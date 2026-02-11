@@ -1,0 +1,110 @@
+# File: .claude/specs/cross-platform-release-pipeline/feature.gherkin
+#
+# Generated from: .claude/specs/cross-platform-release-pipeline/requirements.md
+# Issue: #2
+
+Feature: Cross-platform release pipeline
+  As a developer contributing to chrome-cli
+  I want automated CI/CD pipelines that build, test, lint, and release cross-platform binaries
+  So that every PR is validated and releases produce optimized standalone binaries for all supported platforms
+
+  # --- CI Workflow ---
+
+  Scenario: CI workflow runs on PRs and pushes to main
+    Given the repository has ".github/workflows/ci.yml"
+    When I inspect the workflow trigger configuration
+    Then it triggers on push to "main" branch
+    And it triggers on pull_request to "main" branch
+    And it runs cargo fmt --check
+    And it runs cargo clippy -- -D warnings
+    And it runs cargo test
+    And it runs cargo build
+
+  # --- Release Workflow Trigger ---
+
+  Scenario: Release workflow triggered by version tags
+    Given the repository has ".github/workflows/release.yml"
+    When I inspect the workflow trigger configuration
+    Then it triggers on push of tags matching "v*"
+
+  # --- Build Matrix ---
+
+  Scenario Outline: Release builds target platform on correct runner
+    Given the release workflow has a build matrix
+    When I inspect the matrix entry for "<target>"
+    Then the runner is "<runner>"
+
+    Examples:
+      | target                        | runner            |
+      | aarch64-apple-darwin          | macos-latest      |
+      | x86_64-apple-darwin           | macos-13          |
+      | x86_64-unknown-linux-gnu      | ubuntu-latest     |
+      | aarch64-unknown-linux-gnu     | ubuntu-24.04-arm  |
+      | x86_64-pc-windows-msvc        | windows-latest    |
+
+  Scenario: macOS ARM builds on ARM runner
+    Given the release workflow has a build matrix
+    When I inspect the matrix entry for "aarch64-apple-darwin"
+    Then the runner is "macos-latest"
+
+  Scenario: macOS Intel builds on Intel runner
+    Given the release workflow has a build matrix
+    When I inspect the matrix entry for "x86_64-apple-darwin"
+    Then the runner is "macos-13"
+
+  Scenario: Linux ARM64 builds on native ARM runner
+    Given the release workflow has a build matrix
+    When I inspect the matrix entry for "aarch64-unknown-linux-gnu"
+    Then the runner is "ubuntu-24.04-arm"
+
+  Scenario: Windows builds on Windows runner
+    Given the release workflow has a build matrix
+    When I inspect the matrix entry for "x86_64-pc-windows-msvc"
+    Then the runner is "windows-latest"
+
+  # --- Archiving ---
+
+  Scenario: Unix targets archived as tar.gz
+    Given a release binary has been built for a Unix target
+    When it is archived
+    Then the archive format is "tar.gz"
+    And the archive name matches "chrome-cli-{version}-{target}.tar.gz"
+
+  Scenario: Windows targets archived as zip
+    Given a release binary has been built for "x86_64-pc-windows-msvc"
+    When it is archived
+    Then the archive format is "zip"
+    And the archive name matches "chrome-cli-{version}-{target}.zip"
+
+  # --- Checksums ---
+
+  Scenario: SHA256 checksums generated for all archives
+    Given release archives have been created
+    When the publish-release job runs
+    Then a SHA256 checksum file is generated for each archive
+    And each checksum file has the extension ".sha256"
+
+  # --- GitHub Release ---
+
+  Scenario: GitHub Release created with all artifacts
+    Given all archives and checksums have been generated
+    When the publish-release job completes
+    Then a GitHub Release exists for the tag
+    And all archive files are attached as release assets
+    And all checksum files are attached as release assets
+    And release notes are auto-generated
+
+  # --- Naming Convention ---
+
+  Scenario Outline: Binary archive naming convention
+    Given a release for version "<version>" targeting "<target>"
+    When the archive is created
+    Then the archive filename is "<filename>"
+
+    Examples:
+      | version | target                        | filename                                              |
+      | 0.1.0   | aarch64-apple-darwin          | chrome-cli-0.1.0-aarch64-apple-darwin.tar.gz          |
+      | 0.1.0   | x86_64-apple-darwin           | chrome-cli-0.1.0-x86_64-apple-darwin.tar.gz           |
+      | 0.1.0   | x86_64-unknown-linux-gnu      | chrome-cli-0.1.0-x86_64-unknown-linux-gnu.tar.gz      |
+      | 0.1.0   | aarch64-unknown-linux-gnu     | chrome-cli-0.1.0-aarch64-unknown-linux-gnu.tar.gz     |
+      | 0.1.0   | x86_64-pc-windows-msvc        | chrome-cli-0.1.0-x86_64-pc-windows-msvc.zip           |

@@ -1,0 +1,77 @@
+# File: .claude/specs/cargo-workspace-setup/feature.gherkin
+#
+# Generated from: .claude/specs/cargo-workspace-setup/requirements.md
+# Issue: #1
+
+Feature: Cargo workspace setup, linting, license, and README scaffold
+  As a developer contributing to chrome-cli
+  I want a properly configured Rust project with workspace setup, linting, and project metadata
+  So that I can build, test, and lint the project with zero warnings from day one
+
+  # --- Configuration Files ---
+
+  Scenario: Cargo.toml has workspace configuration and project metadata
+    Given a freshly cloned repository
+    When I inspect "Cargo.toml"
+    Then it contains a workspace section with resolver "3"
+    And it contains a package section with name "chrome-cli"
+    And it contains version "0.1.0" and edition "2024"
+    And it contains metadata for authors, license, repository, description, keywords, and categories
+
+  Scenario: Dual license files are present
+    Given a freshly cloned repository
+    When I inspect the root directory
+    Then a "LICENSE-MIT" file exists with valid MIT license text
+    And a "LICENSE-APACHE" file exists with valid Apache 2.0 license text
+
+  Scenario: Rust-appropriate .gitignore exists
+    Given a freshly cloned repository
+    When I inspect ".gitignore"
+    Then it excludes "target/"
+    And it excludes "*.swp" and ".DS_Store"
+
+  Scenario: Formatting configuration exists
+    Given a freshly cloned repository
+    When I inspect "rustfmt.toml"
+    Then it sets edition to "2024"
+    And "cargo fmt --check" passes with no formatting issues
+
+  Scenario: Clippy linting is configured to deny warnings
+    Given a freshly cloned repository
+    When I inspect "Cargo.toml" lints section
+    Then clippy "all" is set to deny
+    And "cargo clippy -- -D warnings" passes with zero warnings
+
+  Scenario: Rust toolchain is pinned
+    Given a freshly cloned repository
+    When I inspect "rust-toolchain.toml"
+    Then it pins a stable Rust version that supports edition 2024
+
+  # --- Minimal Binary ---
+
+  Scenario: Minimal main.rs compiles and prints version
+    Given the project has been set up
+    When I run "cargo run"
+    Then it prints "chrome-cli 0.1.0"
+    And the process exits with code 0
+
+  # --- Documentation ---
+
+  Scenario: Scaffold README exists
+    Given a freshly cloned repository
+    When I inspect "README.md"
+    Then it contains the project name "chrome-cli"
+    And it contains a one-line description
+    And it contains an "under construction" notice
+
+  # --- Build Verification ---
+
+  Scenario: Build and clippy pass with zero warnings
+    Given the project has been set up
+    When I run "cargo build" and "cargo clippy -- -D warnings"
+    Then both commands complete successfully with zero warnings
+
+  Scenario: Tests pass
+    Given the project has been set up
+    When I run "cargo test"
+    Then the test suite passes
