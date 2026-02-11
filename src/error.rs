@@ -42,6 +42,7 @@ impl fmt::Display for AppError {
 impl std::error::Error for AppError {}
 
 impl AppError {
+    #[must_use]
     pub fn not_implemented(command: &str) -> Self {
         Self {
             message: format!("{command}: not yet implemented"),
@@ -49,6 +50,7 @@ impl AppError {
         }
     }
 
+    #[must_use]
     pub fn to_json(&self) -> String {
         let output = ErrorOutput {
             error: &self.message,
