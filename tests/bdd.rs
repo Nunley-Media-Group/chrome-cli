@@ -381,6 +381,36 @@ fn stderr_json_should_have_key(world: &mut CliWorld, key: String) {
     );
 }
 
+#[then("stdout should be valid JSON")]
+fn stdout_should_be_valid_json(world: &mut CliWorld) {
+    let trimmed = world.stdout.trim();
+    let _: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|e| {
+        panic!("stdout is not valid JSON: {e}\nstdout: {trimmed}");
+    });
+}
+
+#[then(expr = "stdout JSON should have key {string}")]
+fn stdout_json_should_have_key(world: &mut CliWorld, key: String) {
+    let trimmed = world.stdout.trim();
+    let json: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|e| {
+        panic!("stdout is not valid JSON: {e}\nstdout: {trimmed}");
+    });
+    assert!(
+        json.get(&key).is_some(),
+        "stdout JSON does not have key '{key}'\nJSON: {json}"
+    );
+}
+
+#[then("the exit code should be nonzero")]
+fn exit_code_should_be_nonzero(world: &mut CliWorld) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_ne!(
+        actual, 0,
+        "Expected nonzero exit code, got 0\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
 // =============================================================================
 // CdpWorld — CDP WebSocket client BDD tests
 // =============================================================================
@@ -1249,5 +1279,6 @@ async fn valid_commands_still_work(world: &mut CdpWorld) {
 async fn main() {
     WorkflowWorld::run("tests/features/release-pipeline.feature").await;
     CliWorld::run("tests/features/cli-skeleton.feature").await;
+    CliWorld::run("tests/features/chrome-discovery-launch.feature").await;
     CdpWorld::run("tests/features/cdp-websocket-client.feature").await;
 }

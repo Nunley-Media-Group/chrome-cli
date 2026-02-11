@@ -1,6 +1,8 @@
 #![allow(clippy::doc_markdown)]
 
-use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -75,7 +77,7 @@ pub enum Command {
         long_about = "Connect to a running Chrome/Chromium instance via the Chrome DevTools \
             Protocol, or launch a new one. Tests the connection and prints browser metadata."
     )]
-    Connect,
+    Connect(ConnectArgs),
 
     /// Tab management (list, create, close, activate)
     #[command(
@@ -159,4 +161,37 @@ pub enum Command {
             and analyze runtime performance. Outputs metrics as structured JSON for analysis."
     )]
     Perf,
+}
+
+/// Chrome release channel to use when launching.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ChromeChannel {
+    Stable,
+    Canary,
+    Beta,
+    Dev,
+}
+
+/// Arguments for the `connect` subcommand.
+#[derive(Args)]
+pub struct ConnectArgs {
+    /// Launch a new Chrome instance instead of connecting to an existing one
+    #[arg(long)]
+    pub launch: bool,
+
+    /// Launch Chrome in headless mode
+    #[arg(long, requires = "launch")]
+    pub headless: bool,
+
+    /// Chrome release channel to launch
+    #[arg(long, requires = "launch", default_value = "stable")]
+    pub channel: ChromeChannel,
+
+    /// Path to a Chrome/Chromium executable (overrides channel-based discovery)
+    #[arg(long, requires = "launch")]
+    pub chrome_path: Option<PathBuf>,
+
+    /// Additional arguments to pass to Chrome (can be repeated)
+    #[arg(long, requires = "launch")]
+    pub chrome_arg: Vec<String>,
 }
