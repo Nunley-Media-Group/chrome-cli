@@ -92,12 +92,12 @@ fn chrome_candidates(channel: Channel) -> Vec<PathBuf> {
 
     #[cfg(target_os = "linux")]
     {
-        linux_candidates(&channel)
+        linux_candidates(channel)
     }
 
     #[cfg(target_os = "windows")]
     {
-        windows_candidates(&channel)
+        windows_candidates(channel)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -127,7 +127,7 @@ fn macos_candidates(channel: Channel) -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_candidates(channel: &Channel) -> Vec<PathBuf> {
+fn linux_candidates(channel: Channel) -> Vec<PathBuf> {
     let path_dirs: Vec<PathBuf> = std::env::var("PATH")
         .unwrap_or_default()
         .split(':')
@@ -156,7 +156,7 @@ fn linux_candidates(channel: &Channel) -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_candidates(channel: &Channel) -> Vec<PathBuf> {
+fn windows_candidates(channel: Channel) -> Vec<PathBuf> {
     let program_files = std::env::var("ProgramFiles").unwrap_or_default();
     let program_files_x86 = std::env::var("ProgramFiles(x86)").unwrap_or_default();
     let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_default();
