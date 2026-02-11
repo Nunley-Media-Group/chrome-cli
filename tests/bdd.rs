@@ -6,6 +6,10 @@ use cucumber::{World, given, then, when};
 use serde_yaml::Value;
 use std::path::PathBuf;
 
+// =============================================================================
+// WorkflowWorld — CI/CD workflow BDD tests
+// =============================================================================
+
 #[derive(Debug, Default, World)]
 struct WorkflowWorld {
     ci_workflow: Option<Value>,
@@ -276,7 +280,114 @@ fn actions_use_sha_pins(world: &mut WorkflowWorld) {
     }
 }
 
+// =============================================================================
+// CliWorld — CLI skeleton BDD tests
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct CliWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+fn binary_path() -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_BIN_EXE_chrome-cli"));
+    // Resolve the path to handle any symlinks
+    if let Ok(canonical) = path.canonicalize() {
+        path = canonical;
+    }
+    path
+}
+
+#[given("chrome-cli is built")]
+fn chrome_cli_is_built(world: &mut CliWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[when(expr = "I run {string}")]
+fn i_run_command(world: &mut CliWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given chrome-cli is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    // Skip the first part ("chrome-cli") and use our binary path
+    let args = if parts.first().is_some_and(|&p| p == "chrome-cli") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[then(expr = "the exit code should be {int}")]
+fn exit_code_should_be(world: &mut CliWorld, expected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, expected,
+        "Expected exit code {expected}, got {actual}\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stdout should contain {string}")]
+fn stdout_should_contain(world: &mut CliWorld, expected: String) {
+    assert!(
+        world.stdout.contains(&expected),
+        "stdout does not contain '{expected}'\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then(expr = "stderr should contain {string}")]
+fn stderr_should_contain(world: &mut CliWorld, expected: String) {
+    assert!(
+        world.stderr.contains(&expected),
+        "stderr does not contain '{expected}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then("stderr should be valid JSON")]
+fn stderr_should_be_valid_json(world: &mut CliWorld) {
+    let trimmed = world.stderr.trim();
+    let _: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|e| {
+        panic!("stderr is not valid JSON: {e}\nstderr: {trimmed}");
+    });
+}
+
+#[then(expr = "stderr JSON should have key {string}")]
+fn stderr_json_should_have_key(world: &mut CliWorld, key: String) {
+    let trimmed = world.stderr.trim();
+    let json: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|e| {
+        panic!("stderr is not valid JSON: {e}\nstderr: {trimmed}");
+    });
+    assert!(
+        json.get(&key).is_some(),
+        "stderr JSON does not have key '{key}'\nJSON: {json}"
+    );
+}
+
+// =============================================================================
+// Main — run both worlds
+// =============================================================================
+
 fn main() {
-    let runner = WorkflowWorld::run("tests/features");
-    futures::executor::block_on(runner);
+    let runner1 = WorkflowWorld::run("tests/features");
+    futures::executor::block_on(runner1);
+    let runner2 = CliWorld::run("tests/features");
+    futures::executor::block_on(runner2);
 }
