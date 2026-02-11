@@ -6,17 +6,19 @@ use clap::Parser;
 use cli::{Cli, Command};
 use error::AppError;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
-    if let Err(e) = run(&cli) {
+    if let Err(e) = run(&cli).await {
         e.print_json_stderr();
         #[allow(clippy::cast_possible_truncation)]
         std::process::exit(e.code as i32);
     }
 }
 
-fn run(cli: &Cli) -> Result<(), AppError> {
+#[allow(clippy::unused_async)]
+async fn run(cli: &Cli) -> Result<(), AppError> {
     match &cli.command {
         Command::Connect => Err(AppError::not_implemented("connect")),
         Command::Tabs => Err(AppError::not_implemented("tabs")),
