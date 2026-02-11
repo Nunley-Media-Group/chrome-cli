@@ -2,4 +2,5 @@
 // The binary entry point is in main.rs.
 
 pub mod cdp;
+pub mod chrome;
 pub mod error;

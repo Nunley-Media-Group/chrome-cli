@@ -59,7 +59,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
     Examples:
       | subcommand |
-      | connect    |
       | tabs       |
       | navigate   |
       | page       |
@@ -84,7 +83,7 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
   Scenario: Error output is structured JSON on stderr
     Given chrome-cli is built
-    When I run "chrome-cli connect"
+    When I run "chrome-cli tabs"
     Then the exit code should be 1
     And stderr should be valid JSON
     And stderr JSON should have key "error"
