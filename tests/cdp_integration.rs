@@ -32,8 +32,7 @@ async fn start_echo_server() -> (SocketAddr, JoinHandle<()>) {
                 while let Some(Ok(msg)) = source.next().await {
                     if let Message::Text(text) = msg {
                         let cmd: Value = serde_json::from_str(&text).unwrap();
-                        let response =
-                            json!({"id": cmd["id"], "result": {}});
+                        let response = json!({"id": cmd["id"], "result": {}});
                         sink.send(Message::Text(response.to_string().into()))
                             .await
                             .unwrap();
@@ -90,10 +89,7 @@ async fn start_silent_server() -> (SocketAddr, JoinHandle<()>) {
 }
 
 /// Start a mock server that returns a CDP protocol error for each command.
-async fn start_protocol_error_server(
-    code: i64,
-    message: &str,
-) -> (SocketAddr, JoinHandle<()>) {
+async fn start_protocol_error_server(code: i64, message: &str) -> (SocketAddr, JoinHandle<()>) {
     let message = message.to_owned();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -153,11 +149,7 @@ async fn start_drop_after_server(n: usize) -> (SocketAddr, JoinHandle<()>) {
 }
 
 /// Start a mock server that emits events on demand via a channel.
-async fn start_event_server() -> (
-    SocketAddr,
-    mpsc::Sender<Value>,
-    JoinHandle<()>,
-) {
+async fn start_event_server() -> (SocketAddr, mpsc::Sender<Value>, JoinHandle<()>) {
     let (event_tx, mut event_rx) = mpsc::channel::<Value>(32);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -214,16 +206,13 @@ async fn start_malformed_then_echo_server() -> (SocketAddr, JoinHandle<()>) {
                         let cmd: Value = serde_json::from_str(&text).unwrap();
                         if first {
                             // Send malformed JSON first
-                            sink.send(Message::Text(
-                                r"this is not json{".into(),
-                            ))
-                            .await
-                            .unwrap();
+                            sink.send(Message::Text(r"this is not json{".into()))
+                                .await
+                                .unwrap();
                             first = false;
                         }
                         // Then send a proper response
-                        let response =
-                            json!({"id": cmd["id"], "result": {}});
+                        let response = json!({"id": cmd["id"], "result": {}});
                         sink.send(Message::Text(response.to_string().into()))
                             .await
                             .unwrap();
@@ -236,11 +225,7 @@ async fn start_malformed_then_echo_server() -> (SocketAddr, JoinHandle<()>) {
 }
 
 /// Start a mock server that records all received messages including sessionId.
-async fn start_recording_server() -> (
-    SocketAddr,
-    mpsc::Receiver<Value>,
-    JoinHandle<()>,
-) {
+async fn start_recording_server() -> (SocketAddr, mpsc::Receiver<Value>, JoinHandle<()>) {
     let (record_tx, record_rx) = mpsc::channel::<Value>(64);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -257,9 +242,7 @@ async fn start_recording_server() -> (
 
                         // If it's Target.attachToTarget, return a sessionId
                         if cmd["method"] == "Target.attachToTarget" {
-                            let target_id = cmd["params"]["targetId"]
-                                .as_str()
-                                .unwrap_or("unknown");
+                            let target_id = cmd["params"]["targetId"].as_str().unwrap_or("unknown");
                             let session_id = format!("session-for-{target_id}");
                             let response = json!({
                                 "id": cmd["id"],
@@ -326,10 +309,7 @@ async fn send_command_and_receive_response() {
         .unwrap();
 
     let result = client
-        .send_command(
-            "Page.navigate",
-            Some(json!({"url": "https://example.com"})),
-        )
+        .send_command("Page.navigate", Some(json!({"url": "https://example.com"})))
         .await;
 
     assert!(result.is_ok());
@@ -341,10 +321,7 @@ async fn send_command_and_receive_response() {
 #[tokio::test]
 async fn concurrent_command_correlation() {
     // Server returns the command's id as a result value
-    let (addr, _handle) = start_custom_result_server(|cmd| {
-        json!({"echo_id": cmd["id"]})
-    })
-    .await;
+    let (addr, _handle) = start_custom_result_server(|cmd| json!({"echo_id": cmd["id"]})).await;
     let client = CdpClient::connect(&ws_url(addr), quick_config())
         .await
         .unwrap();
@@ -450,14 +427,8 @@ async fn session_multiplexing() {
     let msg1 = record_rx.recv().await.unwrap();
     let msg2 = record_rx.recv().await.unwrap();
 
-    assert_eq!(
-        msg1["sessionId"].as_str().unwrap(),
-        session1.session_id()
-    );
-    assert_eq!(
-        msg2["sessionId"].as_str().unwrap(),
-        session2.session_id()
-    );
+    assert_eq!(msg1["sessionId"].as_str().unwrap(), session1.session_id());
+    assert_eq!(msg2["sessionId"].as_str().unwrap(), session2.session_id());
 }
 
 /// AC7: Flatten session protocol support
@@ -574,8 +545,7 @@ async fn websocket_close_handling() {
 /// AC11: CDP protocol error handling
 #[tokio::test]
 async fn protocol_error_handling() {
-    let (addr, _handle) =
-        start_protocol_error_server(-32000, "Not found").await;
+    let (addr, _handle) = start_protocol_error_server(-32000, "Not found").await;
     let client = CdpClient::connect(&ws_url(addr), quick_config())
         .await
         .unwrap();
@@ -687,7 +657,10 @@ async fn invalid_json_handling() {
 
     // First command triggers malformed JSON, but should still get a response
     let result = client.send_command("Test.first", None).await;
-    assert!(result.is_ok(), "client should handle malformed JSON gracefully");
+    assert!(
+        result.is_ok(),
+        "client should handle malformed JSON gracefully"
+    );
 
     // Second command should work normally
     let result = client.send_command("Test.second", None).await;

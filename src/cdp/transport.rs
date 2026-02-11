@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
@@ -295,15 +295,16 @@ impl TransportTask {
         let json = match serde_json::to_string(&command) {
             Ok(j) => j,
             Err(e) => {
-                let _ = response_tx
-                    .send(Err(CdpError::Internal(format!("serialization error: {e}"))));
+                let _ =
+                    response_tx.send(Err(CdpError::Internal(format!("serialization error: {e}"))));
                 return;
             }
         };
 
         if let Err(e) = self.ws_stream.send(Message::Text(json.into())).await {
-            let _ =
-                response_tx.send(Err(CdpError::Connection(format!("WebSocket write error: {e}"))));
+            let _ = response_tx.send(Err(CdpError::Connection(format!(
+                "WebSocket write error: {e}"
+            ))));
             return;
         }
 

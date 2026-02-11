@@ -77,7 +77,14 @@ impl CdpClient {
         method: &str,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, CdpError> {
-        send_command_impl(&self.handle, self.config.command_timeout, method, params, None).await
+        send_command_impl(
+            &self.handle,
+            self.config.command_timeout,
+            method,
+            params,
+            None,
+        )
+        .await
     }
 
     /// Subscribe to CDP events matching a method name.
@@ -88,10 +95,7 @@ impl CdpClient {
     /// # Errors
     ///
     /// Returns `CdpError::Internal` if the transport task has exited.
-    pub async fn subscribe(
-        &self,
-        method: &str,
-    ) -> Result<mpsc::Receiver<CdpEvent>, CdpError> {
+    pub async fn subscribe(&self, method: &str) -> Result<mpsc::Receiver<CdpEvent>, CdpError> {
         subscribe_impl(&self.handle, self.config.channel_capacity, method, None).await
     }
 
@@ -115,9 +119,7 @@ impl CdpClient {
         let session_id = result["sessionId"]
             .as_str()
             .ok_or_else(|| {
-                CdpError::InvalidResponse(
-                    "Target.attachToTarget response missing sessionId".into(),
-                )
+                CdpError::InvalidResponse("Target.attachToTarget response missing sessionId".into())
             })?
             .to_owned();
 
@@ -187,10 +189,7 @@ impl CdpSession {
     /// # Errors
     ///
     /// Returns `CdpError::Internal` if the transport task has exited.
-    pub async fn subscribe(
-        &self,
-        method: &str,
-    ) -> Result<mpsc::Receiver<CdpEvent>, CdpError> {
+    pub async fn subscribe(&self, method: &str) -> Result<mpsc::Receiver<CdpEvent>, CdpError> {
         subscribe_impl(
             &self.handle,
             self.config.channel_capacity,

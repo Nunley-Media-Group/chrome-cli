@@ -79,9 +79,7 @@ impl From<CdpError> for crate::error::AppError {
             CdpError::Connection(_)
             | CdpError::ConnectionClosed
             | CdpError::ReconnectFailed { .. } => ExitCode::ConnectionError,
-            CdpError::ConnectionTimeout | CdpError::CommandTimeout { .. } => {
-                ExitCode::TimeoutError
-            }
+            CdpError::ConnectionTimeout | CdpError::CommandTimeout { .. } => ExitCode::TimeoutError,
             CdpError::Protocol { .. } => ExitCode::ProtocolError,
             CdpError::InvalidResponse(_) | CdpError::Internal(_) => ExitCode::GeneralError,
         };

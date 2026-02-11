@@ -160,10 +160,8 @@ mod tests {
 
     #[test]
     fn deserialize_success_response() {
-        let raw: RawCdpMessage = serde_json::from_str(
-            r#"{"id": 1, "result": {"frameId": "abc"}}"#,
-        )
-        .unwrap();
+        let raw: RawCdpMessage =
+            serde_json::from_str(r#"{"id": 1, "result": {"frameId": "abc"}}"#).unwrap();
         assert_eq!(raw.id, Some(1));
         assert!(raw.result.is_some());
         assert!(raw.error.is_none());
@@ -172,10 +170,9 @@ mod tests {
 
     #[test]
     fn deserialize_error_response() {
-        let raw: RawCdpMessage = serde_json::from_str(
-            r#"{"id": 2, "error": {"code": -32000, "message": "Not found"}}"#,
-        )
-        .unwrap();
+        let raw: RawCdpMessage =
+            serde_json::from_str(r#"{"id": 2, "error": {"code": -32000, "message": "Not found"}}"#)
+                .unwrap();
         assert_eq!(raw.id, Some(2));
         assert!(raw.error.is_some());
         let err = raw.error.unwrap();
@@ -205,10 +202,8 @@ mod tests {
 
     #[test]
     fn deserialize_session_scoped_response() {
-        let raw: RawCdpMessage = serde_json::from_str(
-            r#"{"id": 5, "result": {}, "sessionId": "sess-2"}"#,
-        )
-        .unwrap();
+        let raw: RawCdpMessage =
+            serde_json::from_str(r#"{"id": 5, "result": {}, "sessionId": "sess-2"}"#).unwrap();
         assert_eq!(raw.id, Some(5));
         assert_eq!(raw.session_id.as_deref(), Some("sess-2"));
     }

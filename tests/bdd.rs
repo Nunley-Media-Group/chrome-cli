@@ -560,14 +560,10 @@ async fn connected_client(world: &mut CdpWorld) {
 }
 
 #[when(expr = "I send a {string} command with params '{}'")]
-async fn send_command_with_params(
-    world: &mut CdpWorld,
-    method: String,
-    params_json: String,
-) {
+async fn send_command_with_params(world: &mut CdpWorld, method: String, params_json: String) {
     let client = world.client.as_ref().expect("No client");
-    let params: serde_json::Value = serde_json::from_str(&params_json)
-        .unwrap_or_else(|e| panic!("Invalid params JSON: {e}"));
+    let params: serde_json::Value =
+        serde_json::from_str(&params_json).unwrap_or_else(|e| panic!("Invalid params JSON: {e}"));
     match client.send_command(&method, Some(params)).await {
         Ok(v) => world.last_result = Some(Ok(v)),
         Err(e) => world.last_result = Some(Err(e.to_string())),
@@ -620,11 +616,7 @@ async fn send_10_concurrent(world: &mut CdpWorld) {
 
 #[then("each command receives its own unique response")]
 fn each_command_unique_response(world: &mut CdpWorld) {
-    assert_eq!(
-        world.concurrent_results.len(),
-        10,
-        "Expected 10 results"
-    );
+    assert_eq!(world.concurrent_results.len(), 10, "Expected 10 results");
     for (i, r) in world.concurrent_results.iter().enumerate() {
         assert!(r.is_ok(), "Command {i} failed: {r:?}");
     }
@@ -651,19 +643,18 @@ async fn connected_and_subscribed(world: &mut CdpWorld, method: String) {
     let client = CdpClient::connect(&url, CdpWorld::quick_config())
         .await
         .expect("Failed to connect");
-    let rx = client.subscribe(&method).await.expect("Failed to subscribe");
+    let rx = client
+        .subscribe(&method)
+        .await
+        .expect("Failed to subscribe");
     world.client = Some(client);
     world.event_rx = Some(rx);
 }
 
 #[when(expr = "the server emits a {string} event with params '{}'")]
-async fn server_emits_event(
-    world: &mut CdpWorld,
-    method: String,
-    params_json: String,
-) {
-    let params: serde_json::Value = serde_json::from_str(&params_json)
-        .unwrap_or_else(|e| panic!("Invalid params JSON: {e}"));
+async fn server_emits_event(world: &mut CdpWorld, method: String, params_json: String) {
+    let params: serde_json::Value =
+        serde_json::from_str(&params_json).unwrap_or_else(|e| panic!("Invalid params JSON: {e}"));
     let event_tx = world.mock_event_tx.as_ref().expect("No event channel");
     event_tx
         .send(json!({"method": method, "params": params}))
@@ -730,11 +721,7 @@ fn no_event_delivered(world: &mut CdpWorld) {
 // =========================================================================
 
 #[given(expr = "a CDP session {string} attached to target {string}")]
-async fn create_session(
-    world: &mut CdpWorld,
-    session_label: String,
-    target_id: String,
-) {
+async fn create_session(world: &mut CdpWorld, session_label: String, target_id: String) {
     let client = world.client.as_ref().expect("No client");
     let session = client
         .create_session(&target_id)
@@ -756,9 +743,7 @@ async fn send_on_session(world: &mut CdpWorld, session_label: String) {
     let _ = session.send_command("Runtime.evaluate", None).await;
     // Record the message
     if let Some(rx) = world.mock_record_rx.as_mut() {
-        if let Ok(Some(msg)) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
-        {
+        if let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
             world.recorded_messages.push(msg);
         }
     }
@@ -813,11 +798,7 @@ async fn connected_with_session(world: &mut CdpWorld, session_label: String) {
 }
 
 #[when(expr = "I send a {string} command on session {string}")]
-async fn send_method_on_session(
-    world: &mut CdpWorld,
-    method: String,
-    session_label: String,
-) {
+async fn send_method_on_session(world: &mut CdpWorld, method: String, session_label: String) {
     let session = world
         .sessions
         .get(&session_label)
@@ -828,9 +809,7 @@ async fn send_method_on_session(
     }
     // Record the message
     if let Some(rx) = world.mock_record_rx.as_mut() {
-        if let Ok(Some(msg)) =
-            tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
-        {
+        if let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
             world.recorded_messages.push(msg);
         }
     }
@@ -1010,10 +989,7 @@ fn pending_gets_closed_error(_world: &mut CdpWorld) {
 #[then("the client reports it is disconnected")]
 fn client_is_disconnected(world: &mut CdpWorld) {
     let client = world.client.as_ref().expect("No client");
-    assert!(
-        !client.is_connected(),
-        "Client should report disconnected"
-    );
+    assert!(!client.is_connected(), "Client should report disconnected");
 }
 
 // =========================================================================
@@ -1079,10 +1055,7 @@ async fn server_restarts(_world: &mut CdpWorld) {
 #[then("the client reconnects automatically")]
 fn client_reconnects(world: &mut CdpWorld) {
     let client = world.client.as_ref().expect("No client");
-    assert!(
-        client.is_connected(),
-        "Client should have reconnected"
-    );
+    assert!(client.is_connected(), "Client should have reconnected");
 }
 
 #[then("the client can send commands again")]
@@ -1157,11 +1130,7 @@ fn reconnect_failed_reported(world: &mut CdpWorld) {
 // =========================================================================
 
 #[when(expr = "I send a command that the server rejects with code {int} and message {string}")]
-async fn send_rejected_command(
-    world: &mut CdpWorld,
-    code: i64,
-    message: String,
-) {
+async fn send_rejected_command(world: &mut CdpWorld, code: i64, message: String) {
     // Replace mock server with one that returns protocol errors
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
