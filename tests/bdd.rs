@@ -1472,6 +1472,9 @@ async fn main() {
     // TODO: tests/features/tab-management.feature exists but requires a running
     // Chrome instance with real tabs. Step definitions and a TabWorld will be
     // added when integration-test infrastructure is available.
+    // TODO: tests/features/page-text-extraction.feature exists but requires a
+    // running Chrome instance with loaded pages. Step definitions and a PageWorld
+    // will be added when integration-test infrastructure is available.
 
     SessionWorld::cucumber()
         .filter_run_and_exit(

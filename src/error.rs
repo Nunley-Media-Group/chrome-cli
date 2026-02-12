@@ -112,6 +112,22 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn element_not_found(selector: &str) -> Self {
+        Self {
+            message: format!("Element not found for selector: {selector}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn evaluation_failed(description: &str) -> Self {
+        Self {
+            message: format!("Text extraction failed: {description}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
     pub fn no_chrome_found() -> Self {
         Self {
             message: "No Chrome instance found. Run 'chrome-cli connect' or \
@@ -228,6 +244,22 @@ mod tests {
         assert!(err.message.contains("30000ms"));
         assert!(err.message.contains("load"));
         assert!(matches!(err.code, ExitCode::TimeoutError));
+    }
+
+    #[test]
+    fn element_not_found_error() {
+        let err = AppError::element_not_found("#missing");
+        assert!(err.message.contains("Element not found"));
+        assert!(err.message.contains("#missing"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn evaluation_failed_error() {
+        let err = AppError::evaluation_failed("script threw an exception");
+        assert!(err.message.contains("Text extraction failed"));
+        assert!(err.message.contains("script threw an exception"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
     }
 
     #[test]
