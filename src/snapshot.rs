@@ -96,6 +96,8 @@ pub struct SnapshotNode {
     pub uid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub properties: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip)]
+    pub backend_dom_node_id: Option<i64>,
     pub children: Vec<SnapshotNode>,
 }
 
@@ -151,6 +153,7 @@ pub fn build_tree(nodes: &[serde_json::Value], verbose: bool) -> BuildResult {
         name: String::new(),
         uid: None,
         properties: None,
+        backend_dom_node_id: None,
         children: vec![],
     });
 
@@ -227,6 +230,7 @@ fn build_subtree(
         name: ax.name.clone(),
         uid,
         properties,
+        backend_dom_node_id: ax.backend_dom_node_id,
         children,
     })
 }
@@ -257,7 +261,6 @@ pub fn search_tree(
     role_filter: Option<&str>,
     exact: bool,
     limit: usize,
-    uid_map: &HashMap<String, i64>,
 ) -> Vec<SearchHit> {
     let mut ctx = SearchContext {
         query,
@@ -265,7 +268,6 @@ pub fn search_tree(
         role_filter,
         exact,
         limit,
-        uid_map,
         results: Vec::new(),
     };
     search_node(root, &mut ctx);
@@ -278,7 +280,6 @@ struct SearchContext<'a> {
     role_filter: Option<&'a str>,
     exact: bool,
     limit: usize,
-    uid_map: &'a HashMap<String, i64>,
     results: Vec<SearchHit>,
 }
 
@@ -300,15 +301,11 @@ fn search_node(node: &SnapshotNode, ctx: &mut SearchContext<'_>) {
     };
 
     if role_matches && text_matches {
-        let backend_id = node
-            .uid
-            .as_ref()
-            .and_then(|uid| ctx.uid_map.get(uid).copied());
         ctx.results.push(SearchHit {
             uid: node.uid.clone(),
             role: node.role.clone(),
             name: node.name.clone(),
-            backend_dom_node_id: backend_id,
+            backend_dom_node_id: node.backend_dom_node_id,
         });
     }
 
@@ -729,6 +726,7 @@ mod tests {
             name: "Submit".to_string(),
             uid: Some("s1".to_string()),
             properties: None,
+            backend_dom_node_id: Some(10),
             children: vec![],
         };
         let json = serde_json::to_value(&node).unwrap();
@@ -736,6 +734,9 @@ mod tests {
         assert_eq!(json["name"], "Submit");
         assert_eq!(json["uid"], "s1");
         assert!(json.get("properties").is_none());
+        // backend_dom_node_id is #[serde(skip)] — must not appear in JSON
+        assert!(json.get("backend_dom_node_id").is_none());
+        assert!(json.get("backendDOMNodeId").is_none());
     }
 
     #[test]
@@ -745,10 +746,12 @@ mod tests {
             name: "Hello".to_string(),
             uid: None,
             properties: None,
+            backend_dom_node_id: Some(20),
             children: vec![],
         };
         let json = serde_json::to_value(&node).unwrap();
         assert!(json.get("uid").is_none());
+        assert!(json.get("backend_dom_node_id").is_none());
     }
 
     #[test]
@@ -886,7 +889,7 @@ mod tests {
     fn search_tree_substring_match() {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
-        let hits = search_tree(&build.root, "Submit", None, false, 10, &build.uid_map);
+        let hits = search_tree(&build.root, "Submit", None, false, 10);
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].name, "Submit");
         assert_eq!(hits[0].role, "button");
@@ -898,7 +901,7 @@ mod tests {
     fn search_tree_case_insensitive() {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
-        let hits = search_tree(&build.root, "submit", None, false, 10, &build.uid_map);
+        let hits = search_tree(&build.root, "submit", None, false, 10);
         assert_eq!(hits.len(), 2);
     }
 
@@ -906,7 +909,7 @@ mod tests {
     fn search_tree_exact_match() {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
-        let hits = search_tree(&build.root, "Submit", None, true, 10, &build.uid_map);
+        let hits = search_tree(&build.root, "Submit", None, true, 10);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].name, "Submit");
     }
@@ -915,7 +918,7 @@ mod tests {
     fn search_tree_exact_match_case_sensitive() {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
-        let hits = search_tree(&build.root, "submit", None, true, 10, &build.uid_map);
+        let hits = search_tree(&build.root, "submit", None, true, 10);
         assert_eq!(hits.len(), 0);
     }
 
@@ -929,7 +932,6 @@ mod tests {
             Some("button"),
             false,
             10,
-            &build.uid_map,
         );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].name, "Login");
@@ -940,7 +942,7 @@ mod tests {
     fn search_tree_combined_role_and_text() {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
-        let hits = search_tree(&build.root, "Log", Some("link"), false, 10, &build.uid_map);
+        let hits = search_tree(&build.root, "Log", Some("link"), false, 10);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].name, "Log out");
         assert_eq!(hits[0].role, "link");
@@ -951,7 +953,7 @@ mod tests {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
         // All nodes match empty query
-        let hits = search_tree(&build.root, "", None, false, 2, &build.uid_map);
+        let hits = search_tree(&build.root, "", None, false, 2);
         assert_eq!(hits.len(), 2);
     }
 
@@ -959,14 +961,14 @@ mod tests {
     fn search_tree_no_matches() {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
-        let hits = search_tree(&build.root, "nonexistent", None, false, 10, &build.uid_map);
+        let hits = search_tree(&build.root, "nonexistent", None, false, 10);
         assert!(hits.is_empty());
     }
 
     #[test]
     fn search_tree_empty_tree() {
         let build = build_tree(&[], false);
-        let hits = search_tree(&build.root, "anything", None, false, 10, &build.uid_map);
+        let hits = search_tree(&build.root, "anything", None, false, 10);
         assert!(hits.is_empty());
     }
 
@@ -980,7 +982,6 @@ mod tests {
             Some("button"),
             false,
             10,
-            &build.uid_map,
         );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].uid.as_deref(), Some("s1"));
@@ -988,11 +989,28 @@ mod tests {
     }
 
     #[test]
+    fn search_tree_non_interactive_includes_backend_id() {
+        let nodes = search_test_nodes();
+        let build = build_tree(&nodes, false);
+        // Heading is non-interactive (no uid) but should still have backend_dom_node_id
+        let hits = search_tree(
+            &build.root,
+            "Submit Your Application",
+            Some("heading"),
+            false,
+            10,
+        );
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].uid.is_none()); // heading is not interactive
+        assert_eq!(hits[0].backend_dom_node_id, Some(40)); // but backend ID is available
+    }
+
+    #[test]
     fn search_tree_document_order() {
         let nodes = search_test_nodes();
         let build = build_tree(&nodes, false);
         // Empty query matches all nodes, verifying depth-first order
-        let hits = search_tree(&build.root, "", None, false, 100, &build.uid_map);
+        let hits = search_tree(&build.root, "", None, false, 100);
         let roles: Vec<&str> = hits.iter().map(|h| h.role.as_str()).collect();
         assert_eq!(roles, ["document", "button", "button", "link", "heading"]);
     }

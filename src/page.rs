@@ -365,13 +365,17 @@ async fn find_by_selector(
                 "selector": selector,
             })),
         )
-        .await?;
+        .await
+        .map_err(|e| AppError {
+            message: format!("CSS selector query failed: {e}"),
+            code: ExitCode::ProtocolError,
+        })?;
 
     let node_ids = query_result["nodeIds"]
         .as_array()
         .ok_or_else(|| AppError::snapshot_failed("DOM.querySelectorAll missing nodeIds"))?;
 
-    let mut matches = Vec::new();
+    let mut matches = Vec::with_capacity(limit.min(node_ids.len()));
     for node_id_val in node_ids.iter().take(limit) {
         let Some(node_id) = node_id_val.as_i64() else {
             continue;
@@ -439,6 +443,32 @@ async fn find_by_selector(
     Ok(matches)
 }
 
+/// Capture the accessibility tree, build it, and persist snapshot state.
+async fn capture_snapshot(
+    managed: &ManagedSession,
+) -> Result<crate::snapshot::BuildResult, AppError> {
+    let ax_result = managed
+        .send_command("Accessibility.getFullAXTree", None)
+        .await
+        .map_err(|e| AppError::snapshot_failed(&e.to_string()))?;
+    let nodes = ax_result["nodes"]
+        .as_array()
+        .ok_or_else(|| AppError::snapshot_failed("response missing 'nodes' array"))?;
+    let build = crate::snapshot::build_tree(nodes, false);
+
+    let (url, _title) = get_page_info(managed).await?;
+    let state = crate::snapshot::SnapshotState {
+        url,
+        timestamp: chrome_cli::session::now_iso8601(),
+        uid_map: build.uid_map.clone(),
+    };
+    if let Err(e) = crate::snapshot::write_snapshot_state(&state) {
+        eprintln!("warning: could not save snapshot state: {e}");
+    }
+
+    Ok(build)
+}
+
 async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<(), AppError> {
     // Validate: at least one of query or selector must be provided
     if args.query.is_none() && args.selector.is_none() {
@@ -455,30 +485,11 @@ async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<(), Ap
     managed.ensure_domain("DOM").await?;
     managed.ensure_domain("Runtime").await?;
 
+    // Capture snapshot (used by both search paths for UID assignment)
+    let build = capture_snapshot(&managed).await?;
+
     let matches = if let Some(ref selector) = args.selector {
         // CSS selector path
-        // First trigger a full snapshot for UID assignment
-        let ax_result = managed
-            .send_command("Accessibility.getFullAXTree", None)
-            .await
-            .map_err(|e| AppError::snapshot_failed(&e.to_string()))?;
-        let nodes = ax_result["nodes"]
-            .as_array()
-            .ok_or_else(|| AppError::snapshot_failed("response missing 'nodes' array"))?;
-        let build = crate::snapshot::build_tree(nodes, false);
-
-        // Get page URL and persist snapshot state
-        let (url, _title) = get_page_info(&managed).await?;
-        let state = crate::snapshot::SnapshotState {
-            url,
-            timestamp: chrome_cli::session::now_iso8601(),
-            uid_map: build.uid_map.clone(),
-        };
-        if let Err(e) = crate::snapshot::write_snapshot_state(&state) {
-            eprintln!("warning: could not save snapshot state: {e}");
-        }
-
-        // Find by CSS selector
         let mut css_matches = find_by_selector(&managed, selector, args.limit).await?;
 
         // Enrich CSS matches with UIDs from the snapshot tree
@@ -491,35 +502,12 @@ async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<(), Ap
         // Accessibility text search path
         let query = args.query.as_deref().unwrap_or("");
 
-        // Capture accessibility tree
-        let ax_result = managed
-            .send_command("Accessibility.getFullAXTree", None)
-            .await
-            .map_err(|e| AppError::snapshot_failed(&e.to_string()))?;
-        let nodes = ax_result["nodes"]
-            .as_array()
-            .ok_or_else(|| AppError::snapshot_failed("response missing 'nodes' array"))?;
-        let build = crate::snapshot::build_tree(nodes, false);
-
-        // Get page URL and persist snapshot state
-        let (url, _title) = get_page_info(&managed).await?;
-        let state = crate::snapshot::SnapshotState {
-            url,
-            timestamp: chrome_cli::session::now_iso8601(),
-            uid_map: build.uid_map.clone(),
-        };
-        if let Err(e) = crate::snapshot::write_snapshot_state(&state) {
-            eprintln!("warning: could not save snapshot state: {e}");
-        }
-
-        // Search the tree
         let hits = crate::snapshot::search_tree(
             &build.root,
             query,
             args.role.as_deref(),
             args.exact,
             args.limit,
-            &build.uid_map,
         );
 
         // Resolve bounding boxes for each hit
@@ -747,5 +735,82 @@ mod tests {
         let json_str = serde_json::to_string(&m).unwrap();
         assert!(json_str.contains("\"boundingBox\""));
         assert!(!json_str.contains("\"bounding_box\""));
+    }
+
+    // =========================================================================
+    // assign_uid_from_snapshot tests
+    // =========================================================================
+
+    fn make_snapshot_node(
+        role: &str,
+        name: &str,
+        uid: Option<&str>,
+        children: Vec<crate::snapshot::SnapshotNode>,
+    ) -> crate::snapshot::SnapshotNode {
+        crate::snapshot::SnapshotNode {
+            role: role.to_string(),
+            name: name.to_string(),
+            uid: uid.map(String::from),
+            properties: None,
+            backend_dom_node_id: None,
+            children,
+        }
+    }
+
+    #[test]
+    fn assign_uid_matches_role_and_name() {
+        let tree = make_snapshot_node(
+            "document",
+            "Page",
+            None,
+            vec![make_snapshot_node("button", "Submit", Some("s1"), vec![])],
+        );
+        let mut m = FindMatch {
+            uid: None,
+            role: "button".to_string(),
+            name: "Submit".to_string(),
+            bounding_box: None,
+        };
+        assign_uid_from_snapshot(&tree, &mut m);
+        assert_eq!(m.uid.as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn assign_uid_no_match_leaves_none() {
+        let tree = make_snapshot_node(
+            "document",
+            "Page",
+            None,
+            vec![make_snapshot_node("button", "Submit", Some("s1"), vec![])],
+        );
+        let mut m = FindMatch {
+            uid: None,
+            role: "link".to_string(),
+            name: "Other".to_string(),
+            bounding_box: None,
+        };
+        assign_uid_from_snapshot(&tree, &mut m);
+        assert!(m.uid.is_none());
+    }
+
+    #[test]
+    fn assign_uid_first_match_wins() {
+        let tree = make_snapshot_node(
+            "document",
+            "Page",
+            None,
+            vec![
+                make_snapshot_node("button", "OK", Some("s1"), vec![]),
+                make_snapshot_node("button", "OK", Some("s2"), vec![]),
+            ],
+        );
+        let mut m = FindMatch {
+            uid: None,
+            role: "button".to_string(),
+            name: "OK".to_string(),
+            bounding_box: None,
+        };
+        assign_uid_from_snapshot(&tree, &mut m);
+        assert_eq!(m.uid.as_deref(), Some("s1"));
     }
 }
