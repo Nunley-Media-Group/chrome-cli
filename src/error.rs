@@ -88,6 +88,14 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn last_tab() -> Self {
+        Self {
+            message: "Cannot close the last tab. Chrome requires at least one open tab.".into(),
+            code: ExitCode::TargetError,
+        }
+    }
+
+    #[must_use]
     pub fn no_chrome_found() -> Self {
         Self {
             message: "No Chrome instance found. Run 'chrome-cli connect' or \
@@ -178,6 +186,14 @@ mod tests {
     fn no_page_targets_error() {
         let err = AppError::no_page_targets();
         assert!(err.message.contains("No page targets"));
+        assert!(matches!(err.code, ExitCode::TargetError));
+    }
+
+    #[test]
+    fn last_tab_error() {
+        let err = AppError::last_tab();
+        assert!(err.message.contains("Cannot close the last tab"));
+        assert!(err.message.contains("at least one open tab"));
         assert!(matches!(err.code, ExitCode::TargetError));
     }
 

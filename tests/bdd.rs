@@ -1469,6 +1469,10 @@ async fn main() {
     CliWorld::run("tests/features/cli-skeleton.feature").await;
     CliWorld::run("tests/features/chrome-discovery-launch.feature").await;
     CdpWorld::run("tests/features/cdp-websocket-client.feature").await;
+    // TODO: tests/features/tab-management.feature exists but requires a running
+    // Chrome instance with real tabs. Step definitions and a TabWorld will be
+    // added when integration-test infrastructure is available.
+
     SessionWorld::cucumber()
         .filter_run_and_exit(
             "tests/features/session-connection-management.feature",
