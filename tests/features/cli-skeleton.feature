@@ -36,7 +36,7 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
   Scenario: Default connection values are applied
     Given chrome-cli is built
-    When I run "chrome-cli tabs"
+    When I run "chrome-cli navigate"
     Then stderr should contain "not yet implemented"
     And the exit code should be 1
 
@@ -44,7 +44,7 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
   Scenario: Conflicting output format flags are rejected
     Given chrome-cli is built
-    When I run "chrome-cli --json --plain tabs"
+    When I run "chrome-cli --json --plain navigate"
     Then the exit code should be 2
     And stderr should contain "cannot be used with"
 
@@ -59,7 +59,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
     Examples:
       | subcommand |
-      | tabs       |
       | navigate   |
       | page       |
       | dom        |
@@ -83,7 +82,7 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
   Scenario: Error output is structured JSON on stderr
     Given chrome-cli is built
-    When I run "chrome-cli tabs"
+    When I run "chrome-cli navigate"
     Then the exit code should be 1
     And stderr should be valid JSON
     And stderr JSON should have key "error"
@@ -93,19 +92,19 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
   Scenario: Custom port and host are accepted
     Given chrome-cli is built
-    When I run "chrome-cli --port 9333 --host 192.168.1.100 tabs"
+    When I run "chrome-cli --port 9333 --host 192.168.1.100 navigate"
     Then the exit code should be 1
     And stderr should contain "not yet implemented"
 
   Scenario: WebSocket URL option is accepted
     Given chrome-cli is built
-    When I run "chrome-cli --ws-url ws://localhost:9222/devtools/browser/abc tabs"
+    When I run "chrome-cli --ws-url ws://localhost:9222/devtools/browser/abc navigate"
     Then the exit code should be 1
     And stderr should contain "not yet implemented"
 
   Scenario: Timeout option is accepted
     Given chrome-cli is built
-    When I run "chrome-cli --timeout 5000 tabs"
+    When I run "chrome-cli --timeout 5000 navigate"
     Then the exit code should be 1
     And stderr should contain "not yet implemented"
 

@@ -1,4 +1,5 @@
 mod cli;
+mod tabs;
 
 use std::time::Duration;
 
@@ -29,7 +30,7 @@ async fn main() {
 async fn run(cli: &Cli) -> Result<(), AppError> {
     match &cli.command {
         Command::Connect(args) => execute_connect(&cli.global, args).await,
-        Command::Tabs => Err(AppError::not_implemented("tabs")),
+        Command::Tabs(args) => tabs::execute_tabs(&cli.global, args).await,
         Command::Navigate => Err(AppError::not_implemented("navigate")),
         Command::Page => Err(AppError::not_implemented("page")),
         Command::Dom => Err(AppError::not_implemented("dom")),

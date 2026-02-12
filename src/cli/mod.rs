@@ -94,7 +94,7 @@ pub enum Command {
             activate (focus) a specific tab. Each operation returns structured JSON with tab IDs \
             and metadata."
     )]
-    Tabs,
+    Tabs(TabsArgs),
 
     /// URL navigation and history
     #[command(
@@ -179,6 +179,67 @@ pub enum ChromeChannel {
     Canary,
     Beta,
     Dev,
+}
+
+/// Arguments for the `tabs` subcommand group.
+#[derive(Args)]
+pub struct TabsArgs {
+    #[command(subcommand)]
+    pub command: TabsCommand,
+}
+
+/// Tab management subcommands.
+#[derive(Subcommand)]
+pub enum TabsCommand {
+    /// List open tabs
+    List(TabsListArgs),
+
+    /// Create a new tab
+    Create(TabsCreateArgs),
+
+    /// Close one or more tabs
+    Close(TabsCloseArgs),
+
+    /// Activate (focus) a tab
+    Activate(TabsActivateArgs),
+}
+
+/// Arguments for `tabs list`.
+#[derive(Args)]
+pub struct TabsListArgs {
+    /// Include internal Chrome pages (chrome://, chrome-extension://)
+    #[arg(long)]
+    pub all: bool,
+}
+
+/// Arguments for `tabs create`.
+#[derive(Args)]
+pub struct TabsCreateArgs {
+    /// URL to open (defaults to about:blank)
+    pub url: Option<String>,
+
+    /// Open the tab in the background without activating it
+    #[arg(long)]
+    pub background: bool,
+}
+
+/// Arguments for `tabs close`.
+#[derive(Args)]
+pub struct TabsCloseArgs {
+    /// Tab ID(s) or index(es) to close
+    #[arg(required = true)]
+    pub targets: Vec<String>,
+}
+
+/// Arguments for `tabs activate`.
+#[derive(Args)]
+pub struct TabsActivateArgs {
+    /// Tab ID or index to activate
+    pub target: String,
+
+    /// Suppress output after activation
+    #[arg(long)]
+    pub quiet: bool,
 }
 
 /// Arguments for the `connect` subcommand.
