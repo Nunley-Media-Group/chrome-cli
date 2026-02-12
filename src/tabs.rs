@@ -129,12 +129,7 @@ fn filter_page_targets(targets: &[TargetInfo], include_all: bool) -> Vec<&Target
 // =============================================================================
 
 async fn execute_list(global: &GlobalOpts, include_all: bool) -> Result<(), AppError> {
-    let conn = resolve_connection(
-        &global.host,
-        global.port,
-        global.ws_url.as_deref(),
-    )
-    .await?;
+    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
 
     let targets = query_targets(&conn.host, conn.port).await?;
     let filtered = filter_page_targets(&targets, include_all);
@@ -163,12 +158,7 @@ async fn execute_create(
     url: Option<&str>,
     background: bool,
 ) -> Result<(), AppError> {
-    let conn = resolve_connection(
-        &global.host,
-        global.port,
-        global.ws_url.as_deref(),
-    )
-    .await?;
+    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
 
     let config = cdp_config(global);
     let client = CdpClient::connect(&conn.ws_url, config).await?;
@@ -183,10 +173,7 @@ async fn execute_create(
         .send_command("Target.createTarget", Some(params))
         .await?;
 
-    let target_id = result["targetId"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
+    let target_id = result["targetId"].as_str().unwrap_or_default().to_string();
 
     // Re-query to get the new tab's resolved URL and title
     let targets = query_targets(&conn.host, conn.port).await?;
@@ -202,12 +189,7 @@ async fn execute_create(
 }
 
 async fn execute_close(global: &GlobalOpts, target_args: &[String]) -> Result<(), AppError> {
-    let conn = resolve_connection(
-        &global.host,
-        global.port,
-        global.ws_url.as_deref(),
-    )
-    .await?;
+    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
 
     let targets = query_targets(&conn.host, conn.port).await?;
 
@@ -220,10 +202,7 @@ async fn execute_close(global: &GlobalOpts, target_args: &[String]) -> Result<()
 
     // Last-tab protection: count page targets and how many we're closing
     let page_count = targets.iter().filter(|t| t.target_type == "page").count();
-    let closing_page_count = to_close
-        .iter()
-        .filter(|t| t.target_type == "page")
-        .count();
+    let closing_page_count = to_close.iter().filter(|t| t.target_type == "page").count();
     if closing_page_count >= page_count {
         return Err(AppError::last_tab());
     }
@@ -260,12 +239,7 @@ async fn execute_activate(
     target_arg: &str,
     quiet: bool,
 ) -> Result<(), AppError> {
-    let conn = resolve_connection(
-        &global.host,
-        global.port,
-        global.ws_url.as_deref(),
-    )
-    .await?;
+    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
 
     let targets = query_targets(&conn.host, conn.port).await?;
     let target = select_target(&targets, Some(target_arg))?;
