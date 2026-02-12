@@ -1,18 +1,19 @@
-mod chrome;
 mod cli;
-mod error;
 
 use std::time::Duration;
 
 use clap::Parser;
 use serde::Serialize;
 
-use chrome::{
-    Channel, LaunchConfig, discover_chrome, find_available_port, find_chrome_executable,
+use chrome_cli::chrome::{
+    self, Channel, LaunchConfig, discover_chrome, find_available_port, find_chrome_executable,
     launch_chrome, query_version,
 };
+use chrome_cli::connection::{self, extract_port_from_ws_url};
+use chrome_cli::error::{AppError, ExitCode};
+use chrome_cli::session::{self, SessionData};
+
 use cli::{ChromeChannel, Cli, Command, ConnectArgs, GlobalOpts};
-use error::AppError;
 
 #[tokio::main]
 async fn main() {
@@ -50,6 +51,32 @@ struct ConnectionInfo {
     pid: Option<u32>,
 }
 
+#[derive(Serialize)]
+struct StatusInfo {
+    ws_url: String,
+    port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pid: Option<u32>,
+    timestamp: String,
+    reachable: bool,
+}
+
+#[derive(Serialize)]
+struct DisconnectInfo {
+    disconnected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    killed_pid: Option<u32>,
+}
+
+fn print_json(value: &impl Serialize) -> Result<(), AppError> {
+    let json = serde_json::to_string(value).map_err(|e| AppError {
+        message: format!("serialization error: {e}"),
+        code: ExitCode::GeneralError,
+    })?;
+    println!("{json}");
+    Ok(())
+}
+
 fn convert_channel(ch: ChromeChannel) -> Channel {
     match ch {
         ChromeChannel::Stable => Channel::Stable,
@@ -68,21 +95,44 @@ fn warn_if_remote_host(host: &str) {
     }
 }
 
+/// Write session data after a successful connect. Non-fatal on failure.
+fn save_session(info: &ConnectionInfo) {
+    let data = SessionData {
+        ws_url: info.ws_url.clone(),
+        port: info.port,
+        pid: info.pid,
+        timestamp: session::now_iso8601(),
+    };
+    if let Err(e) = session::write_session(&data) {
+        eprintln!("warning: could not save session file: {e}");
+    }
+}
+
 async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), AppError> {
+    // Handle --status
+    if args.status {
+        return execute_status(global).await;
+    }
+
+    // Handle --disconnect
+    if args.disconnect {
+        return execute_disconnect();
+    }
+
     let timeout = Duration::from_millis(global.timeout.unwrap_or(30_000));
 
     warn_if_remote_host(&global.host);
 
     // Strategy 1: Direct WebSocket URL
     if let Some(ws_url) = &global.ws_url {
-        // Extract port from URL if possible, otherwise use global port
-        let port = extract_port_from_ws_url(ws_url).unwrap_or(global.port);
+        let port = extract_port_from_ws_url(ws_url).unwrap_or(global.port_or_default());
         let info = ConnectionInfo {
             ws_url: ws_url.clone(),
             port,
             pid: None,
         };
-        println!("{}", serde_json::to_string(&info).unwrap());
+        save_session(&info);
+        print_json(&info)?;
         return Ok(());
     }
 
@@ -92,14 +142,15 @@ async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), 
     }
 
     // Strategy 3: Auto-discover, then auto-launch
-    match discover_chrome(&global.host, global.port).await {
+    match discover_chrome(&global.host, global.port_or_default()).await {
         Ok((ws_url, port)) => {
             let info = ConnectionInfo {
                 ws_url,
                 port,
                 pid: None,
             };
-            println!("{}", serde_json::to_string(&info).unwrap());
+            save_session(&info);
+            print_json(&info)?;
             Ok(())
         }
         Err(discover_err) => {
@@ -146,12 +197,12 @@ async fn execute_launch(args: &ConnectArgs, timeout: Duration) -> Result<(), App
                     port,
                     pid: Some(pid),
                 };
-                println!("{}", serde_json::to_string(&info).unwrap());
+                save_session(&info);
+                print_json(&info)?;
                 return Ok(());
             }
             Err(e @ chrome::ChromeError::LaunchFailed(_)) => {
                 last_err = Some(e);
-                // Retry with a different port
                 continue;
             }
             Err(e) => return Err(e.into()),
@@ -163,12 +214,56 @@ async fn execute_launch(args: &ConnectArgs, timeout: Duration) -> Result<(), App
         .into())
 }
 
-fn extract_port_from_ws_url(url: &str) -> Option<u16> {
-    // Parse "ws://host:port/path" or "wss://host:port/path"
-    let without_scheme = url
-        .strip_prefix("ws://")
-        .or_else(|| url.strip_prefix("wss://"))?;
-    let host_port = without_scheme.split('/').next()?;
-    let port_str = host_port.rsplit(':').next()?;
-    port_str.parse().ok()
+async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
+    let session_data = session::read_session()?.ok_or_else(AppError::no_session)?;
+
+    let reachable = connection::health_check(&global.host, session_data.port)
+        .await
+        .is_ok();
+
+    let status = StatusInfo {
+        ws_url: session_data.ws_url,
+        port: session_data.port,
+        pid: session_data.pid,
+        timestamp: session_data.timestamp,
+        reachable,
+    };
+    print_json(&status)?;
+    Ok(())
+}
+
+fn execute_disconnect() -> Result<(), AppError> {
+    let session_data = session::read_session()?;
+    let mut killed_pid = None;
+
+    if let Some(data) = &session_data {
+        if let Some(pid) = data.pid {
+            kill_process(pid);
+            killed_pid = Some(pid);
+        }
+    }
+
+    session::delete_session()?;
+
+    let output = DisconnectInfo {
+        disconnected: true,
+        killed_pid,
+    };
+    print_json(&output)?;
+    Ok(())
+}
+
+fn kill_process(pid: u32) {
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .output();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string()])
+            .output();
+    }
 }

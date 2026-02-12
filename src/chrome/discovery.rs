@@ -26,7 +26,7 @@ pub struct BrowserVersion {
 }
 
 /// Information about a single debuggable target (tab, service worker, etc.).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct TargetInfo {
