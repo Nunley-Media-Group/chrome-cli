@@ -1,0 +1,737 @@
+use std::collections::HashMap;
+use std::fmt;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use chrome_cli::error::AppError;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Maximum number of nodes before truncation.
+pub const MAX_NODES: usize = 10_000;
+
+/// Roles that receive a UID for interaction commands.
+const INTERACTIVE_ROLES: &[&str] = &[
+    "link",
+    "button",
+    "textbox",
+    "checkbox",
+    "radio",
+    "combobox",
+    "menuitem",
+    "tab",
+    "switch",
+    "slider",
+    "spinbutton",
+    "searchbox",
+    "option",
+    "treeitem",
+];
+
+// =============================================================================
+// Internal CDP node representation
+// =============================================================================
+
+struct AxNode {
+    node_id: String,
+    ignored: bool,
+    role: String,
+    name: String,
+    properties: Vec<(String, serde_json::Value)>,
+    child_ids: Vec<String>,
+    backend_dom_node_id: Option<i64>,
+}
+
+fn parse_ax_nodes(nodes: &[serde_json::Value]) -> Vec<AxNode> {
+    nodes
+        .iter()
+        .map(|n| {
+            let child_ids = n["childIds"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let properties = n["properties"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|p| {
+                            let name = p["name"].as_str()?.to_string();
+                            let value = p["value"]["value"].clone();
+                            Some((name, value))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            AxNode {
+                node_id: n["nodeId"].as_str().unwrap_or_default().to_string(),
+                ignored: n["ignored"].as_bool().unwrap_or(false),
+                role: n["role"]["value"].as_str().unwrap_or_default().to_string(),
+                name: n["name"]["value"].as_str().unwrap_or_default().to_string(),
+                properties,
+                child_ids,
+                backend_dom_node_id: n["backendDOMNodeId"].as_i64(),
+            }
+        })
+        .collect()
+}
+
+// =============================================================================
+// Output tree node
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotNode {
+    pub role: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<HashMap<String, serde_json::Value>>,
+    pub children: Vec<SnapshotNode>,
+}
+
+// =============================================================================
+// Tree building + UID assignment
+// =============================================================================
+
+/// Result of building the snapshot tree.
+pub struct BuildResult {
+    pub root: SnapshotNode,
+    pub uid_map: HashMap<String, i64>,
+    pub truncated: bool,
+    pub total_nodes: usize,
+}
+
+/// Build a `SnapshotNode` tree from the flat CDP `Accessibility.getFullAXTree` response.
+///
+/// Assigns sequential UIDs (`s1`, `s2`, ...) to interactive elements in depth-first order.
+/// Returns the root node and the uid-to-`backendDOMNodeId` mapping.
+pub fn build_tree(nodes: &[serde_json::Value], verbose: bool) -> BuildResult {
+    let ax_nodes = parse_ax_nodes(nodes);
+    let total_nodes = ax_nodes.len();
+
+    // Build lookup: node_id → AxNode
+    let mut lookup: HashMap<&str, &AxNode> = HashMap::with_capacity(ax_nodes.len());
+    for node in &ax_nodes {
+        lookup.insert(&node.node_id, node);
+    }
+
+    // Find root (first node, or first non-ignored node)
+    let root_id = ax_nodes
+        .iter()
+        .find(|n| !n.ignored)
+        .map(|n| n.node_id.as_str())
+        .unwrap_or_default();
+
+    let mut uid_counter: usize = 0;
+    let mut uid_map: HashMap<String, i64> = HashMap::new();
+    let mut node_count: usize = 0;
+    let truncated = total_nodes > MAX_NODES;
+
+    let root = build_subtree(
+        root_id,
+        &lookup,
+        verbose,
+        &mut uid_counter,
+        &mut uid_map,
+        &mut node_count,
+        truncated,
+    )
+    .unwrap_or_else(|| SnapshotNode {
+        role: "document".to_string(),
+        name: String::new(),
+        uid: None,
+        properties: None,
+        children: vec![],
+    });
+
+    BuildResult {
+        root,
+        uid_map,
+        truncated,
+        total_nodes,
+    }
+}
+
+fn build_subtree(
+    node_id: &str,
+    lookup: &HashMap<&str, &AxNode>,
+    verbose: bool,
+    uid_counter: &mut usize,
+    uid_map: &mut HashMap<String, i64>,
+    node_count: &mut usize,
+    truncated: bool,
+) -> Option<SnapshotNode> {
+    if truncated && *node_count >= MAX_NODES {
+        return None;
+    }
+
+    let ax = lookup.get(node_id)?;
+
+    if ax.ignored {
+        return None;
+    }
+
+    *node_count += 1;
+
+    // Assign UID if interactive and has a backend node ID
+    let uid = if INTERACTIVE_ROLES.contains(&ax.role.as_str()) {
+        if let Some(backend_id) = ax.backend_dom_node_id {
+            *uid_counter += 1;
+            let uid = format!("s{uid_counter}");
+            uid_map.insert(uid.clone(), backend_id);
+            Some(uid)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Collect properties if verbose
+    let properties = if verbose && !ax.properties.is_empty() {
+        let map: HashMap<String, serde_json::Value> = ax.properties.iter().cloned().collect();
+        if map.is_empty() { None } else { Some(map) }
+    } else {
+        None
+    };
+
+    // Recursively build children
+    let children: Vec<SnapshotNode> = ax
+        .child_ids
+        .iter()
+        .filter_map(|cid| {
+            build_subtree(
+                cid,
+                lookup,
+                verbose,
+                uid_counter,
+                uid_map,
+                node_count,
+                truncated,
+            )
+        })
+        .collect();
+
+    Some(SnapshotNode {
+        role: ax.role.clone(),
+        name: ax.name.clone(),
+        uid,
+        properties,
+        children,
+    })
+}
+
+// =============================================================================
+// Text formatting
+// =============================================================================
+
+/// Format the snapshot tree as hierarchical text.
+///
+/// Each line: `{indent}- {role} "{name}" [{uid}]`
+pub fn format_text(root: &SnapshotNode, verbose: bool) -> String {
+    let mut output = String::new();
+    format_text_node(root, 0, verbose, &mut output);
+    output
+}
+
+fn format_text_node(node: &SnapshotNode, depth: usize, verbose: bool, output: &mut String) {
+    use std::fmt::Write;
+
+    let indent = "  ".repeat(depth);
+
+    let uid_str = node
+        .uid
+        .as_ref()
+        .map_or(String::new(), |uid| format!(" [{uid}]"));
+
+    let props_str = if verbose {
+        node.properties
+            .as_ref()
+            .map(|props| {
+                let mut parts: Vec<String> = props
+                    .iter()
+                    .map(|(k, v)| {
+                        if v.is_string() {
+                            format!("{k}={}", v.as_str().unwrap_or_default())
+                        } else {
+                            format!("{k}={v}")
+                        }
+                    })
+                    .collect();
+                parts.sort();
+                if parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", parts.join(" "))
+                }
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let _ = writeln!(
+        output,
+        "{indent}- {} \"{}\"{uid_str}{props_str}",
+        node.role, node.name
+    );
+
+    for child in &node.children {
+        format_text_node(child, depth + 1, verbose, output);
+    }
+}
+
+// =============================================================================
+// Snapshot state persistence
+// =============================================================================
+
+/// Persisted UID-to-backend-node mapping for use by interaction commands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotState {
+    pub url: String,
+    pub timestamp: String,
+    pub uid_map: HashMap<String, i64>,
+}
+
+/// Errors from snapshot state file operations.
+#[derive(Debug)]
+pub enum SnapshotStateError {
+    NoHomeDir,
+    Io(std::io::Error),
+    InvalidFormat(String),
+}
+
+impl fmt::Display for SnapshotStateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoHomeDir => write!(f, "could not determine home directory"),
+            Self::Io(e) => write!(f, "snapshot state file error: {e}"),
+            Self::InvalidFormat(e) => write!(f, "invalid snapshot state file: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SnapshotStateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for SnapshotStateError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<SnapshotStateError> for AppError {
+    fn from(e: SnapshotStateError) -> Self {
+        use chrome_cli::error::ExitCode;
+        Self {
+            message: e.to_string(),
+            code: ExitCode::GeneralError,
+        }
+    }
+}
+
+/// Returns the path to `~/.chrome-cli/snapshot.json`.
+fn snapshot_state_path() -> Result<PathBuf, SnapshotStateError> {
+    #[cfg(unix)]
+    let key = "HOME";
+    #[cfg(windows)]
+    let key = "USERPROFILE";
+
+    let home = std::env::var(key)
+        .map(PathBuf::from)
+        .map_err(|_| SnapshotStateError::NoHomeDir)?;
+    Ok(home.join(".chrome-cli").join("snapshot.json"))
+}
+
+/// Write snapshot state to `~/.chrome-cli/snapshot.json` using atomic write.
+pub fn write_snapshot_state(state: &SnapshotState) -> Result<(), SnapshotStateError> {
+    let path = snapshot_state_path()?;
+    write_snapshot_state_to(&path, state)
+}
+
+/// Write snapshot state to a specific path (testable variant).
+pub fn write_snapshot_state_to(
+    path: &std::path::Path,
+    state: &SnapshotState,
+) -> Result<(), SnapshotStateError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+
+    let json = serde_json::to_string_pretty(state)
+        .map_err(|e| SnapshotStateError::InvalidFormat(e.to_string()))?;
+
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    std::fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
+/// Read snapshot state from `~/.chrome-cli/snapshot.json`.
+///
+/// Returns `Ok(None)` if the file does not exist.
+///
+/// Used by interaction commands (#14-#17) to resolve UIDs to backend node IDs.
+#[allow(dead_code)]
+pub fn read_snapshot_state() -> Result<Option<SnapshotState>, SnapshotStateError> {
+    let path = snapshot_state_path()?;
+    read_snapshot_state_from(&path)
+}
+
+/// Read snapshot state from a specific path (testable variant).
+#[allow(dead_code)]
+pub fn read_snapshot_state_from(
+    path: &std::path::Path,
+) -> Result<Option<SnapshotState>, SnapshotStateError> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => {
+            let state: SnapshotState = serde_json::from_str(&contents)
+                .map_err(|e| SnapshotStateError::InvalidFormat(e.to_string()))?;
+            Ok(Some(state))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(SnapshotStateError::Io(e)),
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_cdp_nodes() -> Vec<serde_json::Value> {
+        vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "document"},
+                "name": {"type": "computedString", "value": "Example Domain"},
+                "properties": [],
+                "childIds": ["2", "3", "4"],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "ignored": false,
+                "role": {"type": "role", "value": "heading"},
+                "name": {"type": "computedString", "value": "Example Domain"},
+                "properties": [
+                    {"name": "level", "value": {"type": "integer", "value": 1}}
+                ],
+                "childIds": [],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "ignored": false,
+                "role": {"type": "role", "value": "paragraph"},
+                "name": {"type": "computedString", "value": ""},
+                "properties": [],
+                "childIds": ["5"],
+                "backendDOMNodeId": 20
+            }),
+            json!({
+                "nodeId": "4",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "More information..."},
+                "properties": [
+                    {"name": "url", "value": {"type": "string", "value": "https://www.iana.org/domains/example"}}
+                ],
+                "childIds": [],
+                "backendDOMNodeId": 30
+            }),
+            json!({
+                "nodeId": "5",
+                "ignored": false,
+                "role": {"type": "role", "value": "text"},
+                "name": {"type": "computedString", "value": "This domain is for use in..."},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 25
+            }),
+        ]
+    }
+
+    #[test]
+    fn build_tree_produces_correct_hierarchy() {
+        let nodes = sample_cdp_nodes();
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.role, "document");
+        assert_eq!(result.root.name, "Example Domain");
+        assert_eq!(result.root.children.len(), 3);
+        assert_eq!(result.root.children[0].role, "heading");
+        assert_eq!(result.root.children[1].role, "paragraph");
+        assert_eq!(result.root.children[2].role, "link");
+    }
+
+    #[test]
+    fn build_tree_assigns_uids_to_interactive_only() {
+        let nodes = sample_cdp_nodes();
+        let result = build_tree(&nodes, false);
+
+        // document — not interactive
+        assert!(result.root.uid.is_none());
+        // heading — not interactive
+        assert!(result.root.children[0].uid.is_none());
+        // paragraph — not interactive
+        assert!(result.root.children[1].uid.is_none());
+        // link — interactive
+        assert_eq!(result.root.children[2].uid.as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn build_tree_uid_map_contains_backend_ids() {
+        let nodes = sample_cdp_nodes();
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.uid_map.len(), 1);
+        assert_eq!(result.uid_map.get("s1"), Some(&30));
+    }
+
+    #[test]
+    fn build_tree_deterministic_uid_order() {
+        // Two interactive elements: button then link
+        let nodes = vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "document"},
+                "name": {"type": "computedString", "value": "Test"},
+                "properties": [],
+                "childIds": ["2", "3"],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "ignored": false,
+                "role": {"type": "role", "value": "button"},
+                "name": {"type": "computedString", "value": "Click"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "Go"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+        ];
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.children[0].uid.as_deref(), Some("s1"));
+        assert_eq!(result.root.children[1].uid.as_deref(), Some("s2"));
+        assert_eq!(result.uid_map.get("s1"), Some(&10));
+        assert_eq!(result.uid_map.get("s2"), Some(&20));
+    }
+
+    #[test]
+    fn build_tree_filters_ignored_nodes() {
+        let nodes = vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "document"},
+                "name": {"type": "computedString", "value": "Doc"},
+                "properties": [],
+                "childIds": ["2", "3"],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "ignored": true,
+                "role": {"type": "role", "value": "generic"},
+                "name": {"type": "computedString", "value": ""},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "ignored": false,
+                "role": {"type": "role", "value": "button"},
+                "name": {"type": "computedString", "value": "OK"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+        ];
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.children.len(), 1);
+        assert_eq!(result.root.children[0].role, "button");
+    }
+
+    #[test]
+    fn build_tree_empty_nodes() {
+        let result = build_tree(&[], false);
+        assert_eq!(result.root.role, "document");
+        assert_eq!(result.root.name, "");
+        assert!(result.root.children.is_empty());
+    }
+
+    #[test]
+    fn format_text_basic() {
+        let nodes = sample_cdp_nodes();
+        let result = build_tree(&nodes, false);
+        let text = format_text(&result.root, false);
+        assert!(text.contains("- document \"Example Domain\""));
+        assert!(text.contains("  - heading \"Example Domain\""));
+        assert!(text.contains("  - link \"More information...\" [s1]"));
+        assert!(text.contains("    - text \"This domain is for use in...\""));
+    }
+
+    #[test]
+    fn format_text_verbose_includes_properties() {
+        let nodes = sample_cdp_nodes();
+        let result = build_tree(&nodes, true);
+        let text = format_text(&result.root, true);
+        assert!(text.contains("level=1"), "text was: {text}");
+    }
+
+    #[test]
+    fn format_text_empty_tree() {
+        let result = build_tree(&[], false);
+        let text = format_text(&result.root, false);
+        assert!(text.contains("- document \"\""));
+    }
+
+    #[test]
+    fn snapshot_node_serialization() {
+        let node = SnapshotNode {
+            role: "button".to_string(),
+            name: "Submit".to_string(),
+            uid: Some("s1".to_string()),
+            properties: None,
+            children: vec![],
+        };
+        let json = serde_json::to_value(&node).unwrap();
+        assert_eq!(json["role"], "button");
+        assert_eq!(json["name"], "Submit");
+        assert_eq!(json["uid"], "s1");
+        assert!(json.get("properties").is_none());
+    }
+
+    #[test]
+    fn snapshot_node_serialization_no_uid() {
+        let node = SnapshotNode {
+            role: "paragraph".to_string(),
+            name: "Hello".to_string(),
+            uid: None,
+            properties: None,
+            children: vec![],
+        };
+        let json = serde_json::to_value(&node).unwrap();
+        assert!(json.get("uid").is_none());
+    }
+
+    #[test]
+    fn snapshot_state_write_read_round_trip() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-snapshot-rt");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("snapshot.json");
+
+        let state = SnapshotState {
+            url: "https://example.com/".to_string(),
+            timestamp: "2026-02-12T10:00:00Z".to_string(),
+            uid_map: HashMap::from([("s1".to_string(), 42), ("s2".to_string(), 87)]),
+        };
+
+        write_snapshot_state_to(&path, &state).unwrap();
+        let read = read_snapshot_state_from(&path).unwrap().unwrap();
+
+        assert_eq!(read.url, state.url);
+        assert_eq!(read.timestamp, state.timestamp);
+        assert_eq!(read.uid_map, state.uid_map);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_snapshot_state_nonexistent_returns_none() {
+        let path = std::path::Path::new("/tmp/chrome-cli-test-snap-nonexistent/snapshot.json");
+        let result = read_snapshot_state_from(path).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn truncation_large_tree() {
+        // Create a flat tree with > MAX_NODES children
+        let mut nodes = vec![json!({
+            "nodeId": "root",
+            "ignored": false,
+            "role": {"type": "role", "value": "document"},
+            "name": {"type": "computedString", "value": "Big"},
+            "properties": [],
+            "childIds": (1..=10_001).map(|i| serde_json::Value::String(format!("n{i}"))).collect::<Vec<_>>(),
+            "backendDOMNodeId": 0
+        })];
+        for i in 1..=10_001 {
+            nodes.push(json!({
+                "nodeId": format!("n{i}"),
+                "ignored": false,
+                "role": {"type": "role", "value": "text"},
+                "name": {"type": "computedString", "value": format!("Item {i}")},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": i
+            }));
+        }
+
+        let result = build_tree(&nodes, false);
+        assert!(result.truncated);
+        assert_eq!(result.total_nodes, 10_002);
+        // Should have fewer children than total
+        assert!(result.root.children.len() < 10_001);
+    }
+
+    #[test]
+    fn snapshot_state_error_display() {
+        assert_eq!(
+            SnapshotStateError::NoHomeDir.to_string(),
+            "could not determine home directory"
+        );
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        assert_eq!(
+            SnapshotStateError::Io(io_err).to_string(),
+            "snapshot state file error: denied"
+        );
+        assert_eq!(
+            SnapshotStateError::InvalidFormat("bad".into()).to_string(),
+            "invalid snapshot state file: bad"
+        );
+    }
+}

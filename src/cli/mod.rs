@@ -305,6 +305,9 @@ pub struct PageArgs {
 pub enum PageCommand {
     /// Extract visible text from the page
     Text(PageTextArgs),
+
+    /// Capture the accessibility tree of the page
+    Snapshot(PageSnapshotArgs),
 }
 
 /// Arguments for `page text`.
@@ -313,6 +316,18 @@ pub struct PageTextArgs {
     /// CSS selector to extract text from a specific element
     #[arg(long)]
     pub selector: Option<String>,
+}
+
+/// Arguments for `page snapshot`.
+#[derive(Args)]
+pub struct PageSnapshotArgs {
+    /// Include additional element properties (checked, disabled, level, etc.)
+    #[arg(long)]
+    pub verbose: bool,
+
+    /// Save snapshot to file instead of stdout
+    #[arg(long)]
+    pub file: Option<PathBuf>,
 }
 
 /// Wait strategy for navigation commands.

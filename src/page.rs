@@ -6,7 +6,7 @@ use chrome_cli::cdp::{CdpClient, CdpConfig};
 use chrome_cli::connection::{ManagedSession, resolve_connection, resolve_target};
 use chrome_cli::error::{AppError, ExitCode};
 
-use crate::cli::{GlobalOpts, PageArgs, PageCommand, PageTextArgs};
+use crate::cli::{GlobalOpts, PageArgs, PageCommand, PageSnapshotArgs, PageTextArgs};
 
 // =============================================================================
 // Output types
@@ -61,6 +61,7 @@ fn cdp_config(global: &GlobalOpts) -> CdpConfig {
 pub async fn execute_page(global: &GlobalOpts, args: &PageArgs) -> Result<(), AppError> {
     match &args.command {
         PageCommand::Text(text_args) => execute_text(global, text_args).await,
+        PageCommand::Snapshot(snap_args) => execute_snapshot(global, snap_args).await,
     }
 }
 
@@ -178,6 +179,80 @@ async fn execute_text(global: &GlobalOpts, args: &PageTextArgs) -> Result<(), Ap
 
     let output = PageTextResult { text, url, title };
     print_output(&output, &global.output)
+}
+
+// =============================================================================
+// Accessibility tree snapshot
+// =============================================================================
+
+async fn execute_snapshot(global: &GlobalOpts, args: &PageSnapshotArgs) -> Result<(), AppError> {
+    let (_client, mut managed) = setup_session(global).await?;
+
+    // Enable required domains
+    managed.ensure_domain("Accessibility").await?;
+    managed.ensure_domain("Runtime").await?;
+
+    // Capture the accessibility tree
+    let result = managed
+        .send_command("Accessibility.getFullAXTree", None)
+        .await
+        .map_err(|e| AppError::snapshot_failed(&e.to_string()))?;
+
+    let nodes = result["nodes"]
+        .as_array()
+        .ok_or_else(|| AppError::snapshot_failed("response missing 'nodes' array"))?;
+
+    // Build tree and assign UIDs
+    let build = crate::snapshot::build_tree(nodes, args.verbose);
+
+    // Get page URL for snapshot state
+    let (url, _title) = get_page_info(&managed).await?;
+
+    // Persist UID mapping
+    let state = crate::snapshot::SnapshotState {
+        url,
+        timestamp: chrome_cli::session::now_iso8601(),
+        uid_map: build.uid_map,
+    };
+    if let Err(e) = crate::snapshot::write_snapshot_state(&state) {
+        eprintln!("warning: could not save snapshot state: {e}");
+    }
+
+    // Format output
+    let formatted = if global.output.json || global.output.pretty {
+        // JSON output
+        let serializer = if global.output.pretty {
+            serde_json::to_string_pretty(&build.root)
+        } else {
+            serde_json::to_string(&build.root)
+        };
+        serializer.map_err(|e| AppError {
+            message: format!("serialization error: {e}"),
+            code: ExitCode::GeneralError,
+        })?
+    } else {
+        // Text output (default and --plain)
+        let mut text = crate::snapshot::format_text(&build.root, args.verbose);
+        if build.truncated {
+            text.push_str(&format!(
+                "[... truncated: {} nodes, showing first {}]\n",
+                build.total_nodes,
+                crate::snapshot::MAX_NODES
+            ));
+        }
+        text
+    };
+
+    // Write to file or stdout
+    if let Some(ref file_path) = args.file {
+        std::fs::write(file_path, &formatted).map_err(|e| {
+            AppError::file_write_failed(&file_path.display().to_string(), &e.to_string())
+        })?;
+    } else {
+        print!("{formatted}");
+    }
+
+    Ok(())
 }
 
 // =============================================================================

@@ -1,6 +1,7 @@
 mod cli;
 mod navigate;
 mod page;
+mod snapshot;
 mod tabs;
 
 use std::time::Duration;

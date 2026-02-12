@@ -1476,6 +1476,10 @@ async fn main() {
     // running Chrome instance with loaded pages. Step definitions and a PageWorld
     // will be added when integration-test infrastructure is available.
 
+    // TODO: tests/features/accessibility-tree-snapshot.feature exists but requires a
+    // running Chrome instance with loaded pages. Step definitions and a SnapshotWorld
+    // will be added when integration-test infrastructure is available.
+
     SessionWorld::cucumber()
         .filter_run_and_exit(
             "tests/features/session-connection-management.feature",
