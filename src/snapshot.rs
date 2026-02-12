@@ -262,7 +262,7 @@ fn format_text_node(node: &SnapshotNode, depth: usize, verbose: bool, output: &m
                     .iter()
                     .map(|(k, v)| {
                         if v.is_string() {
-                            format!("{k}={}", v.as_str().unwrap_or_default())
+                            format!("{k}=\"{}\"", v.as_str().unwrap_or_default())
                         } else {
                             format!("{k}={v}")
                         }
@@ -620,6 +620,10 @@ mod tests {
         let result = build_tree(&nodes, true);
         let text = format_text(&result.root, true);
         assert!(text.contains("level=1"), "text was: {text}");
+        assert!(
+            text.contains("url=\"https://www.iana.org/domains/example\""),
+            "text was: {text}"
+        );
     }
 
     #[test]

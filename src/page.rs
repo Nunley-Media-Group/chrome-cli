@@ -220,11 +220,24 @@ async fn execute_snapshot(global: &GlobalOpts, args: &PageSnapshotArgs) -> Resul
 
     // Format output
     let formatted = if global.output.json || global.output.pretty {
-        // JSON output
+        // JSON output — add truncation info to root if applicable
+        let mut json_value = serde_json::to_value(&build.root).map_err(|e| AppError {
+            message: format!("serialization error: {e}"),
+            code: ExitCode::GeneralError,
+        })?;
+        if build.truncated {
+            if let Some(obj) = json_value.as_object_mut() {
+                obj.insert("truncated".to_string(), serde_json::Value::Bool(true));
+                obj.insert(
+                    "total_nodes".to_string(),
+                    serde_json::Value::Number(build.total_nodes.into()),
+                );
+            }
+        }
         let serializer = if global.output.pretty {
-            serde_json::to_string_pretty(&build.root)
+            serde_json::to_string_pretty(&json_value)
         } else {
-            serde_json::to_string(&build.root)
+            serde_json::to_string(&json_value)
         };
         serializer.map_err(|e| AppError {
             message: format!("serialization error: {e}"),
