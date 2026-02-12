@@ -29,9 +29,9 @@ pub struct Cli {
 
 #[derive(Args)]
 pub struct GlobalOpts {
-    /// Chrome DevTools Protocol port number
-    #[arg(long, default_value_t = 9222, global = true)]
-    pub port: u16,
+    /// Chrome DevTools Protocol port number [default: 9222]
+    #[arg(long, global = true)]
+    pub port: Option<u16>,
 
     /// Chrome DevTools Protocol host address
     #[arg(long, default_value = "127.0.0.1", global = true)]
@@ -51,6 +51,15 @@ pub struct GlobalOpts {
 
     #[command(flatten)]
     pub output: OutputFormat,
+}
+
+impl GlobalOpts {
+    /// Returns the port if explicitly provided, or the default (9222).
+    #[must_use]
+    pub fn port_or_default(&self) -> u16 {
+        self.port
+            .unwrap_or(chrome_cli::connection::DEFAULT_CDP_PORT)
+    }
 }
 
 #[allow(clippy::struct_excessive_bools)]

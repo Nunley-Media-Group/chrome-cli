@@ -1,10 +1,15 @@
+use std::collections::HashSet;
+
+use crate::cdp::{CdpError, CdpSession};
 use crate::chrome::{TargetInfo, discover_chrome, query_targets, query_version};
 use crate::error::AppError;
 use crate::session;
 
+/// Default Chrome `DevTools` Protocol port.
+pub const DEFAULT_CDP_PORT: u16 = 9222;
+
 /// Resolved connection info ready for use by a command.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct ResolvedConnection {
     pub ws_url: String,
     pub host: String,
@@ -28,22 +33,25 @@ pub async fn health_check(host: &str, port: u16) -> Result<(), AppError> {
 /// Resolve a Chrome connection using the priority chain:
 ///
 /// 1. Explicit `--ws-url`
-/// 2. Session file (with health check)
-/// 3. Auto-discover (default host:port)
-/// 4. Error with suggestion
+/// 2. Explicit `--port` (user provided, not the default)
+/// 3. Session file (with health check)
+/// 4. Auto-discover (default host:port 9222)
+/// 5. Error with suggestion
 ///
 /// # Errors
 ///
 /// Returns `AppError` if no Chrome connection can be resolved.
-#[allow(dead_code)]
 pub async fn resolve_connection(
     host: &str,
-    port: u16,
+    port: Option<u16>,
     ws_url: Option<&str>,
 ) -> Result<ResolvedConnection, AppError> {
+    let default_port = DEFAULT_CDP_PORT;
+
     // 1. Explicit --ws-url
     if let Some(ws_url) = ws_url {
-        let resolved_port = extract_port_from_ws_url(ws_url).unwrap_or(port);
+        let resolved_port =
+            extract_port_from_ws_url(ws_url).unwrap_or(port.unwrap_or(default_port));
         return Ok(ResolvedConnection {
             ws_url: ws_url.to_string(),
             host: host.to_string(),
@@ -51,7 +59,21 @@ pub async fn resolve_connection(
         });
     }
 
-    // 2. Session file
+    // 2. Explicit --port (user provided)
+    if let Some(explicit_port) = port {
+        match discover_chrome(host, explicit_port).await {
+            Ok((ws_url, p)) => {
+                return Ok(ResolvedConnection {
+                    ws_url,
+                    host: host.to_string(),
+                    port: p,
+                });
+            }
+            Err(_) => return Err(AppError::no_chrome_found()),
+        }
+    }
+
+    // 3. Session file
     if let Some(session_data) = session::read_session()? {
         health_check(host, session_data.port).await?;
         return Ok(ResolvedConnection {
@@ -61,12 +83,12 @@ pub async fn resolve_connection(
         });
     }
 
-    // 3. Auto-discover
-    match discover_chrome(host, port).await {
-        Ok((ws_url, port)) => Ok(ResolvedConnection {
+    // 4. Auto-discover on default port
+    match discover_chrome(host, default_port).await {
+        Ok((ws_url, p)) => Ok(ResolvedConnection {
             ws_url,
             host: host.to_string(),
-            port,
+            port: p,
         }),
         Err(_) => Err(AppError::no_chrome_found()),
     }
@@ -94,7 +116,6 @@ pub fn extract_port_from_ws_url(url: &str) -> Option<u16> {
 ///
 /// Returns `AppError::no_page_targets()` if no page-type target exists,
 /// or `AppError::target_not_found()` if the specified tab cannot be matched.
-#[allow(dead_code)]
 pub fn select_target<'a>(
     targets: &'a [TargetInfo],
     tab: Option<&str>,
@@ -125,7 +146,6 @@ pub fn select_target<'a>(
 /// # Errors
 ///
 /// Returns `AppError` if targets cannot be queried or the specified tab is not found.
-#[allow(dead_code)]
 pub async fn resolve_target(
     host: &str,
     port: u16,
@@ -133,6 +153,68 @@ pub async fn resolve_target(
 ) -> Result<TargetInfo, AppError> {
     let targets = query_targets(host, port).await?;
     select_target(&targets, tab).cloned()
+}
+
+/// A CDP session wrapper that tracks which domains have been enabled,
+/// ensuring each domain is only enabled once (lazy domain enabling).
+///
+/// This fulfills AC13: "only the required domains are enabled" per command.
+#[derive(Debug)]
+pub struct ManagedSession {
+    session: CdpSession,
+    enabled_domains: HashSet<String>,
+}
+
+impl ManagedSession {
+    /// Wrap a [`CdpSession`] with domain tracking.
+    #[must_use]
+    pub fn new(session: CdpSession) -> Self {
+        Self {
+            session,
+            enabled_domains: HashSet::new(),
+        }
+    }
+
+    /// Ensure a CDP domain is enabled. Sends `{domain}.enable` only if
+    /// the domain has not already been enabled in this session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CdpError` if the enable command fails.
+    pub async fn ensure_domain(&mut self, domain: &str) -> Result<(), CdpError> {
+        if self.enabled_domains.contains(domain) {
+            return Ok(());
+        }
+        let method = format!("{domain}.enable");
+        self.session.send_command(&method, None).await?;
+        self.enabled_domains.insert(domain.to_string());
+        Ok(())
+    }
+
+    /// Send a command within this session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CdpError` if the command fails.
+    pub async fn send_command(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, CdpError> {
+        self.session.send_command(method, params).await
+    }
+
+    /// Get the underlying session ID.
+    #[must_use]
+    pub fn session_id(&self) -> &str {
+        self.session.session_id()
+    }
+
+    /// Returns the set of currently enabled domains.
+    #[must_use]
+    pub fn enabled_domains(&self) -> &HashSet<String> {
+        &self.enabled_domains
+    }
 }
 
 #[cfg(test)]
@@ -240,5 +322,96 @@ mod tests {
         ];
         let result = select_target(&targets, None);
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn managed_session_enables_domain_once() {
+        use crate::cdp::{CdpClient, CdpConfig, ReconnectConfig};
+        use futures_util::{SinkExt, StreamExt};
+        use std::time::Duration;
+        use tokio::net::TcpListener;
+        use tokio::sync::mpsc;
+        use tokio_tungstenite::tungstenite::Message;
+
+        // Start mock CDP server that echoes responses and records messages
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (record_tx, mut record_rx) = mpsc::channel::<serde_json::Value>(32);
+
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                let (mut sink, mut source) = ws.split();
+                while let Some(Ok(Message::Text(text))) = source.next().await {
+                    let cmd: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    let _ = record_tx.send(cmd.clone()).await;
+
+                    if cmd["method"] == "Target.attachToTarget" {
+                        let tid = cmd["params"]["targetId"].as_str().unwrap_or("test");
+                        let resp = serde_json::json!({
+                            "id": cmd["id"],
+                            "result": {"sessionId": tid}
+                        });
+                        let _ = sink.send(Message::Text(resp.to_string().into())).await;
+                    } else {
+                        let mut resp = serde_json::json!({"id": cmd["id"], "result": {}});
+                        if let Some(sid) = cmd.get("sessionId") {
+                            resp["sessionId"] = sid.clone();
+                        }
+                        let _ = sink.send(Message::Text(resp.to_string().into())).await;
+                    }
+                }
+            }
+        });
+
+        // Connect and create session
+        let url = format!("ws://{addr}");
+        let config = CdpConfig {
+            connect_timeout: Duration::from_secs(5),
+            command_timeout: Duration::from_secs(5),
+            channel_capacity: 256,
+            reconnect: ReconnectConfig {
+                max_retries: 0,
+                ..ReconnectConfig::default()
+            },
+        };
+        let client = CdpClient::connect(&url, config).await.unwrap();
+        let session = client.create_session("test-target").await.unwrap();
+        // Drain the attachToTarget message
+        let _ = tokio::time::timeout(Duration::from_millis(200), record_rx.recv()).await;
+
+        let mut managed = ManagedSession::new(session);
+        assert!(managed.enabled_domains().is_empty());
+
+        // First enable: should send Page.enable
+        managed.ensure_domain("Page").await.unwrap();
+        let msg = tokio::time::timeout(Duration::from_millis(200), record_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg["method"], "Page.enable");
+        assert!(managed.enabled_domains().contains("Page"));
+
+        // Second enable of same domain: should NOT send anything
+        managed.ensure_domain("Page").await.unwrap();
+        let no_msg = tokio::time::timeout(Duration::from_millis(100), record_rx.recv()).await;
+        assert!(
+            no_msg.is_err(),
+            "No message should be sent for already-enabled domain"
+        );
+
+        // Enable a different domain
+        managed.ensure_domain("Runtime").await.unwrap();
+        let msg2 = tokio::time::timeout(Duration::from_millis(200), record_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(msg2["method"], "Runtime.enable");
+
+        // Verify final state
+        let domains = managed.enabled_domains();
+        assert!(domains.contains("Page"));
+        assert!(domains.contains("Runtime"));
+        assert_eq!(domains.len(), 2);
     }
 }

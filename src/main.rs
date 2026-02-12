@@ -1,22 +1,19 @@
-mod chrome;
 mod cli;
-mod connection;
-mod error;
-mod session;
 
 use std::time::Duration;
 
 use clap::Parser;
 use serde::Serialize;
 
-use chrome::{
-    Channel, LaunchConfig, discover_chrome, find_available_port, find_chrome_executable,
+use chrome_cli::chrome::{
+    self, Channel, LaunchConfig, discover_chrome, find_available_port, find_chrome_executable,
     launch_chrome, query_version,
 };
+use chrome_cli::connection::{self, extract_port_from_ws_url};
+use chrome_cli::error::{AppError, ExitCode};
+use chrome_cli::session::{self, SessionData};
+
 use cli::{ChromeChannel, Cli, Command, ConnectArgs, GlobalOpts};
-use connection::extract_port_from_ws_url;
-use error::AppError;
-use session::SessionData;
 
 #[tokio::main]
 async fn main() {
@@ -71,6 +68,15 @@ struct DisconnectInfo {
     killed_pid: Option<u32>,
 }
 
+fn print_json(value: &impl Serialize) -> Result<(), AppError> {
+    let json = serde_json::to_string(value).map_err(|e| AppError {
+        message: format!("serialization error: {e}"),
+        code: ExitCode::GeneralError,
+    })?;
+    println!("{json}");
+    Ok(())
+}
+
 fn convert_channel(ch: ChromeChannel) -> Channel {
     match ch {
         ChromeChannel::Stable => Channel::Stable,
@@ -119,14 +125,14 @@ async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), 
 
     // Strategy 1: Direct WebSocket URL
     if let Some(ws_url) = &global.ws_url {
-        let port = extract_port_from_ws_url(ws_url).unwrap_or(global.port);
+        let port = extract_port_from_ws_url(ws_url).unwrap_or(global.port_or_default());
         let info = ConnectionInfo {
             ws_url: ws_url.clone(),
             port,
             pid: None,
         };
         save_session(&info);
-        println!("{}", serde_json::to_string(&info).unwrap());
+        print_json(&info)?;
         return Ok(());
     }
 
@@ -136,7 +142,7 @@ async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), 
     }
 
     // Strategy 3: Auto-discover, then auto-launch
-    match discover_chrome(&global.host, global.port).await {
+    match discover_chrome(&global.host, global.port_or_default()).await {
         Ok((ws_url, port)) => {
             let info = ConnectionInfo {
                 ws_url,
@@ -144,7 +150,7 @@ async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), 
                 pid: None,
             };
             save_session(&info);
-            println!("{}", serde_json::to_string(&info).unwrap());
+            print_json(&info)?;
             Ok(())
         }
         Err(discover_err) => {
@@ -192,7 +198,7 @@ async fn execute_launch(args: &ConnectArgs, timeout: Duration) -> Result<(), App
                     pid: Some(pid),
                 };
                 save_session(&info);
-                println!("{}", serde_json::to_string(&info).unwrap());
+                print_json(&info)?;
                 return Ok(());
             }
             Err(e @ chrome::ChromeError::LaunchFailed(_)) => {
@@ -222,7 +228,7 @@ async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
         timestamp: session_data.timestamp,
         reachable,
     };
-    println!("{}", serde_json::to_string(&status).unwrap());
+    print_json(&status)?;
     Ok(())
 }
 
@@ -243,7 +249,7 @@ fn execute_disconnect() -> Result<(), AppError> {
         disconnected: true,
         killed_pid,
     };
-    println!("{}", serde_json::to_string(&output).unwrap());
+    print_json(&output)?;
     Ok(())
 }
 

@@ -4,7 +4,6 @@ use serde::Serialize;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub enum ExitCode {
     Success = 0,
     GeneralError = 1,
@@ -71,7 +70,6 @@ impl AppError {
     }
 
     #[must_use]
-    #[allow(dead_code)]
     pub fn target_not_found(tab: &str) -> Self {
         Self {
             message: format!(
@@ -82,7 +80,6 @@ impl AppError {
     }
 
     #[must_use]
-    #[allow(dead_code)]
     pub fn no_page_targets() -> Self {
         Self {
             message: "No page targets found in Chrome. Open a tab first.".into(),
@@ -91,7 +88,6 @@ impl AppError {
     }
 
     #[must_use]
-    #[allow(dead_code)]
     pub fn no_chrome_found() -> Self {
         Self {
             message: "No Chrome instance found. Run 'chrome-cli connect' or \

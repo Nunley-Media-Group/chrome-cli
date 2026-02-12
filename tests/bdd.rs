@@ -1272,8 +1272,196 @@ async fn valid_commands_still_work(world: &mut CdpWorld) {
 }
 
 // =============================================================================
-// Main — run all three worlds
+// SessionWorld — Session and connection management BDD tests
 // =============================================================================
+
+#[derive(Debug, World)]
+struct SessionWorld {
+    temp_dir: PathBuf,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+impl Default for SessionWorld {
+    fn default() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chrome-cli-bdd-session-{}-{id}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        Self {
+            temp_dir,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+        }
+    }
+}
+
+impl SessionWorld {
+    fn session_dir(&self) -> PathBuf {
+        self.temp_dir.join(".chrome-cli")
+    }
+
+    fn session_path(&self) -> PathBuf {
+        self.session_dir().join("session.json")
+    }
+}
+
+// --- SessionWorld Given steps ---
+
+#[given("no session file exists")]
+fn session_no_file(_world: &mut SessionWorld) {
+    // Default state — temp dir has no .chrome-cli/ directory
+}
+
+#[given("a valid session file exists")]
+fn session_valid_file(world: &mut SessionWorld) {
+    std::fs::create_dir_all(world.session_dir()).unwrap();
+    let data = json!({
+        "ws_url": "ws://127.0.0.1:19222/devtools/browser/test",
+        "port": 19222,
+        "timestamp": "2026-02-11T12:00:00Z"
+    });
+    std::fs::write(world.session_path(), data.to_string()).unwrap();
+}
+
+#[given(expr = "a valid session file exists with ws_url {string}")]
+fn session_valid_with_ws_url(world: &mut SessionWorld, ws_url: String) {
+    let port = chrome_cli::connection::extract_port_from_ws_url(&ws_url).unwrap_or(9222);
+    std::fs::create_dir_all(world.session_dir()).unwrap();
+    let data = json!({
+        "ws_url": ws_url,
+        "port": port,
+        "timestamp": "2026-02-11T12:00:00Z"
+    });
+    std::fs::write(world.session_path(), data.to_string()).unwrap();
+}
+
+#[given(expr = "Chrome is not running on port {int}")]
+fn session_chrome_not_running(_world: &mut SessionWorld, port: i32) {
+    let _ = port; // captured by Gherkin but unused — no-op
+}
+
+#[given("a session file exists with invalid JSON content")]
+fn session_invalid_json(world: &mut SessionWorld) {
+    std::fs::create_dir_all(world.session_dir()).unwrap();
+    std::fs::write(world.session_path(), "not valid json {{{").unwrap();
+}
+
+// --- SessionWorld When steps ---
+
+#[when(expr = "I run {string}")]
+fn session_run_command(world: &mut SessionWorld, command_line: String) {
+    let binary = binary_path();
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "chrome-cli") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(&binary)
+        .args(args)
+        .env("HOME", &world.temp_dir)
+        .env("USERPROFILE", &world.temp_dir)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+// --- SessionWorld Then steps ---
+
+#[then(expr = "stderr should contain {string}")]
+fn session_stderr_contains(world: &mut SessionWorld, expected: String) {
+    assert!(
+        world.stderr.contains(&expected),
+        "stderr does not contain '{expected}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "the exit code should be {int}")]
+fn session_exit_code(world: &mut SessionWorld, expected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, expected,
+        "Expected exit code {expected}, got {actual}\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then("the exit code should be non-zero")]
+fn session_exit_code_nonzero(world: &mut SessionWorld) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_ne!(
+        actual, 0,
+        "Expected non-zero exit code\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then("the session file should not exist")]
+fn session_file_removed(world: &mut SessionWorld) {
+    assert!(
+        !world.session_path().exists(),
+        "Session file should not exist at {}",
+        world.session_path().display()
+    );
+}
+
+#[then(regex = r#"^the output should contain "(\w+)":\s*(.+)$"#)]
+fn session_output_json_value(world: &mut SessionWorld, key: String, value: String) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let expected: serde_json::Value = serde_json::from_str(value.trim())
+        .unwrap_or_else(|e| panic!("Cannot parse expected value '{value}': {e}"));
+    assert_eq!(
+        json.get(&key),
+        Some(&expected),
+        "Expected \"{key}\": {expected} in output: {json}"
+    );
+}
+
+#[then(regex = r#"^the output should contain "(\w+)"$"#)]
+fn session_output_json_key(world: &mut SessionWorld, key: String) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    assert!(
+        json.get(&key).is_some(),
+        "Expected key \"{key}\" in output: {json}"
+    );
+}
+
+#[then("stderr should contain an error about the session file")]
+fn session_stderr_about_session(world: &mut SessionWorld) {
+    let stderr_lower = world.stderr.to_lowercase();
+    assert!(
+        stderr_lower.contains("session"),
+        "stderr should mention session file error\nstderr: {}",
+        world.stderr
+    );
+}
+
+// =============================================================================
+// Main — run all worlds
+// =============================================================================
+
+/// Session BDD scenarios that can be tested without a running Chrome instance.
+const SESSION_TESTABLE_SCENARIOS: &[&str] = &[
+    "Show connection status with no session",
+    "Show connection status with stale session",
+    "Disconnect removes session file",
+    "Disconnect with no session is idempotent",
+    "Corrupted session file handled gracefully",
+];
 
 #[tokio::main]
 async fn main() {
@@ -1281,4 +1469,12 @@ async fn main() {
     CliWorld::run("tests/features/cli-skeleton.feature").await;
     CliWorld::run("tests/features/chrome-discovery-launch.feature").await;
     CdpWorld::run("tests/features/cdp-websocket-client.feature").await;
+    SessionWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/session-connection-management.feature",
+            |_feature, _rule, scenario| {
+                SESSION_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
 }
