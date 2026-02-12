@@ -109,7 +109,7 @@ pub enum Command {
             extract visible text, dump the accessibility tree, or search for text/elements on \
             the page."
     )]
-    Page,
+    Page(PageArgs),
 
     /// DOM inspection and manipulation
     #[command(
@@ -291,6 +291,28 @@ pub struct NavigateReloadArgs {
     /// Bypass the browser cache on reload
     #[arg(long)]
     pub ignore_cache: bool,
+}
+
+/// Arguments for the `page` subcommand group.
+#[derive(Args)]
+pub struct PageArgs {
+    #[command(subcommand)]
+    pub command: PageCommand,
+}
+
+/// Page inspection subcommands.
+#[derive(Subcommand)]
+pub enum PageCommand {
+    /// Extract visible text from the page
+    Text(PageTextArgs),
+}
+
+/// Arguments for `page text`.
+#[derive(Args)]
+pub struct PageTextArgs {
+    /// CSS selector to extract text from a specific element
+    #[arg(long)]
+    pub selector: Option<String>,
 }
 
 /// Wait strategy for navigation commands.
