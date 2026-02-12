@@ -128,6 +128,22 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn snapshot_failed(description: &str) -> Self {
+        Self {
+            message: format!("Accessibility tree capture failed: {description}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn file_write_failed(path: &str, error: &str) -> Self {
+        Self {
+            message: format!("Failed to write snapshot to file: {path}: {error}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
     pub fn no_chrome_found() -> Self {
         Self {
             message: "No Chrome instance found. Run 'chrome-cli connect' or \
@@ -259,6 +275,23 @@ mod tests {
         let err = AppError::evaluation_failed("script threw an exception");
         assert!(err.message.contains("Text extraction failed"));
         assert!(err.message.contains("script threw an exception"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn snapshot_failed_error() {
+        let err = AppError::snapshot_failed("domain not enabled");
+        assert!(err.message.contains("Accessibility tree capture failed"));
+        assert!(err.message.contains("domain not enabled"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn file_write_failed_error() {
+        let err = AppError::file_write_failed("/tmp/out.txt", "permission denied");
+        assert!(err.message.contains("Failed to write snapshot to file"));
+        assert!(err.message.contains("/tmp/out.txt"));
+        assert!(err.message.contains("permission denied"));
         assert!(matches!(err.code, ExitCode::GeneralError));
     }
 
