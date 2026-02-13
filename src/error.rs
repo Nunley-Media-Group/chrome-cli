@@ -154,9 +154,7 @@ impl AppError {
     #[must_use]
     pub fn uid_not_found(uid: &str) -> Self {
         Self {
-            message: format!(
-                "UID '{uid}' not found. Run 'chrome-cli page snapshot' first."
-            ),
+            message: format!("UID '{uid}' not found. Run 'chrome-cli page snapshot' first."),
             code: ExitCode::GeneralError,
         }
     }
