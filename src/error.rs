@@ -274,6 +274,45 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn no_snapshot_state() -> Self {
+        Self {
+            message: "No snapshot state found. Run 'chrome-cli page snapshot' first to assign \
+                      UIDs to interactive elements."
+                .into(),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn element_zero_size(target: &str) -> Self {
+        Self {
+            message: format!(
+                "Element '{target}' has zero-size bounding box and cannot be clicked."
+            ),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn interaction_failed(action: &str, reason: &str) -> Self {
+        Self {
+            message: format!("Interaction failed ({action}): {reason}"),
+            code: ExitCode::ProtocolError,
+        }
+    }
+
+    #[must_use]
+    pub fn stale_uid(uid: &str) -> Self {
+        Self {
+            message: format!(
+                "UID '{uid}' refers to an element that no longer exists. \
+                 Run 'chrome-cli page snapshot' to refresh."
+            ),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
     pub fn to_json(&self) -> String {
         let output = ErrorOutput {
             error: &self.message,
