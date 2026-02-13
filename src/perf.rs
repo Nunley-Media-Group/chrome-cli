@@ -10,8 +10,7 @@ use chrome_cli::connection::{ManagedSession, resolve_connection, resolve_target}
 use chrome_cli::error::{AppError, ExitCode};
 
 use crate::cli::{
-    GlobalOpts, PerfAnalyzeArgs, PerfArgs, PerfCommand, PerfStartArgs, PerfStopArgs,
-    PerfVitalsArgs,
+    GlobalOpts, PerfAnalyzeArgs, PerfArgs, PerfCommand, PerfStartArgs, PerfStopArgs, PerfVitalsArgs,
 };
 
 /// Default trace timeout in milliseconds (30 seconds).
@@ -362,9 +361,7 @@ async fn stream_trace_to_file(
     }
 
     // Close trace format
-    writer
-        .write_all(b"]}")
-        .map_err(|e| write_error(&e))?;
+    writer.write_all(b"]}").map_err(|e| write_error(&e))?;
     writer.flush().map_err(|e| write_error(&e))?;
 
     Ok(())
@@ -405,9 +402,8 @@ struct TraceFile {
 
 /// Parse a trace file and extract Core Web Vitals.
 fn parse_trace_vitals(path: &Path) -> Result<CoreWebVitals, AppError> {
-    let file = fs::File::open(path).map_err(|e| {
-        AppError::trace_file_not_found(&format!("{}: {e}", path.display()))
-    })?;
+    let file = fs::File::open(path)
+        .map_err(|e| AppError::trace_file_not_found(&format!("{}: {e}", path.display())))?;
     let reader = BufReader::new(file);
     let trace: TraceFile = serde_json::from_reader(reader)
         .map_err(|e| AppError::trace_parse_failed(&e.to_string()))?;
@@ -537,10 +533,7 @@ fn extract_ttfb(events: &[TraceEvent]) -> Option<f64> {
 // perf analyze
 // =============================================================================
 
-fn execute_analyze(
-    global: &GlobalOpts,
-    args: &PerfAnalyzeArgs,
-) -> Result<(), AppError> {
+fn execute_analyze(global: &GlobalOpts, args: &PerfAnalyzeArgs) -> Result<(), AppError> {
     // Validate insight name
     if !VALID_INSIGHTS.contains(&args.insight.as_str()) {
         return Err(AppError::unknown_insight(&args.insight));
@@ -666,9 +659,7 @@ fn analyze_render_blocking(events: &[TraceEvent]) -> serde_json::Value {
     for event in events {
         if event.name == "ResourceSendRequest" {
             if let Some(data) = event.args.get("data") {
-                let render_blocking = data["renderBlocking"]
-                    .as_str()
-                    .unwrap_or("non_blocking");
+                let render_blocking = data["renderBlocking"].as_str().unwrap_or("non_blocking");
                 if render_blocking == "blocking" || render_blocking == "in_body_parser_blocking" {
                     let url = data["url"].as_str().unwrap_or("unknown");
                     blocking_resources.push(serde_json::json!({
@@ -995,7 +986,13 @@ mod tests {
     // CWV extraction from trace events
     // =========================================================================
 
-    fn make_trace_event(name: &str, cat: &str, ts: f64, dur: f64, args: serde_json::Value) -> TraceEvent {
+    fn make_trace_event(
+        name: &str,
+        cat: &str,
+        ts: f64,
+        dur: f64,
+        args: serde_json::Value,
+    ) -> TraceEvent {
         TraceEvent {
             name: name.to_string(),
             cat: cat.to_string(),
@@ -1125,9 +1122,27 @@ mod tests {
     #[test]
     fn analyze_long_tasks_finds_tasks_over_50ms() {
         let events = vec![
-            make_trace_event("RunTask", "devtools.timeline", 1_000_000.0, 60_000.0, serde_json::json!({})),
-            make_trace_event("RunTask", "devtools.timeline", 2_000_000.0, 30_000.0, serde_json::json!({})),
-            make_trace_event("RunTask", "devtools.timeline", 3_000_000.0, 100_000.0, serde_json::json!({})),
+            make_trace_event(
+                "RunTask",
+                "devtools.timeline",
+                1_000_000.0,
+                60_000.0,
+                serde_json::json!({}),
+            ),
+            make_trace_event(
+                "RunTask",
+                "devtools.timeline",
+                2_000_000.0,
+                30_000.0,
+                serde_json::json!({}),
+            ),
+            make_trace_event(
+                "RunTask",
+                "devtools.timeline",
+                3_000_000.0,
+                100_000.0,
+                serde_json::json!({}),
+            ),
         ];
         let result = analyze_long_tasks(&events);
         assert_eq!(result["count"], 2);
