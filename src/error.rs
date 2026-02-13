@@ -247,6 +247,23 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn no_dialog_open() -> Self {
+        Self {
+            message: "No dialog is currently open. A dialog must be open before it can be handled."
+                .into(),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn dialog_handle_failed(reason: &str) -> Self {
+        Self {
+            message: format!("Dialog handling failed: {reason}"),
+            code: ExitCode::ProtocolError,
+        }
+    }
+
+    #[must_use]
     pub fn no_chrome_found() -> Self {
         Self {
             message: "No Chrome instance found. Run 'chrome-cli connect' or \
@@ -497,6 +514,22 @@ mod tests {
         assert!(err.message.contains("/tmp/bad.js"));
         assert!(err.message.contains("permission denied"));
         assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn no_dialog_open_error() {
+        let err = AppError::no_dialog_open();
+        assert!(err.message.contains("No dialog is currently open"));
+        assert!(err.message.contains("must be open"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn dialog_handle_failed_error() {
+        let err = AppError::dialog_handle_failed("could not dismiss");
+        assert!(err.message.contains("Dialog handling failed"));
+        assert!(err.message.contains("could not dismiss"));
+        assert!(matches!(err.code, ExitCode::ProtocolError));
     }
 
     #[test]

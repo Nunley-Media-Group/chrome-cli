@@ -1541,6 +1541,71 @@ fn js_stderr_no_code(world: &mut JsWorld) {
 }
 
 // =============================================================================
+// DialogWorld — Dialog handling BDD tests (CLI-testable scenarios)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct DialogWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+#[given("chrome-cli is built")]
+fn dialog_chrome_cli_built(world: &mut DialogWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[when(expr = "I run {string}")]
+fn dialog_run_command(world: &mut DialogWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given chrome-cli is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "chrome-cli") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[then("the exit code should be non-zero")]
+fn dialog_exit_code_nonzero(world: &mut DialogWorld) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_ne!(
+        actual, 0,
+        "Expected non-zero exit code, got 0\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stderr should contain {string}")]
+fn dialog_stderr_contains(world: &mut DialogWorld, expected: String) {
+    assert!(
+        world
+            .stderr
+            .to_lowercase()
+            .contains(&expected.to_lowercase()),
+        "stderr does not contain '{expected}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+// =============================================================================
 // Main — run all worlds
 // =============================================================================
 
@@ -1555,6 +1620,12 @@ const SESSION_TESTABLE_SCENARIOS: &[&str] = &[
 
 /// JS execution BDD scenarios that can be tested without a running Chrome instance.
 const JS_TESTABLE_SCENARIOS: &[&str] = &["File not found error"];
+
+/// Dialog BDD scenarios that can be tested without a running Chrome instance.
+const DIALOG_TESTABLE_SCENARIOS: &[&str] = &[
+    "Dialog handle requires an action argument",
+    "Dialog handle rejects invalid action",
+];
 
 #[tokio::main]
 async fn main() {
@@ -1588,6 +1659,14 @@ async fn main() {
         .filter_run_and_exit(
             "tests/features/js-execution.feature",
             |_feature, _rule, scenario| JS_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
+        )
+        .await;
+
+    // Dialog handling — only CLI-testable scenarios (argument validation) can run without Chrome.
+    DialogWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/dialog.feature",
+            |_feature, _rule, scenario| DIALOG_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
         )
         .await;
 }

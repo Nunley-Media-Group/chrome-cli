@@ -49,6 +49,10 @@ pub struct GlobalOpts {
     #[arg(long, global = true)]
     pub tab: Option<String>,
 
+    /// Automatically dismiss any dialogs that appear during command execution
+    #[arg(long, global = true)]
+    pub auto_dismiss_dialogs: bool,
+
     #[command(flatten)]
     pub output: OutputFormat,
 }
@@ -170,6 +174,15 @@ pub enum Command {
             and analyze runtime performance. Outputs metrics as structured JSON for analysis."
     )]
     Perf(PerfArgs),
+
+    /// Browser dialog handling (alert, confirm, prompt, beforeunload)
+    #[command(
+        long_about = "Detect and handle browser JavaScript dialogs (alert, confirm, prompt, \
+            beforeunload). Query whether a dialog is open, accept or dismiss it, and provide \
+            prompt text. Useful for automation scripts that need to respond to dialogs \
+            programmatically."
+    )]
+    Dialog(DialogArgs),
 }
 
 /// Chrome release channel to use when launching.
@@ -503,6 +516,43 @@ pub struct JsExecArgs {
     /// Truncate results exceeding this size in bytes
     #[arg(long)]
     pub max_size: Option<usize>,
+}
+
+/// Arguments for the `dialog` subcommand group.
+#[derive(Args)]
+pub struct DialogArgs {
+    #[command(subcommand)]
+    pub command: DialogCommand,
+}
+
+/// Dialog subcommands.
+#[derive(Subcommand)]
+pub enum DialogCommand {
+    /// Accept or dismiss the current browser dialog
+    Handle(DialogHandleArgs),
+
+    /// Check whether a dialog is currently open
+    Info,
+}
+
+/// Arguments for `dialog handle`.
+#[derive(Args)]
+pub struct DialogHandleArgs {
+    /// Action to take on the dialog
+    pub action: DialogAction,
+
+    /// Text to provide for prompt dialogs (only used with accept action)
+    #[arg(long)]
+    pub text: Option<String>,
+}
+
+/// Action to take on a browser dialog.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum DialogAction {
+    /// Accept (OK) the dialog
+    Accept,
+    /// Dismiss (Cancel) the dialog
+    Dismiss,
 }
 
 /// Wait strategy for navigation commands.
