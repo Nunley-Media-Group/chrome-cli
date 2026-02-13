@@ -223,7 +223,7 @@ async fn execute_info(global: &GlobalOpts) -> Result<(), AppError> {
 
     let probe_timeout = Duration::from_millis(DIALOG_PROBE_TIMEOUT_MS);
     let dialog_open = match tokio::time::timeout(probe_timeout, probe).await {
-        Ok(Ok(_)) => false,     // evaluate succeeded → no dialog blocking
+        Ok(Ok(_)) => false,          // evaluate succeeded → no dialog blocking
         Ok(Err(_)) | Err(_) => true, // CDP error or timeout → dialog likely blocking
     };
 
@@ -262,18 +262,13 @@ async fn execute_info(global: &GlobalOpts) -> Result<(), AppError> {
 // =============================================================================
 
 /// Drain the dialog event channel and extract dialog metadata.
-fn drain_dialog_event(
-    mut rx: tokio::sync::mpsc::Receiver<CdpEvent>,
-) -> (String, String, String) {
+fn drain_dialog_event(mut rx: tokio::sync::mpsc::Receiver<CdpEvent>) -> (String, String, String) {
     if let Ok(event) = rx.try_recv() {
         let dialog_type = event.params["type"]
             .as_str()
             .unwrap_or("unknown")
             .to_string();
-        let message = event.params["message"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let message = event.params["message"].as_str().unwrap_or("").to_string();
         let default_prompt = event.params["defaultPrompt"]
             .as_str()
             .unwrap_or("")

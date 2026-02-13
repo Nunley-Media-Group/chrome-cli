@@ -1596,7 +1596,10 @@ fn dialog_exit_code_nonzero(world: &mut DialogWorld) {
 #[then(expr = "stderr should contain {string}")]
 fn dialog_stderr_contains(world: &mut DialogWorld, expected: String) {
     assert!(
-        world.stderr.to_lowercase().contains(&expected.to_lowercase()),
+        world
+            .stderr
+            .to_lowercase()
+            .contains(&expected.to_lowercase()),
         "stderr does not contain '{expected}'\nstderr: {}",
         world.stderr
     );
@@ -1663,9 +1666,7 @@ async fn main() {
     DialogWorld::cucumber()
         .filter_run_and_exit(
             "tests/features/dialog.feature",
-            |_feature, _rule, scenario| {
-                DIALOG_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
-            },
+            |_feature, _rule, scenario| DIALOG_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
         )
         .await;
 }
