@@ -1609,6 +1609,18 @@ fn dialog_stderr_contains(world: &mut DialogWorld, expected: String) {
 // Main — run all worlds
 // =============================================================================
 
+/// Interact BDD scenarios that can be tested without a running Chrome instance.
+/// These are pure CLI argument validation scenarios that fail before Chrome connection.
+const INTERACT_TESTABLE_SCENARIOS: &[&str] = &[
+    "Click requires a target argument",
+    "Click-at requires x and y arguments",
+    "Hover requires a target argument",
+    "Drag requires from and to arguments",
+    "Double and right flags are mutually exclusive",
+    "Interact help displays all subcommands",
+    "Click help displays all options",
+];
+
 /// Session BDD scenarios that can be tested without a running Chrome instance.
 const SESSION_TESTABLE_SCENARIOS: &[&str] = &[
     "Show connection status with no session",
@@ -1667,6 +1679,17 @@ async fn main() {
         .filter_run_and_exit(
             "tests/features/dialog.feature",
             |_feature, _rule, scenario| DIALOG_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
+        )
+        .await;
+
+    // Mouse interactions — only CLI argument validation scenarios can be tested without Chrome.
+    // All scenarios requiring actual element interaction need a running Chrome instance.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/interact.feature",
+            |_feature, _rule, scenario| {
+                INTERACT_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
         )
         .await;
 }

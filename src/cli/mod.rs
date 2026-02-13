@@ -151,7 +151,7 @@ pub enum Command {
             combinations, scroll the page, hover over elements, and perform drag-and-drop \
             operations."
     )]
-    Interact,
+    Interact(InteractArgs),
 
     /// Form input and submission
     #[command(
@@ -600,4 +600,93 @@ pub struct ConnectArgs {
     /// Additional arguments to pass to Chrome (can be repeated)
     #[arg(long, requires = "launch")]
     pub chrome_arg: Vec<String>,
+}
+
+/// Arguments for the `interact` subcommand group.
+#[derive(Args)]
+pub struct InteractArgs {
+    #[command(subcommand)]
+    pub command: InteractCommand,
+}
+
+/// Interact subcommands.
+#[derive(Subcommand)]
+pub enum InteractCommand {
+    /// Click an element by UID or CSS selector
+    Click(ClickArgs),
+
+    /// Click at viewport coordinates
+    ClickAt(ClickAtArgs),
+
+    /// Hover over an element
+    Hover(HoverArgs),
+
+    /// Drag from one element to another
+    Drag(DragArgs),
+}
+
+/// Arguments for `interact click`.
+#[derive(Args)]
+pub struct ClickArgs {
+    /// Target element (UID like 's1' or CSS selector like 'css:#button')
+    pub target: String,
+
+    /// Perform a double-click instead of single click
+    #[arg(long, conflicts_with = "right")]
+    pub double: bool,
+
+    /// Perform a right-click (context menu) instead of left click
+    #[arg(long, conflicts_with = "double")]
+    pub right: bool,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `interact click-at`.
+#[derive(Args)]
+pub struct ClickAtArgs {
+    /// X coordinate in viewport
+    pub x: f64,
+
+    /// Y coordinate in viewport
+    pub y: f64,
+
+    /// Perform a double-click instead of single click
+    #[arg(long, conflicts_with = "right")]
+    pub double: bool,
+
+    /// Perform a right-click (context menu) instead of left click
+    #[arg(long, conflicts_with = "double")]
+    pub right: bool,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `interact hover`.
+#[derive(Args)]
+pub struct HoverArgs {
+    /// Target element (UID like 's1' or CSS selector like 'css:#button')
+    pub target: String,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `interact drag`.
+#[derive(Args)]
+pub struct DragArgs {
+    /// Source element to drag from (UID or CSS selector)
+    pub from: String,
+
+    /// Target element to drag to (UID or CSS selector)
+    pub to: String,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
 }

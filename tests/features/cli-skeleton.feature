@@ -62,7 +62,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
       | dom        |
       | console    |
       | network    |
-      | interact   |
       | form       |
       | emulate    |
 
