@@ -169,7 +169,7 @@ pub enum Command {
         long_about = "Collect performance metrics, capture trace files, measure page load timing, \
             and analyze runtime performance. Outputs metrics as structured JSON for analysis."
     )]
-    Perf,
+    Perf(PerfArgs),
 }
 
 /// Chrome release channel to use when launching.
@@ -401,6 +401,66 @@ pub struct PageFindArgs {
     /// Maximum results to return
     #[arg(long, default_value_t = 10)]
     pub limit: usize,
+}
+
+/// Arguments for the `perf` subcommand group.
+#[derive(Args)]
+pub struct PerfArgs {
+    #[command(subcommand)]
+    pub command: PerfCommand,
+}
+
+/// Performance tracing subcommands.
+#[derive(Subcommand)]
+pub enum PerfCommand {
+    /// Start a performance trace recording
+    Start(PerfStartArgs),
+    /// Stop the active trace and collect data
+    Stop(PerfStopArgs),
+    /// Analyze a specific performance insight from a trace
+    Analyze(PerfAnalyzeArgs),
+    /// Quick Core Web Vitals measurement
+    Vitals(PerfVitalsArgs),
+}
+
+/// Arguments for `perf start`.
+#[derive(Args)]
+pub struct PerfStartArgs {
+    /// Reload the page before tracing
+    #[arg(long)]
+    pub reload: bool,
+    /// Automatically stop after page load completes
+    #[arg(long)]
+    pub auto_stop: bool,
+    /// Path to save the trace file (default: auto-generated)
+    #[arg(long)]
+    pub file: Option<PathBuf>,
+}
+
+/// Arguments for `perf stop`.
+#[derive(Args)]
+pub struct PerfStopArgs {
+    /// Override output file path for the trace
+    #[arg(long)]
+    pub file: Option<PathBuf>,
+}
+
+/// Arguments for `perf analyze`.
+#[derive(Args)]
+pub struct PerfAnalyzeArgs {
+    /// Insight name to analyze (e.g., LCPBreakdown, RenderBlocking)
+    pub insight: String,
+    /// Path to a previously saved trace file
+    #[arg(long)]
+    pub trace_file: PathBuf,
+}
+
+/// Arguments for `perf vitals`.
+#[derive(Args)]
+pub struct PerfVitalsArgs {
+    /// Path to save the trace file (default: auto-generated temp)
+    #[arg(long)]
+    pub file: Option<PathBuf>,
 }
 
 /// Wait strategy for navigation commands.

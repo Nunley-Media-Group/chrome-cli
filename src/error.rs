@@ -170,6 +170,49 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn no_active_trace() -> Self {
+        Self {
+            message: "No active trace. Run 'chrome-cli perf start' first.".into(),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn unknown_insight(name: &str) -> Self {
+        Self {
+            message: format!(
+                "Unknown insight: '{name}'. Available: DocumentLatency, LCPBreakdown, \
+                 RenderBlocking, LongTasks"
+            ),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn trace_file_not_found(path: &str) -> Self {
+        Self {
+            message: format!("Trace file not found: {path}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn trace_parse_failed(error: &str) -> Self {
+        Self {
+            message: format!("Failed to parse trace file: {error}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn trace_timeout(timeout_ms: u64) -> Self {
+        Self {
+            message: format!("Trace timed out after {timeout_ms}ms"),
+            code: ExitCode::TimeoutError,
+        }
+    }
+
+    #[must_use]
     pub fn no_chrome_found() -> Self {
         Self {
             message: "No Chrome instance found. Run 'chrome-cli connect' or \
@@ -351,5 +394,49 @@ mod tests {
         assert!(err.message.contains("X,Y,WIDTH,HEIGHT"));
         assert!(err.message.contains("abc"));
         assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn no_active_trace_error() {
+        let err = AppError::no_active_trace();
+        assert!(err.message.contains("No active trace"));
+        assert!(err.message.contains("perf start"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn unknown_insight_error() {
+        let err = AppError::unknown_insight("BadInsight");
+        assert!(err.message.contains("Unknown insight"));
+        assert!(err.message.contains("BadInsight"));
+        assert!(err.message.contains("DocumentLatency"));
+        assert!(err.message.contains("LCPBreakdown"));
+        assert!(err.message.contains("RenderBlocking"));
+        assert!(err.message.contains("LongTasks"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn trace_file_not_found_error() {
+        let err = AppError::trace_file_not_found("/tmp/missing.json");
+        assert!(err.message.contains("Trace file not found"));
+        assert!(err.message.contains("/tmp/missing.json"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn trace_parse_failed_error() {
+        let err = AppError::trace_parse_failed("unexpected EOF");
+        assert!(err.message.contains("Failed to parse trace file"));
+        assert!(err.message.contains("unexpected EOF"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn trace_timeout_error() {
+        let err = AppError::trace_timeout(30000);
+        assert!(err.message.contains("Trace timed out"));
+        assert!(err.message.contains("30000ms"));
+        assert!(matches!(err.code, ExitCode::TimeoutError));
     }
 }

@@ -66,7 +66,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
       | interact   |
       | form       |
       | emulate    |
-      | perf       |
 
   # --- Subcommand Help ---
 

@@ -1,6 +1,7 @@
 mod cli;
 mod navigate;
 mod page;
+mod perf;
 mod snapshot;
 mod tabs;
 
@@ -43,7 +44,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Interact => Err(AppError::not_implemented("interact")),
         Command::Form => Err(AppError::not_implemented("form")),
         Command::Emulate => Err(AppError::not_implemented("emulate")),
-        Command::Perf => Err(AppError::not_implemented("perf")),
+        Command::Perf(args) => perf::execute_perf(&cli.global, args).await,
     }
 }
 
