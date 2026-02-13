@@ -1,4 +1,5 @@
 mod cli;
+mod js;
 mod navigate;
 mod page;
 mod perf;
@@ -38,7 +39,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Navigate(args) => navigate::execute_navigate(&cli.global, args).await,
         Command::Page(args) => page::execute_page(&cli.global, args).await,
         Command::Dom => Err(AppError::not_implemented("dom")),
-        Command::Js => Err(AppError::not_implemented("js")),
+        Command::Js(args) => js::execute_js(&cli.global, args).await,
         Command::Console => Err(AppError::not_implemented("console")),
         Command::Network => Err(AppError::not_implemented("network")),
         Command::Interact => Err(AppError::not_implemented("interact")),

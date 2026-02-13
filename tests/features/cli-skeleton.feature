@@ -60,7 +60,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
     Examples:
       | subcommand |
       | dom        |
-      | js         |
       | console    |
       | network    |
       | interact   |
@@ -107,6 +106,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
 
   Scenario: Tab ID option is accepted
     Given chrome-cli is built
-    When I run "chrome-cli --tab abc123 js"
+    When I run "chrome-cli --tab abc123 js exec --file /nonexistent/file.js"
     Then the exit code should be 1
-    And stderr should contain "not yet implemented"
+    And stderr should contain "Script file not found"

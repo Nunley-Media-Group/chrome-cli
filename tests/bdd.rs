@@ -1451,6 +1451,96 @@ fn session_stderr_about_session(world: &mut SessionWorld) {
 }
 
 // =============================================================================
+// JsWorld — JavaScript execution BDD tests (CLI-testable scenarios)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct JsWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+// Background step — for CLI-testable scenarios, we don't need a running Chrome.
+// The binary will fail at connection time for scenarios that need Chrome,
+// but error-path scenarios fail before connection is attempted.
+#[given("Chrome is running with CDP enabled")]
+fn js_chrome_running(world: &mut JsWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[given(expr = "a page is loaded at {string}")]
+fn js_page_loaded(_world: &mut JsWorld, url: String) {
+    // No-op for CLI-testable error scenarios — the page doesn't matter
+    // since these scenarios fail before Chrome connection.
+    let _ = url;
+}
+
+#[when(expr = "I run {string}")]
+fn js_run_command(world: &mut JsWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given chrome-cli is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "chrome-cli") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[then("the exit code is non-zero")]
+fn js_exit_code_nonzero(world: &mut JsWorld) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_ne!(
+        actual, 0,
+        "Expected non-zero exit code, got 0\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stderr contains a JSON error about file not found")]
+fn js_stderr_file_not_found(world: &mut JsWorld) {
+    let trimmed = world.stderr.trim();
+    assert!(
+        trimmed.contains("Script file not found"),
+        "stderr should mention file not found\nstderr: {trimmed}"
+    );
+}
+
+#[then(expr = "stderr contains a JSON error about UID not found")]
+fn js_stderr_uid_not_found(world: &mut JsWorld) {
+    let trimmed = world.stderr.trim();
+    assert!(
+        trimmed.contains("not found"),
+        "stderr should mention UID not found\nstderr: {trimmed}"
+    );
+}
+
+#[then(expr = "stderr contains a JSON error about no code provided")]
+fn js_stderr_no_code(world: &mut JsWorld) {
+    let trimmed = world.stderr.trim();
+    assert!(
+        trimmed.contains("No JavaScript code provided"),
+        "stderr should mention no code provided\nstderr: {trimmed}"
+    );
+}
+
+// =============================================================================
 // Main — run all worlds
 // =============================================================================
 
@@ -1462,6 +1552,9 @@ const SESSION_TESTABLE_SCENARIOS: &[&str] = &[
     "Disconnect with no session is idempotent",
     "Corrupted session file handled gracefully",
 ];
+
+/// JS execution BDD scenarios that can be tested without a running Chrome instance.
+const JS_TESTABLE_SCENARIOS: &[&str] = &["File not found error"];
 
 #[tokio::main]
 async fn main() {
@@ -1486,6 +1579,15 @@ async fn main() {
             |_feature, _rule, scenario| {
                 SESSION_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
+        )
+        .await;
+
+    // TODO: Most js-execution.feature scenarios require a running Chrome instance.
+    // Only the file-not-found error scenario can be tested without Chrome.
+    JsWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/js-execution.feature",
+            |_feature, _rule, scenario| JS_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
         )
         .await;
 }

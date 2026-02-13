@@ -213,6 +213,40 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn js_execution_failed(description: &str) -> Self {
+        Self {
+            message: format!("JavaScript execution failed: {description}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn script_file_not_found(path: &str) -> Self {
+        Self {
+            message: format!("Script file not found: {path}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn script_file_read_failed(path: &str, error: &str) -> Self {
+        Self {
+            message: format!("Failed to read script file: {path}: {error}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn no_js_code() -> Self {
+        Self {
+            message:
+                "No JavaScript code provided. Specify code as argument, --file, or pipe via stdin."
+                    .into(),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
     pub fn no_chrome_found() -> Self {
         Self {
             message: "No Chrome instance found. Run 'chrome-cli connect' or \
@@ -438,5 +472,39 @@ mod tests {
         assert!(err.message.contains("Trace timed out"));
         assert!(err.message.contains("30000ms"));
         assert!(matches!(err.code, ExitCode::TimeoutError));
+    }
+
+    #[test]
+    fn js_execution_failed_error() {
+        let err = AppError::js_execution_failed("ReferenceError: foo is not defined");
+        assert!(err.message.contains("JavaScript execution failed"));
+        assert!(err.message.contains("ReferenceError: foo is not defined"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn script_file_not_found_error() {
+        let err = AppError::script_file_not_found("/tmp/missing.js");
+        assert!(err.message.contains("Script file not found"));
+        assert!(err.message.contains("/tmp/missing.js"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn script_file_read_failed_error() {
+        let err = AppError::script_file_read_failed("/tmp/bad.js", "permission denied");
+        assert!(err.message.contains("Failed to read script file"));
+        assert!(err.message.contains("/tmp/bad.js"));
+        assert!(err.message.contains("permission denied"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn no_js_code_error() {
+        let err = AppError::no_js_code();
+        assert!(err.message.contains("No JavaScript code provided"));
+        assert!(err.message.contains("--file"));
+        assert!(err.message.contains("stdin"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
     }
 }

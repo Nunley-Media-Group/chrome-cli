@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -124,7 +124,7 @@ pub enum Command {
             the result as structured JSON. Supports both synchronous expressions and async \
             functions."
     )]
-    Js,
+    Js(JsArgs),
 
     /// Console message reading and monitoring
     #[command(
@@ -461,6 +461,48 @@ pub struct PerfVitalsArgs {
     /// Path to save the trace file (default: auto-generated temp)
     #[arg(long)]
     pub file: Option<PathBuf>,
+}
+
+/// Arguments for the `js` subcommand group.
+#[derive(Args)]
+pub struct JsArgs {
+    #[command(subcommand)]
+    pub command: JsCommand,
+}
+
+/// JavaScript subcommands.
+#[derive(Subcommand)]
+pub enum JsCommand {
+    /// Execute JavaScript in the page context
+    Exec(JsExecArgs),
+}
+
+/// Arguments for `js exec`.
+#[derive(Args)]
+pub struct JsExecArgs {
+    /// JavaScript code to execute (use '-' to read from stdin)
+    #[arg(conflicts_with = "file")]
+    pub code: Option<String>,
+
+    /// Read JavaScript from a file
+    #[arg(long)]
+    pub file: Option<PathBuf>,
+
+    /// Element UID from snapshot; function receives element as first argument
+    #[arg(long)]
+    pub uid: Option<String>,
+
+    /// Do not await promise results
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub no_await: bool,
+
+    /// Execution timeout override in milliseconds
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
+    /// Truncate results exceeding this size in bytes
+    #[arg(long)]
+    pub max_size: Option<usize>,
 }
 
 /// Wait strategy for navigation commands.
