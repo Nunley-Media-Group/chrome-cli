@@ -8,7 +8,8 @@ use chrome_cli::connection::{ManagedSession, resolve_connection, resolve_target}
 use chrome_cli::error::{AppError, ExitCode};
 
 use crate::cli::{
-    FormArgs, FormClearArgs, FormCommand, FormFillArgs, FormFillManyArgs, GlobalOpts,
+    FormArgs, FormClearArgs, FormCommand, FormFillArgs, FormFillManyArgs, FormUploadArgs,
+    GlobalOpts,
 };
 use crate::snapshot;
 
@@ -37,6 +38,15 @@ enum FillManyOutput {
 #[derive(Serialize)]
 struct ClearResult {
     cleared: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct UploadResult {
+    uploaded: String,
+    files: Vec<String>,
+    size: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     snapshot: Option<serde_json::Value>,
 }
@@ -78,6 +88,11 @@ fn print_fill_many_plain(results: &[FillResult]) {
 
 fn print_clear_plain(result: &ClearResult) {
     println!("Cleared {}", result.cleared);
+}
+
+fn print_upload_plain(result: &UploadResult) {
+    let file_list = result.files.join(", ");
+    println!("Uploaded {} ({} bytes): {}", result.uploaded, result.size, file_list);
 }
 
 // =============================================================================
@@ -497,6 +512,138 @@ async fn execute_clear(global: &GlobalOpts, args: &FormClearArgs) -> Result<(), 
 }
 
 // =============================================================================
+// File upload constants
+// =============================================================================
+
+/// JavaScript function to check if an element is a file input.
+const IS_FILE_INPUT_JS: &str = r"
+function() {
+    return this.tagName === 'INPUT' && this.type === 'file';
+}
+";
+
+/// JavaScript function to dispatch a change event on a file input.
+const DISPATCH_CHANGE_JS: &str = r"
+function() {
+    this.dispatchEvent(new Event('change', { bubbles: true }));
+}
+";
+
+/// Size threshold in bytes above which a warning is emitted (100 MB).
+const LARGE_FILE_THRESHOLD: u64 = 100 * 1024 * 1024;
+
+// =============================================================================
+// File upload implementation
+// =============================================================================
+
+/// Execute the `form upload` command.
+async fn execute_upload(global: &GlobalOpts, args: &FormUploadArgs) -> Result<(), AppError> {
+    // --- Validate files before connecting to Chrome ---
+    let mut total_size: u64 = 0;
+    let mut resolved_paths: Vec<String> = Vec::with_capacity(args.files.len());
+
+    for path in &args.files {
+        if !path.exists() {
+            return Err(AppError::file_not_found(&path.display().to_string()));
+        }
+        if !path.is_file() {
+            return Err(AppError::file_not_found(&path.display().to_string()));
+        }
+        let metadata = std::fs::metadata(path).map_err(|_| {
+            AppError::file_not_readable(&path.display().to_string())
+        })?;
+        let file_size = metadata.len();
+        if file_size > LARGE_FILE_THRESHOLD {
+            eprintln!(
+                "warning: file is large ({} bytes): {}",
+                file_size,
+                path.display()
+            );
+        }
+        total_size += file_size;
+
+        // Canonicalize the path for CDP
+        let canonical = path.canonicalize().map_err(|_| {
+            AppError::file_not_readable(&path.display().to_string())
+        })?;
+        resolved_paths.push(canonical.to_string_lossy().to_string());
+    }
+
+    // --- Setup CDP session ---
+    let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
+
+    managed.ensure_domain("DOM").await?;
+    managed.ensure_domain("Runtime").await?;
+
+    // --- Resolve target to backend node ID and object ID ---
+    let backend_node_id = resolve_target_to_backend_node_id(&mut managed, &args.target).await?;
+    let object_id = resolve_to_object_id(&mut managed, &args.target).await?;
+
+    // --- Validate element is a file input ---
+    let check_params = serde_json::json!({
+        "objectId": object_id,
+        "functionDeclaration": IS_FILE_INPUT_JS,
+        "returnByValue": true,
+    });
+    let check_response = managed
+        .send_command("Runtime.callFunctionOn", Some(check_params))
+        .await
+        .map_err(|e| AppError::interaction_failed("validate_file_input", &e.to_string()))?;
+
+    let is_file_input = check_response["result"]["value"].as_bool().unwrap_or(false);
+    if !is_file_input {
+        return Err(AppError::not_file_input(&args.target));
+    }
+
+    // --- Call DOM.setFileInputFiles ---
+    let set_files_params = serde_json::json!({
+        "files": resolved_paths,
+        "backendNodeId": backend_node_id,
+    });
+    managed
+        .send_command("DOM.setFileInputFiles", Some(set_files_params))
+        .await
+        .map_err(|e| AppError::interaction_failed("setFileInputFiles", &e.to_string()))?;
+
+    // --- Dispatch change event ---
+    let change_params = serde_json::json!({
+        "objectId": object_id,
+        "functionDeclaration": DISPATCH_CHANGE_JS,
+        "arguments": [],
+    });
+    managed
+        .send_command("Runtime.callFunctionOn", Some(change_params))
+        .await
+        .map_err(|e| AppError::interaction_failed("dispatch_change", &e.to_string()))?;
+
+    // --- Optionally take snapshot ---
+    let snapshot = if args.include_snapshot {
+        let url = get_current_url(&mut managed).await?;
+        Some(take_snapshot(&mut managed, &url).await?)
+    } else {
+        None
+    };
+
+    // --- Build and print result ---
+    let result = UploadResult {
+        uploaded: args.target.clone(),
+        files: resolved_paths,
+        size: total_size,
+        snapshot,
+    };
+
+    if global.output.plain {
+        print_upload_plain(&result);
+        Ok(())
+    } else {
+        print_output(&result, &global.output)
+    }
+}
+
+// =============================================================================
 // File reading helper
 // =============================================================================
 
@@ -521,6 +668,7 @@ pub async fn execute_form(global: &GlobalOpts, args: &FormArgs) -> Result<(), Ap
         FormCommand::Fill(fill_args) => execute_fill(global, fill_args).await,
         FormCommand::FillMany(fill_many_args) => execute_fill_many(global, fill_many_args).await,
         FormCommand::Clear(clear_args) => execute_clear(global, clear_args).await,
+        FormCommand::Upload(upload_args) => execute_upload(global, upload_args).await,
     }
 }
 
@@ -732,5 +880,82 @@ mod tests {
         };
         // Would print "Cleared s1"
         print_clear_plain(&result);
+    }
+
+    // =========================================================================
+    // UploadResult serialization tests
+    // =========================================================================
+
+    #[test]
+    fn upload_result_serialization() {
+        let result = UploadResult {
+            uploaded: "s5".to_string(),
+            files: vec!["/tmp/photo.jpg".to_string()],
+            size: 24576,
+            snapshot: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["uploaded"], "s5");
+        assert_eq!(json["files"].as_array().unwrap().len(), 1);
+        assert_eq!(json["files"][0], "/tmp/photo.jpg");
+        assert_eq!(json["size"], 24576);
+        assert!(json.get("snapshot").is_none());
+    }
+
+    #[test]
+    fn upload_result_serialization_with_snapshot() {
+        let result = UploadResult {
+            uploaded: "s5".to_string(),
+            files: vec!["/tmp/photo.jpg".to_string()],
+            size: 24576,
+            snapshot: Some(serde_json::json!({"role": "document"})),
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["uploaded"], "s5");
+        assert_eq!(json["size"], 24576);
+        assert!(json.get("snapshot").is_some());
+    }
+
+    #[test]
+    fn upload_result_multiple_files() {
+        let result = UploadResult {
+            uploaded: "s3".to_string(),
+            files: vec![
+                "/tmp/doc1.pdf".to_string(),
+                "/tmp/doc2.pdf".to_string(),
+            ],
+            size: 102400,
+            snapshot: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["uploaded"], "s3");
+        assert_eq!(json["files"].as_array().unwrap().len(), 2);
+        assert_eq!(json["files"][0], "/tmp/doc1.pdf");
+        assert_eq!(json["files"][1], "/tmp/doc2.pdf");
+        assert_eq!(json["size"], 102400);
+    }
+
+    #[test]
+    fn upload_result_css_selector_target() {
+        let result = UploadResult {
+            uploaded: "css:#file-upload".to_string(),
+            files: vec!["/tmp/document.pdf".to_string()],
+            size: 51200,
+            snapshot: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["uploaded"], "css:#file-upload");
+    }
+
+    #[test]
+    fn upload_plain_output_format() {
+        let result = UploadResult {
+            uploaded: "s5".to_string(),
+            files: vec!["/tmp/photo.jpg".to_string()],
+            size: 24576,
+            snapshot: None,
+        };
+        // Would print "Uploaded s5 (24576 bytes): /tmp/photo.jpg"
+        print_upload_plain(&result);
     }
 }

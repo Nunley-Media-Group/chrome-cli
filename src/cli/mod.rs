@@ -805,6 +805,9 @@ pub enum FormCommand {
 
     /// Clear a form field's value
     Clear(FormClearArgs),
+
+    /// Upload files to a file input element
+    Upload(FormUploadArgs),
 }
 
 /// Arguments for `form fill`.
@@ -841,6 +844,21 @@ pub struct FormFillManyArgs {
 pub struct FormClearArgs {
     /// Target element (UID like 's1' or CSS selector like 'css:#email')
     pub target: String,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `form upload`.
+#[derive(Args)]
+pub struct FormUploadArgs {
+    /// Target file input element (UID like 's5' or CSS selector like 'css:#file-input')
+    pub target: String,
+
+    /// File paths to upload
+    #[arg(required = true)]
+    pub files: Vec<PathBuf>,
 
     /// Include updated accessibility snapshot in output
     #[arg(long)]
