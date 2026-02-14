@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(
@@ -201,6 +202,19 @@ pub enum Command {
             $CHROME_CLI_CONFIG env var, project-local, XDG config dir, home directory."
     )]
     Config(ConfigArgs),
+
+    /// Generate shell completion scripts
+    #[command(
+        long_about = "Generate shell completion scripts for tab-completion of commands, flags, \
+            and enum values.\n\n\
+            INSTALLATION:\n  \
+            bash:       chrome-cli completions bash > /etc/bash_completion.d/chrome-cli\n  \
+            zsh:        chrome-cli completions zsh > ~/.zfunc/_chrome-cli\n  \
+            fish:       chrome-cli completions fish > ~/.config/fish/completions/chrome-cli.fish\n  \
+            powershell: chrome-cli completions powershell >> $PROFILE\n  \
+            elvish:     chrome-cli completions elvish >> ~/.elvish/rc.elv"
+    )]
+    Completions(CompletionsArgs),
 }
 
 /// Chrome release channel to use when launching.
@@ -1161,4 +1175,11 @@ pub struct ConfigInitArgs {
     /// Create config file at a custom path instead of the default XDG location
     #[arg(long)]
     pub path: Option<PathBuf>,
+}
+
+/// Arguments for the `completions` subcommand.
+#[derive(Args)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for
+    pub shell: Shell,
 }

@@ -27,6 +27,7 @@ Feature: CLI skeleton with clap derive macros and top-level help
     And stdout should contain "form"
     And stdout should contain "emulate"
     And stdout should contain "perf"
+    And stdout should contain "completions"
 
   Scenario: Version flag displays version information
     Given chrome-cli is built

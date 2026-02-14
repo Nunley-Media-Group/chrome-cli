@@ -14,7 +14,7 @@ mod tabs;
 
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use serde::Serialize;
 
 use chrome_cli::chrome::{
@@ -26,7 +26,7 @@ use chrome_cli::connection::{self, extract_port_from_ws_url};
 use chrome_cli::error::{AppError, ExitCode};
 use chrome_cli::session::{self, SessionData};
 
-use cli::{ChromeChannel, Cli, Command, ConfigCommand, ConnectArgs, GlobalOpts};
+use cli::{ChromeChannel, Cli, Command, CompletionsArgs, ConfigCommand, ConnectArgs, GlobalOpts};
 
 #[tokio::main]
 async fn main() {
@@ -62,6 +62,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Emulate(args) => emulate::execute_emulate(&global, args).await,
         Command::Perf(args) => perf::execute_perf(&global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
+        Command::Completions(args) => execute_completions(args),
     }
 }
 
@@ -175,6 +176,13 @@ fn execute_config(cmd: &ConfigCommand, resolved: &config::ResolvedConfig) -> Res
             Ok(())
         }
     }
+}
+
+#[allow(clippy::unnecessary_wraps)]
+fn execute_completions(args: &CompletionsArgs) -> Result<(), AppError> {
+    let mut cmd = Cli::command();
+    clap_complete::generate(args.shell, &mut cmd, "chrome-cli", &mut std::io::stdout());
+    Ok(())
 }
 
 #[derive(Serialize)]
