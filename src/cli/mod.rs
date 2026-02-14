@@ -140,10 +140,10 @@ pub enum Command {
     /// Network request monitoring and interception
     #[command(
         long_about = "Monitor and intercept network requests. List recent requests, filter by \
-            URL pattern or resource type, capture request/response bodies, and set up request \
-            interception rules."
+            URL pattern or resource type, capture request/response bodies, and stream requests \
+            in real time."
     )]
-    Network,
+    Network(NetworkArgs),
 
     /// Mouse, keyboard, and scroll interactions
     #[command(
@@ -902,4 +902,95 @@ pub struct ConsoleFollowArgs {
     /// Auto-exit after the specified number of milliseconds
     #[arg(long)]
     pub timeout: Option<u64>,
+}
+
+/// Arguments for the `network` subcommand group.
+#[derive(Args)]
+pub struct NetworkArgs {
+    #[command(subcommand)]
+    pub command: NetworkCommand,
+}
+
+/// Network subcommands.
+#[derive(Subcommand)]
+pub enum NetworkCommand {
+    /// List network requests or get details of a specific request
+    List(NetworkListArgs),
+
+    /// Get detailed information about a specific network request
+    Get(NetworkGetArgs),
+
+    /// Stream network requests in real-time (tail -f style)
+    Follow(NetworkFollowArgs),
+}
+
+/// Arguments for `network list`.
+#[derive(Args)]
+pub struct NetworkListArgs {
+    /// Filter by resource type (comma-separated: document,stylesheet,image,media,font,script,xhr,fetch,websocket,manifest,other)
+    #[arg(long, value_name = "TYPES")]
+    pub r#type: Option<String>,
+
+    /// Filter by URL pattern (substring match)
+    #[arg(long)]
+    pub url: Option<String>,
+
+    /// Filter by HTTP status code (exact like 404 or wildcard like 4xx)
+    #[arg(long)]
+    pub status: Option<String>,
+
+    /// Filter by HTTP method (GET, POST, etc.)
+    #[arg(long)]
+    pub method: Option<String>,
+
+    /// Maximum number of requests to return
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+
+    /// Pagination page number (0-based)
+    #[arg(long, default_value_t = 0)]
+    pub page: usize,
+
+    /// Include requests from previous navigations
+    #[arg(long)]
+    pub include_preserved: bool,
+}
+
+/// Arguments for `network get`.
+#[derive(Args)]
+pub struct NetworkGetArgs {
+    /// Numeric request ID to inspect
+    pub req_id: u64,
+
+    /// Save request body to a file
+    #[arg(long)]
+    pub save_request: Option<PathBuf>,
+
+    /// Save response body to a file
+    #[arg(long)]
+    pub save_response: Option<PathBuf>,
+}
+
+/// Arguments for `network follow`.
+#[derive(Args)]
+pub struct NetworkFollowArgs {
+    /// Filter by resource type (comma-separated: document,stylesheet,image,media,font,script,xhr,fetch,websocket,manifest,other)
+    #[arg(long, value_name = "TYPES")]
+    pub r#type: Option<String>,
+
+    /// Filter by URL pattern (substring match)
+    #[arg(long)]
+    pub url: Option<String>,
+
+    /// Filter by HTTP method (GET, POST, etc.)
+    #[arg(long)]
+    pub method: Option<String>,
+
+    /// Auto-exit after the specified number of milliseconds
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
+    /// Include request and response headers in stream output
+    #[arg(long)]
+    pub verbose: bool,
 }
