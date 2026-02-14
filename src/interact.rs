@@ -970,6 +970,9 @@ async fn take_snapshot(
 /// Execute the `interact click` command.
 async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("DOM").await?;
@@ -979,7 +982,7 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
     let (x, y) = resolve_target_coords(&mut managed, &args.target).await?;
 
     // Subscribe to navigation events
-    let _nav_rx = managed.subscribe("Page.frameNavigated").await?;
+    let mut nav_rx = managed.subscribe("Page.frameNavigated").await?;
 
     // Determine button and click count
     let button = if args.right { "right" } else { "left" };
@@ -990,6 +993,9 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
 
     // Brief wait for potential navigation (100ms)
     tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Check if navigation happened during the wait
+    let navigated = nav_rx.try_recv().is_ok();
 
     // Get current URL
     let url_response = managed
@@ -1002,9 +1008,6 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
         .as_str()
         .unwrap_or("")
         .to_string();
-
-    // For now, we'll set navigated to false (navigation detection can be enhanced later)
-    let navigated = false;
 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
@@ -1034,6 +1037,9 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
 /// Execute the `interact click-at` command.
 async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Determine button and click count
     let button = if args.right { "right" } else { "left" };
@@ -1083,6 +1089,9 @@ async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(),
 /// Execute the `interact hover` command.
 async fn execute_hover(global: &GlobalOpts, args: &HoverArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable DOM domain
     managed.ensure_domain("DOM").await?;
@@ -1129,6 +1138,9 @@ async fn execute_hover(global: &GlobalOpts, args: &HoverArgs) -> Result<(), AppE
 /// Execute the `interact drag` command.
 async fn execute_drag(global: &GlobalOpts, args: &DragArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable DOM domain
     managed.ensure_domain("DOM").await?;
@@ -1183,6 +1195,9 @@ async fn execute_drag(global: &GlobalOpts, args: &DragArgs) -> Result<(), AppErr
 /// Execute the `interact type` command.
 async fn execute_type(global: &GlobalOpts, args: &TypeArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     let text = &args.text;
     let length = text.chars().count();
@@ -1234,6 +1249,9 @@ async fn execute_key(global: &GlobalOpts, args: &KeyArgs) -> Result<(), AppError
     let parsed = parse_key_combination(&args.keys)?;
 
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Press the key combination (possibly repeated)
     for _ in 0..args.repeat {

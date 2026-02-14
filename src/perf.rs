@@ -168,6 +168,9 @@ fn resolve_trace_path(file: Option<&PathBuf>) -> PathBuf {
 async fn execute_start(global: &GlobalOpts, args: &PerfStartArgs) -> Result<(), AppError> {
     let trace_path = resolve_trace_path(args.file.as_ref());
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     if args.reload || args.auto_stop {
@@ -719,6 +722,9 @@ fn analyze_long_tasks(events: &[TraceEvent]) -> serde_json::Value {
 async fn execute_vitals(global: &GlobalOpts, args: &PerfVitalsArgs) -> Result<(), AppError> {
     let trace_path = resolve_trace_path(args.file.as_ref());
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("Page").await?;

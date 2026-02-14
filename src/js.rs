@@ -243,6 +243,9 @@ fn extract_console_entries(events: &[serde_json::Value]) -> Vec<ConsoleEntry> {
 async fn execute_exec(global: &GlobalOpts, args: &JsExecArgs) -> Result<(), AppError> {
     let code = resolve_code(args)?;
     let (_client, mut managed) = setup_session(global, args).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable Runtime domain
     managed.ensure_domain("Runtime").await?;
