@@ -1,8 +1,8 @@
 {
-  "currentStep": 5,
+  "currentStep": 7,
   "currentIssue": 25,
   "currentBranch": "25-shell-completions-generation",
   "featureName": "25-shell-completions-generation",
-  "lastTransitionAt": "2026-02-14T13:49:54Z",
+  "lastTransitionAt": "2026-02-14T13:57:48Z",
   "retries": {}
 }
