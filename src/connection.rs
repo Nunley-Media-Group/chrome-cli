@@ -227,6 +227,39 @@ impl ManagedSession {
     pub fn enabled_domains(&self) -> &HashSet<String> {
         &self.enabled_domains
     }
+
+    /// Spawn a background task that automatically dismisses JavaScript dialogs.
+    ///
+    /// Enables the Page domain if not already enabled, subscribes to dialog
+    /// events, and dismisses each dialog as it appears. Returns a `JoinHandle`
+    /// whose `abort()` method can be called to stop the task (or it stops
+    /// naturally when the session is dropped).
+    ///
+    /// # Errors
+    ///
+    /// Returns `CdpError` if the Page domain cannot be enabled or
+    /// the event subscription fails.
+    pub async fn spawn_auto_dismiss(
+        &mut self,
+    ) -> Result<tokio::task::JoinHandle<()>, CdpError> {
+        self.ensure_domain("Page").await?;
+
+        let mut dialog_rx = self
+            .session
+            .subscribe("Page.javascriptDialogOpening")
+            .await?;
+        let session = self.session.clone();
+
+        Ok(tokio::spawn(async move {
+            while let Some(_event) = dialog_rx.recv().await {
+                let params = serde_json::json!({ "accept": false });
+                // Best-effort dismiss; ignore errors (session may have closed).
+                let _ = session
+                    .send_command("Page.handleJavaScriptDialog", Some(params))
+                    .await;
+            }
+        }))
+    }
 }
 
 #[cfg(test)]

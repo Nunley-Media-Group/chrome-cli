@@ -156,7 +156,7 @@ impl CdpClient {
 ///
 /// Sessions share the parent client's WebSocket connection but route
 /// commands and events through a `sessionId`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CdpSession {
     session_id: String,
     handle: TransportHandle,

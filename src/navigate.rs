@@ -110,6 +110,9 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
 
     let timeout_ms = args.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS);
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("Page").await?;
@@ -195,6 +198,9 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
 
 async fn execute_back(global: &GlobalOpts) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     managed.ensure_domain("Page").await?;
 
@@ -251,6 +257,9 @@ async fn execute_back(global: &GlobalOpts) -> Result<(), AppError> {
 
 async fn execute_forward(global: &GlobalOpts) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     managed.ensure_domain("Page").await?;
 
@@ -304,6 +313,9 @@ async fn execute_forward(global: &GlobalOpts) -> Result<(), AppError> {
 
 async fn execute_reload(global: &GlobalOpts, args: &NavigateReloadArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     managed.ensure_domain("Page").await?;
 

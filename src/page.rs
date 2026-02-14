@@ -166,6 +166,9 @@ fn escape_selector(selector: &str) -> String {
 
 async fn execute_text(global: &GlobalOpts, args: &PageTextArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable Runtime domain
     managed.ensure_domain("Runtime").await?;
@@ -230,6 +233,9 @@ async fn execute_text(global: &GlobalOpts, args: &PageTextArgs) -> Result<(), Ap
 
 async fn execute_snapshot(global: &GlobalOpts, args: &PageSnapshotArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("Accessibility").await?;
@@ -501,6 +507,9 @@ async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<(), Ap
     }
 
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("Accessibility").await?;
@@ -828,6 +837,9 @@ async fn execute_screenshot(
     }
 
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     managed.ensure_domain("Page").await?;
     managed.ensure_domain("Runtime").await?;

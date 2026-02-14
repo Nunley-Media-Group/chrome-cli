@@ -363,6 +363,9 @@ async fn get_current_url(session: &mut ManagedSession) -> Result<String, AppErro
 /// Execute the `form fill` command.
 async fn execute_fill(global: &GlobalOpts, args: &FormFillArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("DOM").await?;
@@ -413,6 +416,9 @@ async fn execute_fill_many(global: &GlobalOpts, args: &FormFillManyArgs) -> Resu
     })?;
 
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("DOM").await?;
@@ -458,6 +464,9 @@ async fn execute_fill_many(global: &GlobalOpts, args: &FormFillManyArgs) -> Resu
 /// Execute the `form clear` command.
 async fn execute_clear(global: &GlobalOpts, args: &FormClearArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
+    if global.auto_dismiss_dialogs {
+        let _dismiss = managed.spawn_auto_dismiss().await?;
+    }
 
     // Enable required domains
     managed.ensure_domain("DOM").await?;
