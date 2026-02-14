@@ -48,6 +48,8 @@ Feature: Mouse Interactions
     And stdout should contain "click-at"
     And stdout should contain "hover"
     And stdout should contain "drag"
+    And stdout should contain "type"
+    And stdout should contain "key"
 
   Scenario: Click help displays all options
     Given chrome-cli is built

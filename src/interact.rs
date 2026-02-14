@@ -8,6 +8,7 @@ use chrome_cli::error::AppError;
 
 use crate::cli::{
     ClickArgs, ClickAtArgs, DragArgs, GlobalOpts, HoverArgs, InteractArgs, InteractCommand,
+    KeyArgs, TypeArgs,
 };
 use crate::snapshot;
 
@@ -61,6 +62,23 @@ struct HoverResult {
 #[derive(Serialize)]
 struct DragResult {
     dragged: DragTargets,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct TypeResult {
+    typed: String,
+    length: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct KeyResult {
+    pressed: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repeat: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     snapshot: Option<serde_json::Value>,
 }
@@ -120,6 +138,14 @@ fn print_drag_plain(result: &DragResult) {
     println!("Dragged {} to {}", result.dragged.from, result.dragged.to);
 }
 
+fn print_type_plain(result: &TypeResult) {
+    println!("Typed {} characters", result.length);
+}
+
+fn print_key_plain(result: &KeyResult) {
+    println!("Pressed {}", result.pressed);
+}
+
 // =============================================================================
 // Config helper
 // =============================================================================
@@ -176,8 +202,7 @@ async fn resolve_target_to_backend_node_id(
 ) -> Result<i64, AppError> {
     if is_uid(target) {
         // Read snapshot state
-        let state = snapshot::read_snapshot_state()?
-            .ok_or_else(AppError::no_snapshot_state)?;
+        let state = snapshot::read_snapshot_state()?.ok_or_else(AppError::no_snapshot_state)?;
 
         // Lookup UID in the map
         let backend_node_id = state
@@ -391,11 +416,7 @@ async fn dispatch_click(
 }
 
 /// Dispatch a hover (mouse move) to the given coordinates.
-async fn dispatch_hover(
-    session: &mut ManagedSession,
-    x: f64,
-    y: f64,
-) -> Result<(), AppError> {
+async fn dispatch_hover(session: &mut ManagedSession, x: f64, y: f64) -> Result<(), AppError> {
     let params = serde_json::json!({
         "type": "mouseMoved",
         "x": x,
@@ -457,6 +478,451 @@ async fn dispatch_drag(
 }
 
 // =============================================================================
+// Keyboard key validation and mapping
+// =============================================================================
+
+/// Modifier key names.
+const MODIFIER_KEYS: &[&str] = &["Alt", "Control", "Meta", "Shift"];
+
+/// All valid key names (non-modifier).
+const VALID_KEYS: &[&str] = &[
+    // Letters
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z",
+    // Digits
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    // Function keys
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+    "F13",
+    "F14",
+    "F15",
+    "F16",
+    "F17",
+    "F18",
+    "F19",
+    "F20",
+    "F21",
+    "F22",
+    "F23",
+    "F24",
+    // Navigation
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    // Editing
+    "Backspace",
+    "Delete",
+    "Insert",
+    "Tab",
+    "Enter",
+    "Escape",
+    // Whitespace
+    "Space",
+    // Numpad
+    "Numpad0",
+    "Numpad1",
+    "Numpad2",
+    "Numpad3",
+    "Numpad4",
+    "Numpad5",
+    "Numpad6",
+    "Numpad7",
+    "Numpad8",
+    "Numpad9",
+    "NumpadAdd",
+    "NumpadSubtract",
+    "NumpadMultiply",
+    "NumpadDivide",
+    "NumpadDecimal",
+    "NumpadEnter",
+    // Media
+    "MediaPlayPause",
+    "MediaStop",
+    "MediaTrackNext",
+    "MediaTrackPrevious",
+    "AudioVolumeUp",
+    "AudioVolumeDown",
+    "AudioVolumeMute",
+    // Symbols
+    "Minus",
+    "Equal",
+    "BracketLeft",
+    "BracketRight",
+    "Backslash",
+    "Semicolon",
+    "Quote",
+    "Backquote",
+    "Comma",
+    "Period",
+    "Slash",
+    // Lock keys
+    "CapsLock",
+    "NumLock",
+    "ScrollLock",
+    // Other
+    "ContextMenu",
+    "PrintScreen",
+    "Pause",
+];
+
+/// Check if a key name is a modifier.
+fn is_modifier(key: &str) -> bool {
+    MODIFIER_KEYS.contains(&key)
+}
+
+/// Check if a key name is valid (either a modifier or a known key).
+fn is_valid_key(key: &str) -> bool {
+    is_modifier(key) || VALID_KEYS.contains(&key)
+}
+
+/// Parsed key combination.
+#[derive(Debug)]
+struct ParsedKey {
+    /// The modifier bitmask (1=Alt, 2=Control, 4=Meta, 8=Shift).
+    modifiers: u8,
+    /// The primary (non-modifier) key name.
+    key: String,
+}
+
+/// Parse a key combination string like "Control+A" or "Enter".
+///
+/// Validates all parts and checks for duplicate modifiers.
+fn parse_key_combination(input: &str) -> Result<ParsedKey, AppError> {
+    let parts: Vec<&str> = input.split('+').collect();
+    let mut modifiers: u8 = 0;
+    let mut seen_modifiers: Vec<&str> = Vec::new();
+    let mut primary_key: Option<&str> = None;
+
+    for part in &parts {
+        if !is_valid_key(part) {
+            return Err(AppError::invalid_key(part));
+        }
+
+        if is_modifier(part) {
+            if seen_modifiers.contains(part) {
+                return Err(AppError::duplicate_modifier(part));
+            }
+            seen_modifiers.push(part);
+            match *part {
+                "Alt" => modifiers |= 1,
+                "Control" => modifiers |= 2,
+                "Meta" => modifiers |= 4,
+                "Shift" => modifiers |= 8,
+                _ => {}
+            }
+        } else {
+            primary_key = Some(part);
+        }
+    }
+
+    // If there's no primary key and only modifiers, use the last modifier as the key
+    let key = match primary_key {
+        Some(k) => k.to_string(),
+        None => {
+            // All parts are modifiers — use the last one as primary
+            (*parts.last().unwrap_or(&"")).to_string()
+        }
+    };
+
+    Ok(ParsedKey { modifiers, key })
+}
+
+/// Get the CDP `key` value for a key name.
+fn cdp_key_value(key: &str) -> &str {
+    match key {
+        "Enter" => "\r",
+        "Tab" => "\t",
+        "Escape" => "Escape",
+        "Backspace" => "Backspace",
+        "Delete" => "Delete",
+        "Insert" => "Insert",
+        "Space" => " ",
+        "ArrowUp" => "ArrowUp",
+        "ArrowDown" => "ArrowDown",
+        "ArrowLeft" => "ArrowLeft",
+        "ArrowRight" => "ArrowRight",
+        "Home" => "Home",
+        "End" => "End",
+        "PageUp" => "PageUp",
+        "PageDown" => "PageDown",
+        "Alt" => "Alt",
+        "Control" => "Control",
+        "Meta" => "Meta",
+        "Shift" => "Shift",
+        "CapsLock" => "CapsLock",
+        "NumLock" => "NumLock",
+        "ScrollLock" => "ScrollLock",
+        "ContextMenu" => "ContextMenu",
+        "PrintScreen" => "PrintScreen",
+        "Pause" => "Pause",
+        _ if key.starts_with('F') && key.len() >= 2 => key,
+        _ if key.starts_with("Numpad") => key,
+        _ if key.starts_with("Media") || key.starts_with("Audio") => key,
+        // Single character keys
+        _ if key.len() == 1 => key,
+        // Symbol key names
+        "Minus" => "-",
+        "Equal" => "=",
+        "BracketLeft" => "[",
+        "BracketRight" => "]",
+        "Backslash" => "\\",
+        "Semicolon" => ";",
+        "Quote" => "'",
+        "Backquote" => "`",
+        "Comma" => ",",
+        "Period" => ".",
+        "Slash" => "/",
+        _ => key,
+    }
+}
+
+/// Get the CDP `code` value for a key name.
+fn cdp_key_code(key: &str) -> String {
+    match key {
+        // Letters
+        k if k.len() == 1 && k.chars().next().unwrap().is_ascii_alphabetic() => {
+            format!("Key{}", k.to_uppercase())
+        }
+        // Digits
+        k if k.len() == 1 && k.chars().next().unwrap().is_ascii_digit() => {
+            format!("Digit{k}")
+        }
+        "Enter" => "Enter".to_string(),
+        "Tab" => "Tab".to_string(),
+        "Escape" => "Escape".to_string(),
+        "Backspace" => "Backspace".to_string(),
+        "Delete" => "Delete".to_string(),
+        "Insert" => "Insert".to_string(),
+        "Space" => "Space".to_string(),
+        "ArrowUp" => "ArrowUp".to_string(),
+        "ArrowDown" => "ArrowDown".to_string(),
+        "ArrowLeft" => "ArrowLeft".to_string(),
+        "ArrowRight" => "ArrowRight".to_string(),
+        "Home" => "Home".to_string(),
+        "End" => "End".to_string(),
+        "PageUp" => "PageUp".to_string(),
+        "PageDown" => "PageDown".to_string(),
+        "Alt" => "AltLeft".to_string(),
+        "Control" => "ControlLeft".to_string(),
+        "Meta" => "MetaLeft".to_string(),
+        "Shift" => "ShiftLeft".to_string(),
+        "CapsLock" => "CapsLock".to_string(),
+        "NumLock" => "NumLock".to_string(),
+        "ScrollLock" => "ScrollLock".to_string(),
+        "ContextMenu" => "ContextMenu".to_string(),
+        "PrintScreen" => "PrintScreen".to_string(),
+        "Pause" => "Pause".to_string(),
+        "Minus" => "Minus".to_string(),
+        "Equal" => "Equal".to_string(),
+        "BracketLeft" => "BracketLeft".to_string(),
+        "BracketRight" => "BracketRight".to_string(),
+        "Backslash" => "Backslash".to_string(),
+        "Semicolon" => "Semicolon".to_string(),
+        "Quote" => "Quote".to_string(),
+        "Backquote" => "Backquote".to_string(),
+        "Comma" => "Comma".to_string(),
+        "Period" => "Period".to_string(),
+        "Slash" => "Slash".to_string(),
+        k if k.starts_with('F') => k.to_string(),
+        k if k.starts_with("Numpad") => k.to_string(),
+        k if k.starts_with("Media") || k.starts_with("Audio") => k.to_string(),
+        _ => key.to_string(),
+    }
+}
+
+// =============================================================================
+// Keyboard dispatch helpers
+// =============================================================================
+
+/// Dispatch a single key press (keyDown + keyUp) via CDP Input.dispatchKeyEvent.
+async fn dispatch_key_press(
+    session: &mut ManagedSession,
+    key: &str,
+    modifiers: u8,
+) -> Result<(), AppError> {
+    let key_value = cdp_key_value(key);
+    let code = cdp_key_code(key);
+
+    // keyDown
+    let down_params = serde_json::json!({
+        "type": "keyDown",
+        "key": key_value,
+        "code": code,
+        "modifiers": modifiers,
+    });
+    session
+        .send_command("Input.dispatchKeyEvent", Some(down_params))
+        .await
+        .map_err(|e| AppError::interaction_failed("key_down", &e.to_string()))?;
+
+    // keyUp
+    let up_params = serde_json::json!({
+        "type": "keyUp",
+        "key": key_value,
+        "code": code,
+        "modifiers": modifiers,
+    });
+    session
+        .send_command("Input.dispatchKeyEvent", Some(up_params))
+        .await
+        .map_err(|e| AppError::interaction_failed("key_up", &e.to_string()))?;
+
+    Ok(())
+}
+
+/// Dispatch typing a single character via CDP Input.dispatchKeyEvent.
+async fn dispatch_char(session: &mut ManagedSession, ch: char) -> Result<(), AppError> {
+    let text = ch.to_string();
+
+    let params = serde_json::json!({
+        "type": "char",
+        "text": text,
+    });
+    session
+        .send_command("Input.dispatchKeyEvent", Some(params))
+        .await
+        .map_err(|e| AppError::interaction_failed("char", &e.to_string()))?;
+
+    Ok(())
+}
+
+/// Send a single modifier key event (keyDown or keyUp).
+async fn dispatch_modifier_event(
+    session: &mut ManagedSession,
+    event_type: &str,
+    key: &str,
+    code: &str,
+    modifiers: u8,
+) -> Result<(), AppError> {
+    let params = serde_json::json!({
+        "type": event_type,
+        "key": key,
+        "code": code,
+        "modifiers": modifiers,
+    });
+    let action = if event_type == "keyDown" {
+        "modifier_down"
+    } else {
+        "modifier_up"
+    };
+    session
+        .send_command("Input.dispatchKeyEvent", Some(params))
+        .await
+        .map_err(|e| AppError::interaction_failed(action, &e.to_string()))?;
+    Ok(())
+}
+
+/// Modifier keys with their bitmask, CDP key name, and CDP code.
+const MODIFIER_MAP: &[(u8, &str, &str)] = &[
+    (1, "Alt", "AltLeft"),
+    (2, "Control", "ControlLeft"),
+    (4, "Meta", "MetaLeft"),
+    (8, "Shift", "ShiftLeft"),
+];
+
+/// Dispatch a key combination: press modifiers, press key, release key, release modifiers.
+async fn dispatch_key_combination(
+    session: &mut ManagedSession,
+    parsed: &ParsedKey,
+) -> Result<(), AppError> {
+    let modifiers = parsed.modifiers;
+
+    // Press modifier keys down
+    for &(bit, key, code) in MODIFIER_MAP {
+        if modifiers & bit != 0 {
+            dispatch_modifier_event(session, "keyDown", key, code, modifiers).await?;
+        }
+    }
+
+    // Press the primary key
+    dispatch_key_press(session, &parsed.key, modifiers).await?;
+
+    // Release modifier keys (reverse order)
+    for &(bit, key, code) in MODIFIER_MAP.iter().rev() {
+        if modifiers & bit != 0 {
+            dispatch_modifier_event(session, "keyUp", key, code, 0).await?;
+        }
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // Snapshot refresh helper
 // =============================================================================
 
@@ -491,9 +957,8 @@ async fn take_snapshot(
     snapshot::write_snapshot_state(&state)?;
 
     // Serialize root node as JSON
-    let snapshot_json = serde_json::to_value(&build_result.root).map_err(|e| {
-        AppError::snapshot_failed(&format!("failed to serialize snapshot: {e}"))
-    })?;
+    let snapshot_json = serde_json::to_value(&build_result.root)
+        .map_err(|e| AppError::snapshot_failed(&format!("failed to serialize snapshot: {e}")))?;
 
     Ok(snapshot_json)
 }
@@ -598,7 +1063,10 @@ async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(),
 
     // Build result
     let result = ClickAtResult {
-        clicked_at: Coords { x: args.x, y: args.y },
+        clicked_at: Coords {
+            x: args.x,
+            y: args.y,
+        },
         double_click: if args.double { Some(true) } else { None },
         right_click: if args.right { Some(true) } else { None },
         snapshot,
@@ -712,6 +1180,106 @@ async fn execute_drag(global: &GlobalOpts, args: &DragArgs) -> Result<(), AppErr
     }
 }
 
+/// Execute the `interact type` command.
+async fn execute_type(global: &GlobalOpts, args: &TypeArgs) -> Result<(), AppError> {
+    let (_client, mut managed) = setup_session(global).await?;
+
+    let text = &args.text;
+    let length = text.chars().count();
+
+    // Type each character
+    for ch in text.chars() {
+        dispatch_char(&mut managed, ch).await?;
+
+        if args.delay > 0 {
+            tokio::time::sleep(Duration::from_millis(args.delay)).await;
+        }
+    }
+
+    // Take snapshot if requested
+    let snapshot = if args.include_snapshot {
+        managed.ensure_domain("Runtime").await?;
+        let url_response = managed
+            .send_command(
+                "Runtime.evaluate",
+                Some(serde_json::json!({ "expression": "window.location.href" })),
+            )
+            .await?;
+        let url = url_response["result"]["value"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        Some(take_snapshot(&mut managed, &url).await?)
+    } else {
+        None
+    };
+
+    let result = TypeResult {
+        typed: text.clone(),
+        length,
+        snapshot,
+    };
+
+    if global.output.plain {
+        print_type_plain(&result);
+        Ok(())
+    } else {
+        print_output(&result, &global.output)
+    }
+}
+
+/// Execute the `interact key` command.
+async fn execute_key(global: &GlobalOpts, args: &KeyArgs) -> Result<(), AppError> {
+    // Validate the key combination before connecting to Chrome
+    let parsed = parse_key_combination(&args.keys)?;
+
+    let (_client, mut managed) = setup_session(global).await?;
+
+    // Press the key combination (possibly repeated)
+    for _ in 0..args.repeat {
+        if parsed.modifiers != 0 {
+            dispatch_key_combination(&mut managed, &parsed).await?;
+        } else {
+            dispatch_key_press(&mut managed, &parsed.key, 0).await?;
+        }
+    }
+
+    // Take snapshot if requested
+    let snapshot = if args.include_snapshot {
+        managed.ensure_domain("Runtime").await?;
+        let url_response = managed
+            .send_command(
+                "Runtime.evaluate",
+                Some(serde_json::json!({ "expression": "window.location.href" })),
+            )
+            .await?;
+        let url = url_response["result"]["value"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        Some(take_snapshot(&mut managed, &url).await?)
+    } else {
+        None
+    };
+
+    let result = KeyResult {
+        pressed: args.keys.clone(),
+        repeat: if args.repeat > 1 {
+            Some(args.repeat)
+        } else {
+            None
+        },
+        snapshot,
+    };
+
+    if global.output.plain {
+        print_key_plain(&result);
+        Ok(())
+    } else {
+        print_output(&result, &global.output)
+    }
+}
+
 // =============================================================================
 // Dispatcher
 // =============================================================================
@@ -727,6 +1295,8 @@ pub async fn execute_interact(global: &GlobalOpts, args: &InteractArgs) -> Resul
         InteractCommand::ClickAt(click_at_args) => execute_click_at(global, click_at_args).await,
         InteractCommand::Hover(hover_args) => execute_hover(global, hover_args).await,
         InteractCommand::Drag(drag_args) => execute_drag(global, drag_args).await,
+        InteractCommand::Type(type_args) => execute_type(global, type_args).await,
+        InteractCommand::Key(key_args) => execute_key(global, key_args).await,
     }
 }
 
@@ -855,5 +1425,302 @@ mod tests {
         assert_eq!(json["dragged"]["from"], "s1");
         assert_eq!(json["dragged"]["to"], "s2");
         assert!(json.get("snapshot").is_none());
+    }
+
+    // =========================================================================
+    // Key validation and parsing tests
+    // =========================================================================
+
+    #[test]
+    fn parse_single_key() {
+        let parsed = parse_key_combination("Enter").unwrap();
+        assert_eq!(parsed.modifiers, 0);
+        assert_eq!(parsed.key, "Enter");
+    }
+
+    #[test]
+    fn parse_modifier_plus_key() {
+        let parsed = parse_key_combination("Control+A").unwrap();
+        assert_eq!(parsed.modifiers, 2); // Control = bit 1 = 2
+        assert_eq!(parsed.key, "A");
+    }
+
+    #[test]
+    fn parse_multiple_modifiers() {
+        let parsed = parse_key_combination("Control+Shift+A").unwrap();
+        assert_eq!(parsed.modifiers, 10); // Control(2) + Shift(8) = 10
+        assert_eq!(parsed.key, "A");
+    }
+
+    #[test]
+    fn parse_all_modifiers() {
+        let parsed = parse_key_combination("Alt+Control+Meta+Shift+a").unwrap();
+        assert_eq!(parsed.modifiers, 15); // 1 + 2 + 4 + 8 = 15
+        assert_eq!(parsed.key, "a");
+    }
+
+    #[test]
+    fn parse_invalid_key_error() {
+        let err = parse_key_combination("FooBar").unwrap_err();
+        assert!(
+            err.message.contains("Invalid key: 'FooBar'"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn parse_duplicate_modifier_error() {
+        let err = parse_key_combination("Control+Control+A").unwrap_err();
+        assert!(
+            err.message.contains("Duplicate modifier: 'Control'"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn parse_single_letter_key() {
+        let parsed = parse_key_combination("a").unwrap();
+        assert_eq!(parsed.modifiers, 0);
+        assert_eq!(parsed.key, "a");
+    }
+
+    #[test]
+    fn parse_function_key() {
+        let parsed = parse_key_combination("F12").unwrap();
+        assert_eq!(parsed.modifiers, 0);
+        assert_eq!(parsed.key, "F12");
+    }
+
+    #[test]
+    fn parse_shift_plus_arrow() {
+        let parsed = parse_key_combination("Shift+ArrowDown").unwrap();
+        assert_eq!(parsed.modifiers, 8); // Shift = 8
+        assert_eq!(parsed.key, "ArrowDown");
+    }
+
+    #[test]
+    fn is_valid_key_modifiers() {
+        assert!(is_valid_key("Alt"));
+        assert!(is_valid_key("Control"));
+        assert!(is_valid_key("Meta"));
+        assert!(is_valid_key("Shift"));
+    }
+
+    #[test]
+    fn is_valid_key_common() {
+        assert!(is_valid_key("Enter"));
+        assert!(is_valid_key("Tab"));
+        assert!(is_valid_key("Space"));
+        assert!(is_valid_key("Backspace"));
+        assert!(is_valid_key("a"));
+        assert!(is_valid_key("Z"));
+        assert!(is_valid_key("0"));
+        assert!(is_valid_key("F1"));
+        assert!(is_valid_key("F24"));
+    }
+
+    #[test]
+    fn is_valid_key_invalid() {
+        assert!(!is_valid_key("FooBar"));
+        assert!(!is_valid_key(""));
+        assert!(!is_valid_key("enter")); // case-sensitive
+    }
+
+    #[test]
+    fn is_modifier_checks() {
+        assert!(is_modifier("Alt"));
+        assert!(is_modifier("Control"));
+        assert!(is_modifier("Meta"));
+        assert!(is_modifier("Shift"));
+        assert!(!is_modifier("Enter"));
+        assert!(!is_modifier("a"));
+    }
+
+    // =========================================================================
+    // CDP key mapping tests
+    // =========================================================================
+
+    #[test]
+    fn cdp_key_value_special_keys() {
+        assert_eq!(cdp_key_value("Enter"), "\r");
+        assert_eq!(cdp_key_value("Tab"), "\t");
+        assert_eq!(cdp_key_value("Space"), " ");
+        assert_eq!(cdp_key_value("Escape"), "Escape");
+        assert_eq!(cdp_key_value("Backspace"), "Backspace");
+        assert_eq!(cdp_key_value("Delete"), "Delete");
+    }
+
+    #[test]
+    fn cdp_key_value_single_chars() {
+        assert_eq!(cdp_key_value("a"), "a");
+        assert_eq!(cdp_key_value("Z"), "Z");
+        assert_eq!(cdp_key_value("5"), "5");
+    }
+
+    #[test]
+    fn cdp_key_value_symbols() {
+        assert_eq!(cdp_key_value("Minus"), "-");
+        assert_eq!(cdp_key_value("Equal"), "=");
+        assert_eq!(cdp_key_value("Comma"), ",");
+        assert_eq!(cdp_key_value("Period"), ".");
+        assert_eq!(cdp_key_value("Slash"), "/");
+        assert_eq!(cdp_key_value("Semicolon"), ";");
+        assert_eq!(cdp_key_value("Quote"), "'");
+        assert_eq!(cdp_key_value("Backquote"), "`");
+        assert_eq!(cdp_key_value("BracketLeft"), "[");
+        assert_eq!(cdp_key_value("BracketRight"), "]");
+        assert_eq!(cdp_key_value("Backslash"), "\\");
+    }
+
+    #[test]
+    fn cdp_key_value_modifiers() {
+        assert_eq!(cdp_key_value("Alt"), "Alt");
+        assert_eq!(cdp_key_value("Control"), "Control");
+        assert_eq!(cdp_key_value("Meta"), "Meta");
+        assert_eq!(cdp_key_value("Shift"), "Shift");
+    }
+
+    #[test]
+    fn cdp_key_value_function_keys() {
+        assert_eq!(cdp_key_value("F1"), "F1");
+        assert_eq!(cdp_key_value("F12"), "F12");
+        assert_eq!(cdp_key_value("F24"), "F24");
+    }
+
+    #[test]
+    fn cdp_key_value_navigation() {
+        assert_eq!(cdp_key_value("ArrowUp"), "ArrowUp");
+        assert_eq!(cdp_key_value("ArrowDown"), "ArrowDown");
+        assert_eq!(cdp_key_value("Home"), "Home");
+        assert_eq!(cdp_key_value("End"), "End");
+        assert_eq!(cdp_key_value("PageUp"), "PageUp");
+        assert_eq!(cdp_key_value("PageDown"), "PageDown");
+    }
+
+    #[test]
+    fn cdp_key_code_letters() {
+        assert_eq!(cdp_key_code("a"), "KeyA");
+        assert_eq!(cdp_key_code("z"), "KeyZ");
+        assert_eq!(cdp_key_code("A"), "KeyA");
+        assert_eq!(cdp_key_code("Z"), "KeyZ");
+    }
+
+    #[test]
+    fn cdp_key_code_digits() {
+        assert_eq!(cdp_key_code("0"), "Digit0");
+        assert_eq!(cdp_key_code("5"), "Digit5");
+        assert_eq!(cdp_key_code("9"), "Digit9");
+    }
+
+    #[test]
+    fn cdp_key_code_modifiers() {
+        assert_eq!(cdp_key_code("Alt"), "AltLeft");
+        assert_eq!(cdp_key_code("Control"), "ControlLeft");
+        assert_eq!(cdp_key_code("Meta"), "MetaLeft");
+        assert_eq!(cdp_key_code("Shift"), "ShiftLeft");
+    }
+
+    #[test]
+    fn cdp_key_code_special() {
+        assert_eq!(cdp_key_code("Enter"), "Enter");
+        assert_eq!(cdp_key_code("Tab"), "Tab");
+        assert_eq!(cdp_key_code("Space"), "Space");
+        assert_eq!(cdp_key_code("Backspace"), "Backspace");
+        assert_eq!(cdp_key_code("Escape"), "Escape");
+    }
+
+    #[test]
+    fn cdp_key_code_function_keys() {
+        assert_eq!(cdp_key_code("F1"), "F1");
+        assert_eq!(cdp_key_code("F12"), "F12");
+    }
+
+    #[test]
+    fn cdp_key_code_symbols() {
+        assert_eq!(cdp_key_code("Minus"), "Minus");
+        assert_eq!(cdp_key_code("Comma"), "Comma");
+        assert_eq!(cdp_key_code("Period"), "Period");
+        assert_eq!(cdp_key_code("Slash"), "Slash");
+    }
+
+    // =========================================================================
+    // TypeResult and KeyResult serialization tests
+    // =========================================================================
+
+    #[test]
+    fn type_result_serialization() {
+        let result = TypeResult {
+            typed: "Hello".to_string(),
+            length: 5,
+            snapshot: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["typed"], "Hello");
+        assert_eq!(json["length"], 5);
+        assert!(json.get("snapshot").is_none());
+    }
+
+    #[test]
+    fn type_result_with_snapshot() {
+        let result = TypeResult {
+            typed: "test".to_string(),
+            length: 4,
+            snapshot: Some(serde_json::json!({"role": "document"})),
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["typed"], "test");
+        assert_eq!(json["length"], 4);
+        assert!(json.get("snapshot").is_some());
+    }
+
+    #[test]
+    fn key_result_serialization_single_press() {
+        let result = KeyResult {
+            pressed: "Enter".to_string(),
+            repeat: None,
+            snapshot: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["pressed"], "Enter");
+        assert!(json.get("repeat").is_none());
+        assert!(json.get("snapshot").is_none());
+    }
+
+    #[test]
+    fn key_result_serialization_with_repeat() {
+        let result = KeyResult {
+            pressed: "ArrowDown".to_string(),
+            repeat: Some(5),
+            snapshot: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["pressed"], "ArrowDown");
+        assert_eq!(json["repeat"], 5);
+    }
+
+    #[test]
+    fn key_result_serialization_with_snapshot() {
+        let result = KeyResult {
+            pressed: "Tab".to_string(),
+            repeat: None,
+            snapshot: Some(serde_json::json!({"role": "document"})),
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["pressed"], "Tab");
+        assert!(json.get("snapshot").is_some());
+        assert!(json.get("repeat").is_none());
+    }
+
+    #[test]
+    fn key_result_combination() {
+        let result = KeyResult {
+            pressed: "Control+A".to_string(),
+            repeat: None,
+            snapshot: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["pressed"], "Control+A");
     }
 }

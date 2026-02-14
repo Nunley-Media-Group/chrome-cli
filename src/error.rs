@@ -294,6 +294,22 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn invalid_key(key: &str) -> Self {
+        Self {
+            message: format!("Invalid key: '{key}'"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn duplicate_modifier(modifier: &str) -> Self {
+        Self {
+            message: format!("Duplicate modifier: '{modifier}'"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
     pub fn interaction_failed(action: &str, reason: &str) -> Self {
         Self {
             message: format!("Interaction failed ({action}): {reason}"),
@@ -560,6 +576,22 @@ mod tests {
         let err = AppError::no_dialog_open();
         assert!(err.message.contains("No dialog is currently open"));
         assert!(err.message.contains("must be open"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn invalid_key_error() {
+        let err = AppError::invalid_key("FooBar");
+        assert!(err.message.contains("Invalid key"));
+        assert!(err.message.contains("FooBar"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn duplicate_modifier_error() {
+        let err = AppError::duplicate_modifier("Control");
+        assert!(err.message.contains("Duplicate modifier"));
+        assert!(err.message.contains("Control"));
         assert!(matches!(err.code, ExitCode::GeneralError));
     }
 

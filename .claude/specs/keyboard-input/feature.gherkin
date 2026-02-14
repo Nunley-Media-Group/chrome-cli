@@ -1,0 +1,187 @@
+# File: tests/features/keyboard.feature
+#
+# Generated from: .claude/specs/keyboard-input/requirements.md
+# Issue: #15
+
+Feature: Keyboard Input
+  As a developer / automation engineer
+  I want to simulate keyboard input via the CLI
+  So that my automation scripts can type text and press keys programmatically
+
+  # --- Type: Happy Paths ---
+
+  Scenario: Type text into the focused element
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused text input
+    When I run "chrome-cli interact type 'Hello World'"
+    Then the output JSON should contain "typed" equal to "Hello World"
+    And the output JSON should contain "length" equal to 11
+    And the exit code should be 0
+
+  Scenario: Type with delay between keystrokes
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused text input
+    When I run "chrome-cli interact type 'abc' --delay 50"
+    Then the output JSON should contain "typed" equal to "abc"
+    And the output JSON should contain "length" equal to 3
+
+  Scenario: Type with include-snapshot flag
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused text input
+    When I run "chrome-cli interact type 'test' --include-snapshot"
+    Then the output JSON should contain "typed" equal to "test"
+    And the output JSON should contain a "snapshot" field
+    And the snapshot should be a valid accessibility tree
+
+  Scenario: Type handles Unicode and special characters
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused text input
+    When I run "chrome-cli interact type 'caf\u00e9'"
+    Then the output JSON should contain "typed" equal to "caf\u00e9"
+    And the output JSON should contain "length" equal to 4
+
+  # --- Key: Happy Paths ---
+
+  Scenario: Press a single key
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused element
+    When I run "chrome-cli interact key Enter"
+    Then the output JSON should contain "pressed" equal to "Enter"
+    And the exit code should be 0
+
+  Scenario: Press a key combination with modifier
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused text input
+    When I run "chrome-cli interact key Control+A"
+    Then the output JSON should contain "pressed" equal to "Control+A"
+    And the exit code should be 0
+
+  Scenario: Press a key with multiple modifiers
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused element
+    When I run "chrome-cli interact key Control+Shift+ArrowDown"
+    Then the output JSON should contain "pressed" equal to "Control+Shift+ArrowDown"
+
+  Scenario: Press a key with repeat flag
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused element
+    When I run "chrome-cli interact key ArrowDown --repeat 5"
+    Then the output JSON should contain "pressed" equal to "ArrowDown"
+    And the output JSON should contain "repeat" equal to 5
+
+  Scenario: Key press with include-snapshot flag
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused element
+    When I run "chrome-cli interact key Enter --include-snapshot"
+    Then the output JSON should contain "pressed" equal to "Enter"
+    And the output JSON should contain a "snapshot" field
+
+  # --- Supported Key Categories ---
+
+  Scenario Outline: Press supported keys from various categories
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused element
+    When I run "chrome-cli interact key <key>"
+    Then the output JSON should contain "pressed" equal to "<key>"
+    And the exit code should be 0
+
+    Examples:
+      | key           |
+      | a             |
+      | Z             |
+      | 5             |
+      | F1            |
+      | F12           |
+      | ArrowUp       |
+      | ArrowDown     |
+      | Home          |
+      | End           |
+      | PageUp        |
+      | Backspace     |
+      | Delete        |
+      | Tab           |
+      | Enter         |
+      | Escape        |
+      | Space         |
+      | Numpad0       |
+      | NumpadAdd     |
+      | Minus         |
+      | Period        |
+      | Slash         |
+      | CapsLock      |
+
+  # --- Error Handling ---
+
+  Scenario: Invalid key name error
+    Given chrome-cli is built
+    When I run "chrome-cli interact key InvalidKey"
+    Then stderr should contain "Invalid key"
+    And stderr should contain "InvalidKey"
+    And the exit code should be nonzero
+
+  Scenario: Duplicate modifier error
+    Given chrome-cli is built
+    When I run "chrome-cli interact key Control+Control+A"
+    Then stderr should contain "Duplicate modifier"
+    And stderr should contain "Control"
+    And the exit code should be nonzero
+
+  Scenario: Type command requires text argument
+    Given chrome-cli is built
+    When I run "chrome-cli interact type"
+    Then the exit code should be nonzero
+    And stderr should contain "required"
+
+  Scenario: Key command requires keys argument
+    Given chrome-cli is built
+    When I run "chrome-cli interact key"
+    Then the exit code should be nonzero
+    And stderr should contain "required"
+
+  # --- Plain Text Output ---
+
+  Scenario: Plain text output for type command
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused text input
+    When I run "chrome-cli interact type 'Hello' --plain"
+    Then the output should be plain text "Typed 5 characters"
+
+  Scenario: Plain text output for key command
+    Given Chrome is running with CDP enabled
+    And a page is loaded with a focused element
+    When I run "chrome-cli interact key Enter --plain"
+    Then the output should be plain text "Pressed Enter"
+
+  # --- Tab Targeting ---
+
+  Scenario: Type with tab targeting
+    Given Chrome is running with CDP enabled
+    And a specific tab with ID "ABC123" contains a focused input
+    When I run "chrome-cli interact type 'Hello' --tab ABC123"
+    Then the text is typed in tab "ABC123"
+    And the exit code should be 0
+
+  Scenario: Key press with tab targeting
+    Given Chrome is running with CDP enabled
+    And a specific tab with ID "ABC123" contains a focused element
+    When I run "chrome-cli interact key Enter --tab ABC123"
+    Then the key is pressed in tab "ABC123"
+    And the exit code should be 0
+
+  # --- CLI Help Text ---
+
+  Scenario: Type subcommand help
+    Given chrome-cli is built
+    When I run "chrome-cli interact type --help"
+    Then stdout should contain "Type text character-by-character"
+    And stdout should contain "--delay"
+    And stdout should contain "--include-snapshot"
+    And the exit code should be 0
+
+  Scenario: Key subcommand help
+    Given chrome-cli is built
+    When I run "chrome-cli interact key --help"
+    Then stdout should contain "Press a key or key combination"
+    And stdout should contain "--repeat"
+    And stdout should contain "--include-snapshot"
+    And the exit code should be 0

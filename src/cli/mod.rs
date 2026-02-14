@@ -623,6 +623,12 @@ pub enum InteractCommand {
 
     /// Drag from one element to another
     Drag(DragArgs),
+
+    /// Type text character-by-character into the focused element
+    Type(TypeArgs),
+
+    /// Press a key or key combination (e.g. Enter, Control+A)
+    Key(KeyArgs),
 }
 
 /// Arguments for `interact click`.
@@ -685,6 +691,38 @@ pub struct DragArgs {
 
     /// Target element to drag to (UID or CSS selector)
     pub to: String,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `interact type`.
+#[derive(Args)]
+pub struct TypeArgs {
+    /// Text to type character-by-character
+    #[arg(required = true)]
+    pub text: String,
+
+    /// Delay between keystrokes in milliseconds (default: 0 for instant)
+    #[arg(long, default_value_t = 0)]
+    pub delay: u64,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `interact key`.
+#[derive(Args)]
+pub struct KeyArgs {
+    /// Key or key combination to press (e.g. Enter, Control+A, Shift+ArrowDown)
+    #[arg(required = true)]
+    pub keys: String,
+
+    /// Number of times to press the key
+    #[arg(long, default_value_t = 1)]
+    pub repeat: u32,
 
     /// Include updated accessibility snapshot in output
     #[arg(long)]

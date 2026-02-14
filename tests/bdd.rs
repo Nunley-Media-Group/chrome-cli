@@ -1606,6 +1606,87 @@ fn dialog_stderr_contains(world: &mut DialogWorld, expected: String) {
 }
 
 // =============================================================================
+// KeyboardWorld — Keyboard input BDD tests (CLI-testable scenarios)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct KeyboardWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+#[given("chrome-cli is built")]
+fn keyboard_chrome_cli_built(world: &mut KeyboardWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[when(expr = "I run {string}")]
+fn keyboard_run_command(world: &mut KeyboardWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given chrome-cli is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "chrome-cli") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[then("the exit code should be nonzero")]
+fn keyboard_exit_code_nonzero(world: &mut KeyboardWorld) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_ne!(
+        actual, 0,
+        "Expected nonzero exit code, got 0\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "the exit code should be {int}")]
+fn keyboard_exit_code(world: &mut KeyboardWorld, expected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, expected,
+        "Expected exit code {expected}, got {actual}\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stderr should contain {string}")]
+fn keyboard_stderr_contains(world: &mut KeyboardWorld, expected: String) {
+    assert!(
+        world.stderr.contains(&expected),
+        "stderr does not contain '{expected}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "stdout should contain {string}")]
+fn keyboard_stdout_contains(world: &mut KeyboardWorld, expected: String) {
+    assert!(
+        world.stdout.contains(&expected),
+        "stdout does not contain '{expected}'\nstdout: {}",
+        world.stdout
+    );
+}
+
+// =============================================================================
 // Main — run all worlds
 // =============================================================================
 
@@ -1637,6 +1718,17 @@ const JS_TESTABLE_SCENARIOS: &[&str] = &["File not found error"];
 const DIALOG_TESTABLE_SCENARIOS: &[&str] = &[
     "Dialog handle requires an action argument",
     "Dialog handle rejects invalid action",
+];
+
+/// Keyboard BDD scenarios that can be tested without a running Chrome instance.
+const KEYBOARD_TESTABLE_SCENARIOS: &[&str] = &[
+    "Type requires a text argument",
+    "Key requires a keys argument",
+    "Type help displays all options",
+    "Key help displays all options",
+    "Interact help includes type and key subcommands",
+    "Key rejects invalid key name",
+    "Key rejects duplicate modifier",
 ];
 
 #[tokio::main]
@@ -1689,6 +1781,17 @@ async fn main() {
             "tests/features/interact.feature",
             |_feature, _rule, scenario| {
                 INTERACT_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Keyboard input — only CLI-testable scenarios (argument validation, help, key validation).
+    // Scenarios requiring a running Chrome instance are skipped.
+    KeyboardWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/keyboard.feature",
+            |_feature, _rule, scenario| {
+                KEYBOARD_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;
