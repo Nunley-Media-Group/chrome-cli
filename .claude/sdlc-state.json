@@ -1,8 +1,8 @@
 {
-  "currentStep": 5,
+  "currentStep": 7,
   "currentIssue": 27,
   "currentBranch": "27-man-page-generation",
   "featureName": "27-man-page-generation",
-  "lastTransitionAt": "2026-02-14T14:53:27Z",
+  "lastTransitionAt": "2026-02-14T15:00:54Z",
   "retries": {}
 }
