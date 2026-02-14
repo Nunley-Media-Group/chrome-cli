@@ -2007,6 +2007,402 @@ fn resolve_json_path<'a>(json: &'a serde_json::Value, path: &str) -> &'a serde_j
 }
 
 // =============================================================================
+// ReadmeWorld — README documentation BDD tests
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct ReadmeWorld {
+    readme_content: String,
+    current_section: String,
+}
+
+impl ReadmeWorld {
+    fn load_readme(&mut self) {
+        if self.readme_content.is_empty() {
+            let path = project_root().join("README.md");
+            self.readme_content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("Failed to read README.md: {e}"));
+        }
+    }
+
+    fn extract_section(&self, heading: &str) -> String {
+        let heading_lower = heading.to_lowercase();
+        let lines: Vec<&str> = self.readme_content.lines().collect();
+        let mut in_section = false;
+        let mut section_lines = Vec::new();
+
+        for line in &lines {
+            if line.starts_with("## ") {
+                if in_section {
+                    break;
+                }
+                if line.to_lowercase().contains(&heading_lower) {
+                    in_section = true;
+                    section_lines.push(*line);
+                    continue;
+                }
+            }
+            if in_section {
+                section_lines.push(*line);
+            }
+        }
+
+        section_lines.join("\n")
+    }
+}
+
+#[given(expr = "the file {string} exists in the repository root")]
+fn readme_file_exists(world: &mut ReadmeWorld, filename: String) {
+    let path = project_root().join(&filename);
+    assert!(
+        path.exists(),
+        "{filename} does not exist at {}",
+        path.display()
+    );
+    world.load_readme();
+}
+
+#[when("I read the README content")]
+fn read_readme_content(world: &mut ReadmeWorld) {
+    world.load_readme();
+    world.current_section = world.readme_content.clone();
+}
+
+#[when(expr = "I read the {string} section")]
+fn read_readme_section(world: &mut ReadmeWorld, section: String) {
+    world.load_readme();
+    world.current_section = world.extract_section(&section);
+    assert!(
+        !world.current_section.is_empty(),
+        "Section '{section}' not found in README"
+    );
+}
+
+#[then(expr = "it starts with a level-1 heading containing {string}")]
+fn starts_with_h1(world: &mut ReadmeWorld, text: String) {
+    let first_line = world.readme_content.lines().next().unwrap_or("");
+    assert!(
+        first_line.starts_with("# ") && first_line.to_lowercase().contains(&text.to_lowercase()),
+        "Expected first line to be H1 containing '{text}', got: {first_line}"
+    );
+}
+
+#[then(expr = "it contains the text {string}")]
+fn readme_contains_text(world: &mut ReadmeWorld, text: String) {
+    assert!(
+        world.current_section.contains(&text),
+        "Content does not contain '{text}'"
+    );
+}
+
+#[then("it contains a CI badge linking to the GitHub Actions workflow")]
+fn has_ci_badge(world: &mut ReadmeWorld) {
+    assert!(
+        world
+            .readme_content
+            .contains("actions/workflows/ci.yml/badge.svg"),
+        "README does not contain a CI badge"
+    );
+}
+
+#[then(expr = "it contains a license badge showing {string} and {string}")]
+fn has_license_badge(world: &mut ReadmeWorld, lic1: String, _lic2: String) {
+    let content = &world.readme_content;
+    assert!(
+        content.contains("img.shields.io/badge/license"),
+        "README does not contain a license badge"
+    );
+    let header_area = &content[..500.min(content.len())];
+    assert!(
+        header_area.to_uppercase().contains(&lic1.to_uppercase()),
+        "License badge does not mention '{lic1}'"
+    );
+}
+
+#[then(expr = "it lists at least {int} capabilities as bullet points")]
+fn lists_capabilities(world: &mut ReadmeWorld, min_count: usize) {
+    let bullet_count = world
+        .current_section
+        .lines()
+        .filter(|l| l.starts_with("- **"))
+        .count();
+    assert!(
+        bullet_count >= min_count,
+        "Expected at least {min_count} bullet capabilities, found {bullet_count}"
+    );
+}
+
+#[then(expr = "the capabilities include {string}")]
+fn capabilities_include(world: &mut ReadmeWorld, capability: String) {
+    assert!(
+        world
+            .current_section
+            .to_lowercase()
+            .contains(&capability.to_lowercase()),
+        "Capabilities do not mention '{capability}'"
+    );
+}
+
+#[then("it contains a Markdown table comparing chrome-cli with alternatives")]
+fn has_comparison_table(world: &mut ReadmeWorld) {
+    assert!(
+        world.current_section.contains("chrome-cli") && world.current_section.contains('|'),
+        "Features section does not contain a comparison table"
+    );
+}
+
+#[then(expr = "the table mentions {string} or {string}")]
+fn table_mentions_either(world: &mut ReadmeWorld, option1: String, option2: String) {
+    let section_lower = world.current_section.to_lowercase();
+    assert!(
+        section_lower.contains(&option1.to_lowercase())
+            || section_lower.contains(&option2.to_lowercase()),
+        "Table does not mention '{option1}' or '{option2}'"
+    );
+}
+
+#[then(expr = "it contains {string}")]
+fn readme_section_contains(world: &mut ReadmeWorld, text: String) {
+    assert!(
+        world.current_section.contains(&text),
+        "Section does not contain '{text}'"
+    );
+}
+
+#[then("it contains curl commands or download instructions for pre-built binaries")]
+fn has_curl_or_download(world: &mut ReadmeWorld) {
+    let section = &world.current_section;
+    assert!(
+        section.contains("curl") || section.contains("download") || section.contains("Releases"),
+        "Installation section does not contain download instructions"
+    );
+}
+
+#[then(expr = "it lists supported platforms including {string} and {string}")]
+fn lists_platforms(world: &mut ReadmeWorld, p1: String, p2: String) {
+    assert!(
+        world.current_section.contains(&p1) && world.current_section.contains(&p2),
+        "Section does not list both '{p1}' and '{p2}'"
+    );
+}
+
+#[then(expr = "it contains {string} instructions for building from source")]
+fn contains_build_instructions(world: &mut ReadmeWorld, text: String) {
+    assert!(
+        world.current_section.contains(&text),
+        "Section does not contain '{text}' build instructions"
+    );
+}
+
+#[then(expr = "it contains at least {int} numbered steps")]
+fn has_numbered_steps(world: &mut ReadmeWorld, min_steps: usize) {
+    let step_count = world
+        .current_section
+        .lines()
+        .filter(|l| {
+            let trimmed = l.trim();
+            trimmed.starts_with("**") && trimmed.chars().nth(2).is_some_and(|c| c.is_ascii_digit())
+        })
+        .count();
+    assert!(
+        step_count >= min_steps,
+        "Expected at least {min_steps} numbered steps, found {step_count}"
+    );
+}
+
+#[then(expr = "it includes {string}")]
+fn readme_section_includes(world: &mut ReadmeWorld, text: String) {
+    assert!(
+        world.current_section.contains(&text),
+        "Section does not include '{text}'"
+    );
+}
+
+#[then("it includes a page inspection command")]
+fn has_page_inspection(world: &mut ReadmeWorld) {
+    assert!(
+        world.current_section.contains("chrome-cli page snapshot")
+            || world.current_section.contains("chrome-cli page text"),
+        "Quick Start does not include a page inspection command"
+    );
+}
+
+#[then(expr = "it contains a screenshot example with {string}")]
+fn has_screenshot_example(world: &mut ReadmeWorld, cmd: String) {
+    assert!(
+        world.current_section.contains(&cmd),
+        "Usage section does not contain screenshot example '{cmd}'"
+    );
+}
+
+#[then(expr = "it contains a text extraction example with {string}")]
+fn has_text_extraction_example(world: &mut ReadmeWorld, cmd: String) {
+    assert!(
+        world.current_section.contains(&cmd),
+        "Usage section does not contain text extraction example '{cmd}'"
+    );
+}
+
+#[then(expr = "it contains a JavaScript execution example with {string}")]
+fn has_js_example(world: &mut ReadmeWorld, cmd: String) {
+    assert!(
+        world.current_section.contains(&cmd),
+        "Usage section does not contain JavaScript execution example '{cmd}'"
+    );
+}
+
+#[then(expr = "it contains a form filling example with {string}")]
+fn has_form_example(world: &mut ReadmeWorld, cmd: String) {
+    assert!(
+        world.current_section.contains(&cmd),
+        "Usage section does not contain form filling example '{cmd}'"
+    );
+}
+
+#[then(expr = "it contains a network monitoring example with {string}")]
+fn has_network_example(world: &mut ReadmeWorld, cmd: String) {
+    assert!(
+        world.current_section.contains(&cmd),
+        "Usage section does not contain network monitoring example '{cmd}'"
+    );
+}
+
+#[then(expr = "at least one example uses a {string} HTML tag")]
+fn has_details_tag(world: &mut ReadmeWorld, tag: String) {
+    assert!(
+        world.current_section.contains(&tag),
+        "Usage section does not contain '{tag}' HTML tags"
+    );
+}
+
+#[then("it contains a Markdown table")]
+fn has_markdown_table(world: &mut ReadmeWorld) {
+    assert!(
+        world.current_section.contains("|---") || world.current_section.contains("| ---"),
+        "Section does not contain a Markdown table"
+    );
+}
+
+#[then(expr = "the table lists the command {string}")]
+fn table_lists_command(world: &mut ReadmeWorld, command: String) {
+    let pattern = format!("`{command}`");
+    assert!(
+        world.current_section.contains(&pattern),
+        "Command reference table does not list command '{command}'"
+    );
+}
+
+#[then(expr = "it mentions {string} or {string} for detailed usage")]
+fn mentions_help_or_man(world: &mut ReadmeWorld, opt1: String, opt2: String) {
+    assert!(
+        world.current_section.contains(&opt1) || world.current_section.contains(&opt2),
+        "Section does not mention '{opt1}' or '{opt2}'"
+    );
+}
+
+#[then("it contains a text diagram showing the communication flow")]
+fn has_text_diagram(world: &mut ReadmeWorld) {
+    assert!(
+        world.current_section.contains('─')
+            || world.current_section.contains('┌')
+            || world.current_section.contains('│')
+            || world.current_section.contains('→'),
+        "Architecture section does not contain a text diagram"
+    );
+}
+
+#[then(expr = "it mentions {string} or {string}")]
+fn readme_mentions_either(world: &mut ReadmeWorld, term1: String, term2: String) {
+    assert!(
+        world.current_section.contains(&term1) || world.current_section.contains(&term2),
+        "Section does not mention '{term1}' or '{term2}'"
+    );
+}
+
+#[then(expr = "it mentions {string}")]
+fn readme_section_mentions(world: &mut ReadmeWorld, term: String) {
+    assert!(
+        world.current_section.contains(&term),
+        "Section does not mention '{term}'"
+    );
+}
+
+#[then("it describes the session or connection management model")]
+fn describes_session_management(world: &mut ReadmeWorld) {
+    let lower = world.current_section.to_lowercase();
+    assert!(
+        lower.contains("session") || lower.contains("connection"),
+        "Architecture section does not describe session/connection management"
+    );
+}
+
+#[then(expr = "it mentions {string} or {string} in the context of performance")]
+fn mentions_performance_context(world: &mut ReadmeWorld, term1: String, term2: String) {
+    let lower = world.current_section.to_lowercase();
+    assert!(
+        (lower.contains(&term1.to_lowercase()) || lower.contains(&term2.to_lowercase()))
+            && (lower.contains("performance")
+                || lower.contains("startup")
+                || lower.contains("fast")),
+        "Section does not mention '{term1}'/'{term2}' in performance context"
+    );
+}
+
+#[then("it explains how to use chrome-cli with Claude Code")]
+fn explains_claude_code(world: &mut ReadmeWorld) {
+    let lower = world.current_section.to_lowercase();
+    assert!(
+        lower.contains("claude")
+            && (lower.contains("agent")
+                || lower.contains("automation")
+                || lower.contains("browser")),
+        "Section does not explain Claude Code usage"
+    );
+}
+
+#[then("it contains a CLAUDE.md example snippet in a code block")]
+fn has_claude_md_snippet(world: &mut ReadmeWorld) {
+    assert!(
+        world.current_section.contains("```")
+            && world.current_section.to_lowercase().contains("claude"),
+        "Section does not contain a CLAUDE.md code block snippet"
+    );
+}
+
+#[then(expr = "it mentions {string} for building")]
+fn mentions_build_tool(world: &mut ReadmeWorld, tool: String) {
+    assert!(
+        world.current_section.contains(&tool),
+        "Contributing section does not mention '{tool}' for building"
+    );
+}
+
+#[then(expr = "it mentions {string} for running tests")]
+fn mentions_test_tool(world: &mut ReadmeWorld, tool: String) {
+    assert!(
+        world.current_section.contains(&tool),
+        "Contributing section does not mention '{tool}' for testing"
+    );
+}
+
+#[then(expr = "it mentions {string} or {string} for code style")]
+fn mentions_code_style(world: &mut ReadmeWorld, tool1: String, tool2: String) {
+    let lower = world.current_section.to_lowercase();
+    assert!(
+        lower.contains(&tool1.to_lowercase()) || lower.contains(&tool2.to_lowercase()),
+        "Contributing section does not mention '{tool1}' or '{tool2}' for code style"
+    );
+}
+
+#[then(expr = "it links to {string}")]
+fn links_to_file(world: &mut ReadmeWorld, filename: String) {
+    assert!(
+        world.current_section.contains(&filename),
+        "Section does not link to '{filename}'"
+    );
+}
+
+// =============================================================================
 // Main — run all worlds
 // =============================================================================
 
@@ -2211,4 +2607,7 @@ async fn main() {
 
     // Man page generation — all scenarios are CLI-testable (no Chrome needed).
     CliWorld::run("tests/features/man-page-generation.feature").await;
+
+    // README documentation — all scenarios are file-parsing tests (no Chrome needed).
+    ReadmeWorld::run("tests/features/readme.feature").await;
 }

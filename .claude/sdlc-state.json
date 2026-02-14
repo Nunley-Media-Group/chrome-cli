@@ -1,8 +1,8 @@
 {
-  "currentStep": 7,
-  "currentIssue": 27,
-  "currentBranch": "27-man-page-generation",
-  "featureName": "27-man-page-generation",
-  "lastTransitionAt": "2026-02-14T15:00:54Z",
+  "currentStep": 4,
+  "currentIssue": 28,
+  "currentBranch": "28-readme-quickstart-examples-architecture",
+  "featureName": "28-readme-quickstart-examples-architecture",
+  "lastTransitionAt": "2026-02-14T15:08:14Z",
   "retries": {}
 }
