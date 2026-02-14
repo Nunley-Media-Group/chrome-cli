@@ -923,7 +923,7 @@ mod tests {
         let result = UploadResult {
             uploaded: "s3".to_string(),
             files: vec!["/tmp/doc1.pdf".to_string(), "/tmp/doc2.pdf".to_string()],
-            size: 102400,
+            size: 102_400,
             snapshot: None,
         };
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
@@ -931,7 +931,7 @@ mod tests {
         assert_eq!(json["files"].as_array().unwrap().len(), 2);
         assert_eq!(json["files"][0], "/tmp/doc1.pdf");
         assert_eq!(json["files"][1], "/tmp/doc2.pdf");
-        assert_eq!(json["size"], 102400);
+        assert_eq!(json["size"], 102_400);
     }
 
     #[test]

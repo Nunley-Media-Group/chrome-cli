@@ -1,3 +1,4 @@
+mod capabilities;
 mod cli;
 mod console;
 mod dialog;
@@ -66,6 +67,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Perf(args) => perf::execute_perf(&global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
         Command::Examples(args) => examples::execute_examples(&global, args),
+        Command::Capabilities(args) => capabilities::execute_capabilities(&global, args),
         Command::Completions(args) => execute_completions(args),
         Command::Man(args) => execute_man(args),
     }

@@ -485,6 +485,28 @@ EXAMPLES:
     )]
     Examples(ExamplesArgs),
 
+    /// Output a machine-readable manifest of all CLI capabilities
+    #[command(
+        long_about = "Output a complete, machine-readable JSON manifest describing every command, \
+            subcommand, flag, argument, and type in the CLI. Designed for AI agents and tooling \
+            that need to programmatically discover the CLI surface. The manifest is generated at \
+            runtime from the clap command tree, so it is always in sync with the binary.",
+        after_long_help = "\
+EXAMPLES:
+  # Full capabilities manifest
+  chrome-cli capabilities
+
+  # Pretty-printed for readability
+  chrome-cli capabilities --pretty
+
+  # Capabilities for a specific command
+  chrome-cli capabilities --command navigate
+
+  # Compact listing (names and descriptions only)
+  chrome-cli capabilities --compact"
+    )]
+    Capabilities(CapabilitiesArgs),
+
     /// Display man pages for chrome-cli commands
     #[command(
         long_about = "Display man pages for chrome-cli commands. Without arguments, displays \
@@ -2078,4 +2100,16 @@ pub struct ManArgs {
 pub struct ExamplesArgs {
     /// Command group to show examples for (e.g., navigate, tabs, page)
     pub command: Option<String>,
+}
+
+/// Arguments for the `capabilities` subcommand.
+#[derive(Args)]
+pub struct CapabilitiesArgs {
+    /// Show capabilities for a specific command only
+    #[arg(long)]
+    pub command: Option<String>,
+
+    /// Minimal output: command names and descriptions only
+    #[arg(long)]
+    pub compact: bool,
 }
