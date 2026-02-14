@@ -1,0 +1,93 @@
+# File: tests/features/claude-code-guide.feature
+#
+# Generated from: .claude/specs/31-claude-code-integration-guide/requirements.md
+# Issue: #31
+
+Feature: Claude Code Integration Guide
+  As a developer using Claude Code for browser automation
+  I want a comprehensive integration guide and CLAUDE.md template
+  So that Claude Code can immediately discover and use chrome-cli
+
+  # --- Happy Path ---
+
+  Scenario: Integration guide exists and covers discovery mechanisms
+    Given the file "docs/claude-code.md" exists in the repository
+    When I read the integration guide
+    Then it contains a "Discovery" or "Setup" section
+    And it mentions "chrome-cli capabilities" for machine-readable discovery
+    And it mentions "chrome-cli examples" for learning commands
+    And it provides a setup checklist
+
+  Scenario: CLAUDE.md template is provided as a drop-in example
+    Given the file "examples/CLAUDE.md.example" exists in the repository
+    When I read the template file
+    Then it contains "chrome-cli connect" for launching Chrome
+    And it contains "chrome-cli page snapshot" for page inspection
+    And it contains "chrome-cli interact" or "chrome-cli form fill" for interaction
+    And it contains a workflow loop description
+
+  # --- Workflow Documentation ---
+
+  Scenario: Common workflow patterns are documented
+    Given the file "docs/claude-code.md" exists in the repository
+    When I read the "Common Workflows" section
+    Then it documents a "Testing Web Apps" workflow
+    And it documents a "Scraping Data" workflow
+    And it documents a "Debugging UI Issues" workflow
+    And it documents a "Form Automation" workflow
+    And each workflow shows complete chrome-cli command sequences
+
+  Scenario: Recommended workflow loops are documented
+    Given the file "docs/claude-code.md" exists in the repository
+    When I read the workflow loops section
+    Then it documents the interaction loop "snapshot → identify → interact → verify"
+    And it documents the data extraction loop "navigate → wait → snapshot → extract"
+
+  # --- Efficiency and Best Practices ---
+
+  Scenario: Efficient usage tips minimize round-trips
+    Given the file "docs/claude-code.md" exists in the repository
+    When I read the efficiency tips section
+    Then it mentions "form fill-many" for batch form filling
+    And it mentions "--wait-until" to avoid race conditions
+    And it explains when to use "page snapshot" vs "page text"
+    And it mentions "--timeout" to prevent hangs
+
+  Scenario: Best practices for AI agents are documented
+    Given the file "docs/claude-code.md" exists in the repository
+    When I read the best practices section
+    Then it recommends running "page snapshot" before interaction commands
+    And it recommends using JSON output for reliable parsing
+    And it recommends checking exit codes for error handling
+    And it recommends "form fill" over "interact type" for form inputs
+    And it recommends "console follow" and "network follow" for debugging
+
+  # --- Error Handling ---
+
+  Scenario: Error handling patterns for AI agents
+    Given the file "docs/claude-code.md" exists in the repository
+    When I read the error handling section
+    Then it documents exit code conventions
+    And it documents common failure modes including "connection refused"
+    And it documents common failure modes including "element not found"
+    And it documents common failure modes including "timeout"
+    And it provides recovery strategies for each failure mode
+
+  # --- Example Conversation ---
+
+  Scenario: Example conversation demonstrates real-world usage
+    Given the file "docs/claude-code.md" exists in the repository
+    When I read the example conversation section
+    Then it shows a multi-turn interaction between a user and Claude Code
+    And the conversation includes "chrome-cli connect" to start a session
+    And the conversation includes "chrome-cli page snapshot" to inspect the page
+    And the conversation includes an interaction command to act on an element
+    And the conversation includes verification of the result
+
+  # --- README Integration ---
+
+  Scenario: README links to the full integration guide
+    Given the file "README.md" exists in the repository
+    When I read the "Claude Code Integration" section
+    Then it contains a link to "docs/claude-code.md"
+    And it contains a link to "examples/CLAUDE.md.example"
