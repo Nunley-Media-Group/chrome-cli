@@ -1,0 +1,17 @@
+{
+  "projectPath": "/Volumes/Fast Brick/source/repos/chrome-cli",
+  "pluginsPath": "/Users/rnunley/.claude/plugins/marketplaces/nmg-plugins",
+  "model": "opus",
+  "steps": {
+    "startCycle":   { "maxTurns": 5,   "timeoutMin": 5  },
+    "startIssue":   { "maxTurns": 15,  "timeoutMin": 5,  "skill": "starting-issues" },
+    "writeSpecs":   { "maxTurns": 40,  "timeoutMin": 15, "skill": "writing-specs" },
+    "implement":    { "maxTurns": 100, "timeoutMin": 30, "skill": "implementing-specs" },
+    "verify":       { "maxTurns": 60,  "timeoutMin": 20, "skill": "verifying-specs" },
+    "commitPush":   { "maxTurns": 10,  "timeoutMin": 5  },
+    "createPR":     { "maxTurns": 15,  "timeoutMin": 5,  "skill": "creating-prs" },
+    "monitorCI":    { "maxTurns": 20,  "timeoutMin": 10 },
+    "merge":        { "maxTurns": 5,   "timeoutMin": 5  }
+  },
+  "maxRetriesPerStep": 3
+}

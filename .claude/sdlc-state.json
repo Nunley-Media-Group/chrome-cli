@@ -1,8 +1,10 @@
 {
-  "currentStep": 4,
-  "currentIssue": 28,
-  "currentBranch": "28-readme-quickstart-examples-architecture",
-  "featureName": "28-readme-quickstart-examples-architecture",
-  "lastTransitionAt": "2026-02-14T15:08:14Z",
-  "retries": {}
+  "currentStep": 1,
+  "currentIssue": null,
+  "currentBranch": "main",
+  "featureName": null,
+  "lastTransitionAt": "2026-02-14T17:34:09.656Z",
+  "retries": {
+    "1": 1
+  }
 }
