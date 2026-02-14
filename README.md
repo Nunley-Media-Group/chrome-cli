@@ -264,28 +264,12 @@ Run `chrome-cli <command> --help` for detailed usage of any command, or `chrome-
 
 ## Claude Code Integration
 
-chrome-cli works well as a browser automation tool for AI agents and Claude Code. Add it to your project's CLAUDE.md to give Claude the ability to interact with web pages:
+chrome-cli is designed for AI agent consumption. See the full
+[Claude Code Integration Guide](docs/claude-code.md) for discovery mechanisms,
+common workflows, best practices, and error handling patterns.
 
-```markdown
-## Browser automation
-
-This project uses `chrome-cli` for browser automation. Common workflows:
-
-- Start Chrome: `chrome-cli connect --launch --headless`
-- Navigate: `chrome-cli navigate <url>`
-- Inspect page: `chrome-cli page snapshot` (returns accessibility tree)
-- Screenshot: `chrome-cli page screenshot --file shot.png`
-- Extract text: `chrome-cli page text`
-- Fill forms: `chrome-cli form fill <uid> "<value>"`
-- Run JavaScript: `chrome-cli js exec "<expression>"`
-
-All commands output JSON to stdout and errors to stderr.
-```
-
-Typical AI agent workflows:
-- **Navigate and inspect:** `chrome-cli navigate <url>` then `chrome-cli page snapshot` to understand page structure
-- **Screenshot and analyze:** `chrome-cli page screenshot --file page.png` then analyze the image
-- **Form automation:** `chrome-cli page snapshot` to find UIDs, then `chrome-cli form fill-many` to populate fields
+Drop the [CLAUDE.md template](examples/CLAUDE.md.example) into your project to
+give Claude Code browser automation capabilities out of the box.
 
 ## Contributing
 

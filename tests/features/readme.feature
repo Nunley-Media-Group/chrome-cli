@@ -124,7 +124,8 @@ Feature: README documentation
   Scenario: Claude Code integration guide
     When I read the "Claude Code" section
     Then it explains how to use chrome-cli with Claude Code
-    And it contains a CLAUDE.md example snippet in a code block
+    And it links to "docs/claude-code.md"
+    And it links to "examples/CLAUDE.md.example"
 
   # --- Contributing ---
 

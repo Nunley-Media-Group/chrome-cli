@@ -1,0 +1,55 @@
+# Browser Automation
+
+This project uses [chrome-cli](https://github.com/Nunley-Media-Group/chrome-cli) for browser automation. chrome-cli is a native CLI tool that controls Chrome via the DevTools Protocol.
+
+## Quick Start
+
+```sh
+# 1. Launch headless Chrome and connect
+chrome-cli connect --launch --headless
+
+# 2. Navigate to the dev server
+chrome-cli navigate http://localhost:3000 --wait-until networkidle
+
+# 3. Inspect the page structure (accessibility tree with UIDs)
+chrome-cli page snapshot
+
+# 4. Take a screenshot
+chrome-cli page screenshot --file screenshot.png
+```
+
+## Key Commands
+
+| Command | Purpose |
+|---------|---------|
+| `chrome-cli capabilities` | See all available commands (JSON manifest) |
+| `chrome-cli examples <cmd>` | See examples for a command |
+| `chrome-cli page snapshot` | Get the page accessibility tree with UIDs |
+| `chrome-cli page text` | Extract visible text content |
+| `chrome-cli page screenshot --file <path>` | Capture a screenshot |
+| `chrome-cli interact click <uid>` | Click an element by UID from snapshot |
+| `chrome-cli form fill <uid> "<value>"` | Fill a form field by UID |
+| `chrome-cli form fill-many '<json>'` | Fill multiple form fields at once |
+| `chrome-cli console read --errors-only` | Check for JavaScript errors |
+| `chrome-cli network follow --timeout 5000` | Monitor network requests |
+
+## Workflow Loop
+
+Always follow this pattern when interacting with pages:
+
+1. **Snapshot** — `chrome-cli page snapshot` to get the current page state and element UIDs
+2. **Identify** — Find the target element UID in the snapshot output
+3. **Interact** — `chrome-cli interact click <uid>` or `chrome-cli form fill <uid> "<value>"`
+4. **Verify** — `chrome-cli page snapshot` again to confirm the action worked
+
+UIDs are dynamic and change when the page updates. Always snapshot before interacting.
+
+## Tips
+
+- Use `--json` output (default) for reliable parsing
+- Check exit codes: 0 = success, 2 = connection error, 4 = timeout
+- Use `--timeout` on navigation and long-running commands to prevent hangs
+- Prefer `form fill` over `interact type` for form inputs (more reliable)
+- Use `form fill-many` to fill multiple fields in one call
+- Use `--include-snapshot` on interaction commands to get the updated tree without a separate snapshot call
+- Use `--wait-until networkidle` after navigation to avoid race conditions
