@@ -5,6 +5,7 @@ mod form;
 mod interact;
 mod js;
 mod navigate;
+mod network;
 mod page;
 mod perf;
 mod snapshot;
@@ -45,7 +46,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Dom => Err(AppError::not_implemented("dom")),
         Command::Js(args) => js::execute_js(&cli.global, args).await,
         Command::Console(args) => console::execute_console(&cli.global, args).await,
-        Command::Network => Err(AppError::not_implemented("network")),
+        Command::Network(args) => network::execute_network(&cli.global, args).await,
         Command::Interact(args) => interact::execute_interact(&cli.global, args).await,
         Command::Form(args) => form::execute_form(&cli.global, args).await,
         Command::Emulate => Err(AppError::not_implemented("emulate")),
