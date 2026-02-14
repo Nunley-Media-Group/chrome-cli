@@ -1,11 +1,10 @@
 {
-  "currentStep": 4,
+  "currentStep": 6,
+  "lastCompletedStep": 5,
   "currentIssue": 29,
   "currentBranch": "29-built-in-examples-subcommand",
-  "featureName": "url-navigation",
-  "lastTransitionAt": "2026-02-14T18:09:26.334Z",
-  "retries": {
-    "4": 2
-  },
-  "runnerPid": 57152
+  "featureName": "29-built-in-examples-subcommand",
+  "lastTransitionAt": "2026-02-14T19:05:33.835Z",
+  "retries": {},
+  "runnerPid": 77790
 }

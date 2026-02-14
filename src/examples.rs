@@ -488,25 +488,23 @@ pub fn execute_examples(global: &GlobalOpts, args: &ExamplesArgs) -> Result<(), 
             }
         }
         Some(name) => {
-            let group = groups.into_iter().find(|g| g.command == *name);
-            match group {
-                Some(g) => {
-                    if is_plain {
-                        print!("{}", format_plain_detail(&g));
-                    } else {
-                        print_output(&g, &global.output)?;
-                    }
+            if let Some(g) = groups.into_iter().find(|g| g.command == *name) {
+                if is_plain {
+                    print!("{}", format_plain_detail(&g));
+                } else {
+                    print_output(&g, &global.output)?;
                 }
-                None => {
-                    return Err(AppError {
-                        message: format!(
-                            "Unknown command group: '{name}'. Available: connect, tabs, navigate, \
-                             page, dom, js, console, network, interact, form, emulate, perf, \
-                             dialog, config"
-                        ),
-                        code: ExitCode::GeneralError,
-                    });
-                }
+            } else {
+                let all = all_examples();
+                let available: Vec<&str> =
+                    all.iter().map(|g| g.command.as_str()).collect();
+                return Err(AppError {
+                    message: format!(
+                        "Unknown command group: '{name}'. Available: {}",
+                        available.join(", ")
+                    ),
+                    code: ExitCode::GeneralError,
+                });
             }
         }
     }
@@ -639,5 +637,107 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.message.contains("Unknown command group"));
         assert!(err.message.contains("nonexistent"));
+    }
+
+    #[test]
+    fn json_serialization_summary_has_expected_fields() {
+        let groups = all_examples();
+        let json = serde_json::to_string(&groups).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let arr = parsed.as_array().unwrap();
+        assert!(!arr.is_empty());
+        for entry in arr {
+            assert!(entry.get("command").is_some(), "missing 'command' field");
+            assert!(
+                entry.get("description").is_some(),
+                "missing 'description' field"
+            );
+            let examples = entry.get("examples").unwrap().as_array().unwrap();
+            assert!(!examples.is_empty());
+            for ex in examples {
+                assert!(ex.get("cmd").is_some(), "missing 'cmd' field");
+                assert!(ex.get("description").is_some(), "missing 'description' field");
+            }
+        }
+    }
+
+    #[test]
+    fn json_serialization_single_group_has_expected_fields() {
+        let groups = all_examples();
+        let navigate = groups.iter().find(|g| g.command == "navigate").unwrap();
+        let json = serde_json::to_string(navigate).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.get("command").unwrap().as_str().unwrap(), "navigate");
+        assert!(parsed.get("description").is_some());
+        let examples = parsed.get("examples").unwrap().as_array().unwrap();
+        assert!(examples.len() >= 3);
+    }
+
+    #[test]
+    fn json_pretty_output_is_multiline() {
+        let groups = all_examples();
+        let json = serde_json::to_string_pretty(&groups).unwrap();
+        assert!(
+            json.lines().count() > 1,
+            "pretty JSON should be multi-line"
+        );
+        assert!(json.contains('\n'));
+    }
+
+    #[test]
+    fn flags_field_omitted_when_none() {
+        let entry = ExampleEntry {
+            cmd: "chrome-cli test".into(),
+            description: "A test".into(),
+            flags: None,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("flags"),
+            "flags field should be omitted when None"
+        );
+    }
+
+    #[test]
+    fn flags_field_present_when_some() {
+        let entry = ExampleEntry {
+            cmd: "chrome-cli test --flag".into(),
+            description: "A test".into(),
+            flags: Some(vec!["--flag".into()]),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains("flags"),
+            "flags field should be present when Some"
+        );
+    }
+
+    #[test]
+    fn error_message_lists_all_available_groups() {
+        let global = GlobalOpts {
+            port: None,
+            host: "127.0.0.1".into(),
+            ws_url: None,
+            timeout: None,
+            tab: None,
+            auto_dismiss_dialogs: false,
+            config: None,
+            output: crate::cli::OutputFormat {
+                json: false,
+                pretty: false,
+                plain: false,
+            },
+        };
+        let args = ExamplesArgs {
+            command: Some("bogus".into()),
+        };
+        let err = execute_examples(&global, &args).unwrap_err();
+        for group in all_examples() {
+            assert!(
+                err.message.contains(&group.command),
+                "Error message should list '{}' as available",
+                group.command
+            );
+        }
     }
 }

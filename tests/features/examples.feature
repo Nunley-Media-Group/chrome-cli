@@ -11,84 +11,80 @@ Feature: Built-in Examples Subcommand
   # --- Happy Path ---
 
   Scenario: List all command groups with summary examples
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples"
-    Then the output lists every command group with a description and one example
-    And the output contains "connect"
-    And the output contains "tabs"
-    And the output contains "navigate"
-    And the output contains "page"
-    And the output contains "js"
-    And the output contains "console"
-    And the output contains "network"
-    And the output contains "interact"
-    And the output contains "form"
-    And the output contains "emulate"
-    And the output contains "perf"
-    And the output contains "dialog"
-    And the output contains "config"
-    And the exit code is 0
+    Then stdout should contain "connect"
+    And stdout should contain "tabs"
+    And stdout should contain "navigate"
+    And stdout should contain "page"
+    And stdout should contain "js"
+    And stdout should contain "console"
+    And stdout should contain "network"
+    And stdout should contain "interact"
+    And stdout should contain "form"
+    And stdout should contain "emulate"
+    And stdout should contain "perf"
+    And stdout should contain "dialog"
+    And stdout should contain "config"
+    And the exit code should be 0
 
   Scenario: Show detailed examples for a specific command group
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples navigate"
-    Then the output contains at least 3 examples
-    And each example includes a command string starting with "chrome-cli navigate"
-    And each example includes a description comment
-    And the exit code is 0
+    Then stdout should contain "chrome-cli navigate"
+    And stdout should contain "#"
+    And the output should have at least 3 example commands
+    And the exit code should be 0
 
   # --- Output Formats ---
 
   Scenario: Plain text output is the default
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples"
-    Then the output is human-readable plain text
-    And the output does not start with "["
-    And the output does not start with "{"
-    And the exit code is 0
+    Then stdout should not start with "["
+    And stdout should not start with "{"
+    And the exit code should be 0
 
   Scenario: JSON output for summary listing
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples --json"
-    Then the output is a valid JSON array
-    And each entry has a "command" field
-    And each entry has a "description" field
-    And each entry has an "examples" array
-    And each example has a "cmd" field
-    And each example has a "description" field
-    And the exit code is 0
+    Then stdout should be a valid JSON array
+    And each JSON entry should have a "command" field
+    And each JSON entry should have a "description" field
+    And each JSON entry should have an "examples" array
+    And the exit code should be 0
 
   Scenario: JSON output for a specific command group
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples navigate --json"
-    Then the output is a valid JSON object
-    And the "command" field is "navigate"
-    And the "examples" array has at least 3 entries
-    And the exit code is 0
+    Then stdout should be a valid JSON object
+    And the JSON "command" field should be "navigate"
+    And the JSON "examples" array should have at least 3 entries
+    And the exit code should be 0
 
   Scenario: Pretty-printed JSON output
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples --pretty"
-    Then the output is a valid JSON array
-    And the output contains indentation (multi-line formatted)
-    And the exit code is 0
+    Then stdout should be a valid JSON array
+    And stdout should be multi-line
+    And the exit code should be 0
 
   # --- Error Handling ---
 
   Scenario: Error on unknown command group
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples nonexistent"
-    Then the exit code is 1
-    And stderr contains an error message about unknown command
+    Then the exit code should be 1
+    And stderr should contain "Unknown command group"
 
   # --- Coverage ---
 
   Scenario Outline: Each command group has at least 3 examples
-    Given chrome-cli is installed
+    Given the chrome-cli binary is available
     When I run "chrome-cli examples <group> --json"
-    Then the output is a valid JSON object
-    And the "examples" array has at least 3 entries
-    And the exit code is 0
+    Then stdout should be a valid JSON object
+    And the JSON "examples" array should have at least 3 entries
+    And the exit code should be 0
 
     Examples:
       | group    |

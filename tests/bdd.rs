@@ -2010,6 +2010,209 @@ fn resolve_json_path<'a>(json: &'a serde_json::Value, path: &str) -> &'a serde_j
 }
 
 // =============================================================================
+// ExamplesWorld — Examples subcommand BDD tests
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct ExamplesWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+    /// Parsed JSON value from stdout (cached for multi-step assertions).
+    parsed_json: Option<serde_json::Value>,
+}
+
+#[given("the chrome-cli binary is available")]
+fn examples_binary_available(world: &mut ExamplesWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[when(expr = "I run {string}")]
+fn examples_run_command(world: &mut ExamplesWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given the chrome-cli binary is available'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "chrome-cli") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+    world.parsed_json = None; // reset cache
+}
+
+#[then(expr = "the exit code should be {int}")]
+fn examples_exit_code(world: &mut ExamplesWorld, expected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, expected,
+        "Expected exit code {expected}, got {actual}\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stdout should contain {string}")]
+fn examples_stdout_contains(world: &mut ExamplesWorld, expected: String) {
+    assert!(
+        world.stdout.contains(&expected),
+        "stdout does not contain '{expected}'\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then(expr = "stderr should contain {string}")]
+fn examples_stderr_contains(world: &mut ExamplesWorld, expected: String) {
+    assert!(
+        world.stderr.contains(&expected),
+        "stderr does not contain '{expected}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "stdout should not start with {string}")]
+fn examples_stdout_not_start_with(world: &mut ExamplesWorld, prefix: String) {
+    assert!(
+        !world.stdout.starts_with(&prefix),
+        "stdout should not start with '{prefix}'\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then("the output should have at least 3 example commands")]
+fn examples_at_least_3_commands(world: &mut ExamplesWorld) {
+    let count = world
+        .stdout
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("chrome-cli ")
+        })
+        .count();
+    assert!(
+        count >= 3,
+        "Expected at least 3 example commands, found {count}\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then("stdout should be a valid JSON array")]
+fn examples_stdout_json_array(world: &mut ExamplesWorld) {
+    let trimmed = world.stdout.trim();
+    let parsed: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|e| {
+        panic!("stdout is not valid JSON: {e}\nstdout: {trimmed}");
+    });
+    assert!(
+        parsed.is_array(),
+        "Expected JSON array, got: {parsed}"
+    );
+    world.parsed_json = Some(parsed);
+}
+
+#[then("stdout should be a valid JSON object")]
+fn examples_stdout_json_object(world: &mut ExamplesWorld) {
+    let trimmed = world.stdout.trim();
+    let parsed: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|e| {
+        panic!("stdout is not valid JSON: {e}\nstdout: {trimmed}");
+    });
+    assert!(
+        parsed.is_object(),
+        "Expected JSON object, got: {parsed}"
+    );
+    world.parsed_json = Some(parsed);
+}
+
+#[then(expr = "each JSON entry should have a {string} field")]
+fn examples_each_entry_has_field(world: &mut ExamplesWorld, field: String) {
+    let json = world
+        .parsed_json
+        .as_ref()
+        .expect("No parsed JSON — call a JSON validation step first");
+    let arr = json.as_array().expect("Expected JSON array");
+    for (i, entry) in arr.iter().enumerate() {
+        assert!(
+            entry.get(&field).is_some(),
+            "Entry {i} missing '{field}' field\nEntry: {entry}"
+        );
+    }
+}
+
+#[then(expr = "each JSON entry should have an {string} array")]
+fn examples_each_entry_has_array(world: &mut ExamplesWorld, field: String) {
+    let json = world
+        .parsed_json
+        .as_ref()
+        .expect("No parsed JSON — call a JSON validation step first");
+    let arr = json.as_array().expect("Expected JSON array");
+    for (i, entry) in arr.iter().enumerate() {
+        let val = entry.get(&field).unwrap_or_else(|| {
+            panic!("Entry {i} missing '{field}' field\nEntry: {entry}");
+        });
+        assert!(
+            val.is_array(),
+            "Entry {i} '{field}' is not an array\nValue: {val}"
+        );
+    }
+}
+
+#[then(expr = "the JSON {string} field should be {string}")]
+fn examples_json_field_equals(world: &mut ExamplesWorld, field: String, expected: String) {
+    let json = world
+        .parsed_json
+        .as_ref()
+        .expect("No parsed JSON — call a JSON validation step first");
+    let val = json
+        .get(&field)
+        .unwrap_or_else(|| panic!("JSON missing '{field}' field\nJSON: {json}"));
+    assert_eq!(
+        val.as_str().unwrap_or(""),
+        expected,
+        "Expected '{field}' to be '{expected}', got: {val}"
+    );
+}
+
+#[then(expr = "the JSON {string} array should have at least {int} entries")]
+fn examples_json_array_min_entries(world: &mut ExamplesWorld, field: String, min: usize) {
+    let json = world
+        .parsed_json
+        .as_ref()
+        .expect("No parsed JSON — call a JSON validation step first");
+    let arr = json
+        .get(&field)
+        .unwrap_or_else(|| panic!("JSON missing '{field}' field\nJSON: {json}"))
+        .as_array()
+        .unwrap_or_else(|| panic!("'{field}' is not an array\nJSON: {json}"));
+    assert!(
+        arr.len() >= min,
+        "Expected at least {min} entries in '{field}', got {}\nJSON: {json}",
+        arr.len()
+    );
+}
+
+#[then("stdout should be multi-line")]
+fn examples_stdout_multiline(world: &mut ExamplesWorld) {
+    let line_count = world.stdout.lines().count();
+    assert!(
+        line_count > 1,
+        "Expected multi-line output, got {line_count} line(s)\nstdout: {}",
+        world.stdout
+    );
+}
+
+// =============================================================================
 // ReadmeWorld — README documentation BDD tests
 // =============================================================================
 
@@ -2610,6 +2813,9 @@ async fn main() {
 
     // Man page generation — all scenarios are CLI-testable (no Chrome needed).
     CliWorld::run("tests/features/man-page-generation.feature").await;
+
+    // Examples subcommand — all scenarios are CLI-testable (no Chrome needed).
+    ExamplesWorld::run("tests/features/examples.feature").await;
 
     // README documentation — all scenarios are file-parsing tests (no Chrome needed).
     ReadmeWorld::run("tests/features/readme.feature").await;
