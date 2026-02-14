@@ -60,7 +60,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
     Examples:
       | subcommand |
       | dom        |
-      | console    |
       | network    |
       | emulate    |
 

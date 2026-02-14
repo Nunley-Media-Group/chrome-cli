@@ -1742,6 +1742,16 @@ const FORM_TESTABLE_SCENARIOS: &[&str] = &[
     "Clear help displays all options",
 ];
 
+/// Console BDD scenarios that can be tested without a running Chrome instance.
+/// These are pure CLI argument validation, help text, and conflict scenarios.
+const CONSOLE_TESTABLE_SCENARIOS: &[&str] = &[
+    "Console help lists read and follow subcommands",
+    "Console read help shows all flags",
+    "Console follow help shows all flags",
+    "Conflicting flags --type and --errors-only on read",
+    "Conflicting flags --type and --errors-only on follow",
+];
+
 /// Scroll BDD scenarios that can be tested without a running Chrome instance.
 /// These are pure CLI argument validation and help text scenarios.
 const SCROLL_TESTABLE_SCENARIOS: &[&str] = &[
@@ -1835,6 +1845,17 @@ async fn main() {
             "tests/features/scroll.feature",
             |_feature, _rule, scenario| {
                 SCROLL_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Console message reading — only CLI-testable scenarios (argument validation, help text, conflicts).
+    // Scenarios requiring a running Chrome instance are commented out in the feature file.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/console.feature",
+            |_feature, _rule, scenario| {
+                CONSOLE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

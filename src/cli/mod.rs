@@ -135,7 +135,7 @@ pub enum Command {
         long_about = "Read and monitor browser console messages (log, warn, error, info). \
             Can capture existing messages or stream new messages in real time."
     )]
-    Console,
+    Console(ConsoleArgs),
 
     /// Network request monitoring and interception
     #[command(
@@ -842,4 +842,64 @@ pub struct FormClearArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+}
+
+/// Arguments for the `console` subcommand group.
+#[derive(Args)]
+pub struct ConsoleArgs {
+    #[command(subcommand)]
+    pub command: ConsoleCommand,
+}
+
+/// Console subcommands.
+#[derive(Subcommand)]
+pub enum ConsoleCommand {
+    /// List console messages or get details of a specific message
+    Read(ConsoleReadArgs),
+
+    /// Stream console messages in real-time (tail -f style)
+    Follow(ConsoleFollowArgs),
+}
+
+/// Arguments for `console read`.
+#[derive(Args)]
+pub struct ConsoleReadArgs {
+    /// Message ID to get detailed information about a specific message
+    pub msg_id: Option<u64>,
+
+    /// Filter by message type (comma-separated: log,error,warn,info,debug,dir,table,trace,assert,count,timeEnd)
+    #[arg(long, value_name = "TYPES", conflicts_with = "errors_only")]
+    pub r#type: Option<String>,
+
+    /// Show only error and assert messages (shorthand for --type error,assert)
+    #[arg(long, conflicts_with = "type")]
+    pub errors_only: bool,
+
+    /// Maximum number of messages to return
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+
+    /// Pagination page number (0-based)
+    #[arg(long, default_value_t = 0)]
+    pub page: usize,
+
+    /// Include messages from previous navigations
+    #[arg(long)]
+    pub include_preserved: bool,
+}
+
+/// Arguments for `console follow`.
+#[derive(Args)]
+pub struct ConsoleFollowArgs {
+    /// Filter by message type (comma-separated: log,error,warn,info,debug,dir,table,trace,assert,count,timeEnd)
+    #[arg(long, value_name = "TYPES", conflicts_with = "errors_only")]
+    pub r#type: Option<String>,
+
+    /// Show only error and assert messages (shorthand for --type error,assert)
+    #[arg(long, conflicts_with = "type")]
+    pub errors_only: bool,
+
+    /// Auto-exit after the specified number of milliseconds
+    #[arg(long)]
+    pub timeout: Option<u64>,
 }

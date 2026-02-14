@@ -1,4 +1,5 @@
 mod cli;
+mod console;
 mod dialog;
 mod form;
 mod interact;
@@ -43,7 +44,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Page(args) => page::execute_page(&cli.global, args).await,
         Command::Dom => Err(AppError::not_implemented("dom")),
         Command::Js(args) => js::execute_js(&cli.global, args).await,
-        Command::Console => Err(AppError::not_implemented("console")),
+        Command::Console(args) => console::execute_console(&cli.global, args).await,
         Command::Network => Err(AppError::not_implemented("network")),
         Command::Interact(args) => interact::execute_interact(&cli.global, args).await,
         Command::Form(args) => form::execute_form(&cli.global, args).await,
