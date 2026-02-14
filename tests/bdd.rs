@@ -1695,6 +1695,7 @@ struct ConfigWorld {
     temp_dir: PathBuf,
     config_path: Option<PathBuf>,
     init_path: Option<PathBuf>,
+    project_dir: Option<PathBuf>,
     stdout: String,
     stderr: String,
     exit_code: Option<i32>,
@@ -1712,6 +1713,7 @@ impl Default for ConfigWorld {
             temp_dir,
             config_path: None,
             init_path: None,
+            project_dir: None,
             stdout: String::new(),
             stderr: String::new(),
             exit_code: None,
@@ -1730,6 +1732,9 @@ impl ConfigWorld {
         let fake_home = self.temp_dir.join("fake-home");
         let _ = std::fs::create_dir_all(&fake_home);
 
+        // Use project_dir as CWD if set (for project-local config tests), else fake_home
+        let work_dir = self.project_dir.as_ref().unwrap_or(&fake_home);
+
         let mut cmd = std::process::Command::new(&binary);
         cmd.args(args)
             .env("HOME", &fake_home)
@@ -1739,8 +1744,8 @@ impl ConfigWorld {
             .env_remove("CHROME_CLI_PORT")
             .env_remove("CHROME_CLI_HOST")
             .env_remove("CHROME_CLI_TIMEOUT")
-            // Set CWD to a directory without a project-local config
-            .current_dir(&fake_home);
+            // Set CWD — project dir for project-local tests, fake_home otherwise
+            .current_dir(work_dir);
 
         for (k, v) in env_pairs {
             cmd.env(k, v);
@@ -1768,6 +1773,53 @@ fn config_file_with_content(
     let path = world.temp_dir.join(&filename);
     std::fs::write(&path, content).unwrap();
     world.config_path = Some(path);
+}
+
+#[given(regex = r#"^a project-local config file "([^"]+)" with content:$"#)]
+fn config_project_local_file(
+    world: &mut ConfigWorld,
+    filename: String,
+    step: &cucumber::gherkin::Step,
+) {
+    let content = step.docstring.as_ref().expect("Missing docstring in step");
+    // Place the config in the project CWD, which is separate from HOME
+    let project_dir = world.temp_dir.join("project");
+    let _ = std::fs::create_dir_all(&project_dir);
+    let path = project_dir.join(&filename);
+    std::fs::write(&path, content).unwrap();
+    // Flag that we should use a separate project dir as CWD
+    world.project_dir = Some(project_dir);
+}
+
+#[given(regex = r#"^an XDG config file "([^"]+)" with content:$"#)]
+fn config_xdg_file(
+    world: &mut ConfigWorld,
+    relative_path: String,
+    step: &cucumber::gherkin::Step,
+) {
+    let content = step.docstring.as_ref().expect("Missing docstring in step");
+    // Place config in the XDG config dir under fake home
+    let fake_home = world.temp_dir.join("fake-home");
+    #[cfg(target_os = "macos")]
+    let config_dir = fake_home.join("Library").join("Application Support");
+    #[cfg(not(target_os = "macos"))]
+    let config_dir = fake_home.join(".config");
+    let path = config_dir.join(&relative_path);
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    std::fs::write(&path, content).unwrap();
+}
+
+#[given(regex = r#"^a home directory config file "([^"]+)" with content:$"#)]
+fn config_home_dir_file(
+    world: &mut ConfigWorld,
+    filename: String,
+    step: &cucumber::gherkin::Step,
+) {
+    let content = step.docstring.as_ref().expect("Missing docstring in step");
+    let fake_home = world.temp_dir.join("fake-home");
+    let _ = std::fs::create_dir_all(&fake_home);
+    let path = fake_home.join(&filename);
+    std::fs::write(&path, content).unwrap();
 }
 
 #[given("no config file exists at the init target path")]

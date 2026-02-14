@@ -25,6 +25,51 @@ Feature: Configuration file support
     Then the exit code should be 0
     And the JSON output field "connection.port" should be 9444
 
+  Scenario: Load config from project-local file
+    Given a project-local config file ".chrome-cli.toml" with content:
+      """
+      [connection]
+      port = 9555
+      """
+    When I run chrome-cli with "config show"
+    Then the exit code should be 0
+    And the JSON output field "connection.port" should be 9555
+
+  Scenario: Load config from XDG standard path
+    Given an XDG config file "chrome-cli/config.toml" with content:
+      """
+      [connection]
+      host = "10.0.0.1"
+      """
+    When I run chrome-cli with "config show"
+    Then the exit code should be 0
+    And the JSON output field "connection.host" should be "10.0.0.1"
+
+  Scenario: Load config from home directory fallback
+    Given a home directory config file ".chrome-cli.toml" with content:
+      """
+      [output]
+      format = "pretty"
+      """
+    When I run chrome-cli with "config show"
+    Then the exit code should be 0
+    And the JSON output field "output.format" should be "pretty"
+
+  Scenario: Config file priority - project-local wins over home directory
+    Given a project-local config file ".chrome-cli.toml" with content:
+      """
+      [connection]
+      port = 1111
+      """
+    And a home directory config file ".chrome-cli.toml" with content:
+      """
+      [connection]
+      port = 2222
+      """
+    When I run chrome-cli with "config show"
+    Then the exit code should be 0
+    And the JSON output field "connection.port" should be 1111
+
   Scenario: CLI flags override config file values
     Given a config file at "override.toml" with content:
       """
