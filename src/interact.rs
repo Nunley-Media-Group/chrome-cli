@@ -2160,10 +2160,45 @@ mod tests {
     }
 
     // =========================================================================
+    // Scroll delta computation tests
+    // =========================================================================
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn compute_delta_returns_correct_values() {
+        let (dx, dy, px, py) = compute_delta((10.0, 20.0), (30.0, 50.0));
+        assert_eq!(dx, 20.0);
+        assert_eq!(dy, 30.0);
+        assert_eq!(px, 30.0);
+        assert_eq!(py, 50.0);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn compute_delta_negative_scroll() {
+        let (dx, dy, px, py) = compute_delta((100.0, 200.0), (50.0, 100.0));
+        assert_eq!(dx, -50.0);
+        assert_eq!(dy, -100.0);
+        assert_eq!(px, 50.0);
+        assert_eq!(py, 100.0);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn compute_delta_no_movement() {
+        let (dx, dy, px, py) = compute_delta((0.0, 0.0), (0.0, 0.0));
+        assert_eq!(dx, 0.0);
+        assert_eq!(dy, 0.0);
+        assert_eq!(px, 0.0);
+        assert_eq!(py, 0.0);
+    }
+
+    // =========================================================================
     // Scroll direction delta computation tests
     // =========================================================================
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn compute_scroll_delta_down_default() {
         let (dx, dy) = compute_scroll_delta(ScrollDirection::Down, None, 1024.0, 768.0);
         assert_eq!(dx, 0.0);
@@ -2171,6 +2206,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn compute_scroll_delta_up_default() {
         let (dx, dy) = compute_scroll_delta(ScrollDirection::Up, None, 1024.0, 768.0);
         assert_eq!(dx, 0.0);
@@ -2178,6 +2214,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn compute_scroll_delta_right_default() {
         let (dx, dy) = compute_scroll_delta(ScrollDirection::Right, None, 1024.0, 768.0);
         assert_eq!(dx, 1024.0);
@@ -2185,6 +2222,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn compute_scroll_delta_left_default() {
         let (dx, dy) = compute_scroll_delta(ScrollDirection::Left, None, 1024.0, 768.0);
         assert_eq!(dx, -1024.0);
@@ -2192,6 +2230,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn compute_scroll_delta_down_with_amount() {
         let (dx, dy) = compute_scroll_delta(ScrollDirection::Down, Some(300), 1024.0, 768.0);
         assert_eq!(dx, 0.0);
@@ -2199,6 +2238,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn compute_scroll_delta_right_with_amount() {
         let (dx, dy) = compute_scroll_delta(ScrollDirection::Right, Some(200), 1024.0, 768.0);
         assert_eq!(dx, 200.0);
