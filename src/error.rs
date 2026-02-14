@@ -346,6 +346,30 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn file_not_found(path: &str) -> Self {
+        Self {
+            message: format!("File not found: {path}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn file_not_readable(path: &str) -> Self {
+        Self {
+            message: format!("File not readable: {path}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn not_file_input(target: &str) -> Self {
+        Self {
+            message: format!("Element is not a file input: {target}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
     pub fn stale_uid(uid: &str) -> Self {
         Self {
             message: format!(
@@ -663,6 +687,30 @@ mod tests {
         assert!(err.message.contains("No JavaScript code provided"));
         assert!(err.message.contains("--file"));
         assert!(err.message.contains("stdin"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn file_not_found_error() {
+        let err = AppError::file_not_found("/nonexistent/file.txt");
+        assert!(err.message.contains("File not found"));
+        assert!(err.message.contains("/nonexistent/file.txt"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn file_not_readable_error() {
+        let err = AppError::file_not_readable("/tmp/secret.txt");
+        assert!(err.message.contains("File not readable"));
+        assert!(err.message.contains("/tmp/secret.txt"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn not_file_input_error() {
+        let err = AppError::not_file_input("s2");
+        assert!(err.message.contains("Element is not a file input"));
+        assert!(err.message.contains("s2"));
         assert!(matches!(err.code, ExitCode::GeneralError));
     }
 }
