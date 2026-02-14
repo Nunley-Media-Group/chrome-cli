@@ -1087,4 +1087,98 @@ mod tests {
         };
         print_detail_plain(&detail);
     }
+
+    // =========================================================================
+    // timestamp_to_iso
+    // =========================================================================
+
+    #[test]
+    fn timestamp_to_iso_epoch_zero() {
+        assert_eq!(timestamp_to_iso(0.0), "1970-01-01T00:00:00.000Z");
+    }
+
+    #[test]
+    fn timestamp_to_iso_known_value() {
+        // 2024-02-14T12:00:00.000Z = 1707912000000 ms since epoch
+        assert_eq!(
+            timestamp_to_iso(1_707_912_000_000.0),
+            "2024-02-14T12:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn timestamp_to_iso_with_milliseconds() {
+        // 2024-02-14T12:00:00.123Z = 1707912000123 ms since epoch
+        assert_eq!(
+            timestamp_to_iso(1_707_912_000_123.0),
+            "2024-02-14T12:00:00.123Z"
+        );
+    }
+
+    #[test]
+    fn timestamp_to_iso_year_2026() {
+        // 2026-01-01T00:00:00.000Z = 1767225600000 ms since epoch
+        assert_eq!(
+            timestamp_to_iso(1_767_225_600_000.0),
+            "2026-01-01T00:00:00.000Z"
+        );
+    }
+
+    // =========================================================================
+    // parse_console_event_detail
+    // =========================================================================
+
+    #[test]
+    fn parse_console_event_detail_basic() {
+        let params = serde_json::json!({
+            "type": "error",
+            "args": [
+                {"type": "string", "value": "something failed"}
+            ],
+            "timestamp": 1_707_912_000_000.0_f64,
+            "stackTrace": {
+                "callFrames": [
+                    {
+                        "url": "https://example.com/app.js",
+                        "lineNumber": 42,
+                        "columnNumber": 5,
+                        "functionName": "handleClick"
+                    },
+                    {
+                        "url": "https://example.com/lib.js",
+                        "lineNumber": 100,
+                        "columnNumber": 10,
+                        "functionName": ""
+                    }
+                ]
+            }
+        });
+        let detail = parse_console_event_detail(&params, 3).unwrap();
+        assert_eq!(detail.id, 3);
+        assert_eq!(detail.msg_type, "error");
+        assert_eq!(detail.text, "something failed");
+        assert_eq!(detail.url, "https://example.com/app.js");
+        assert_eq!(detail.line, 42);
+        assert_eq!(detail.column, 5);
+        assert_eq!(detail.args.len(), 1);
+        assert_eq!(detail.stack_trace.len(), 2);
+        assert_eq!(detail.stack_trace[0].function_name, "handleClick");
+        assert_eq!(detail.stack_trace[1].function_name, "");
+    }
+
+    #[test]
+    fn parse_console_event_detail_no_stack_trace() {
+        let params = serde_json::json!({
+            "type": "log",
+            "args": [{"type": "string", "value": "hello"}],
+            "timestamp": 1_707_912_000_000.0_f64,
+            "stackTrace": {"callFrames": []}
+        });
+        let detail = parse_console_event_detail(&params, 0).unwrap();
+        assert_eq!(detail.msg_type, "log");
+        assert!(detail.stack_trace.is_empty());
+        assert_eq!(detail.url, "");
+        assert_eq!(detail.line, 0);
+        assert_eq!(detail.column, 0);
+    }
 }
