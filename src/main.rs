@@ -2,6 +2,7 @@ mod cli;
 mod console;
 mod dialog;
 mod emulate;
+mod examples;
 mod form;
 mod interact;
 mod js;
@@ -64,6 +65,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Emulate(args) => emulate::execute_emulate(&global, args).await,
         Command::Perf(args) => perf::execute_perf(&global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
+        Command::Examples(args) => examples::execute_examples(&global, args),
         Command::Completions(args) => execute_completions(args),
         Command::Man(args) => execute_man(args),
     }

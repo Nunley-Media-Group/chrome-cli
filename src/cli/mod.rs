@@ -464,6 +464,27 @@ EXAMPLES:
     )]
     Completions(CompletionsArgs),
 
+    /// Show usage examples for commands
+    #[command(
+        long_about = "Show usage examples for chrome-cli commands. Without arguments, lists all \
+            command groups with a brief description and one example each. With a command name, \
+            shows detailed examples for that specific command group.",
+        after_long_help = "\
+EXAMPLES:
+  # List all command groups with summary examples
+  chrome-cli examples
+
+  # Show detailed examples for the navigate command
+  chrome-cli examples navigate
+
+  # Get all examples as JSON (for programmatic use)
+  chrome-cli examples --json
+
+  # Pretty-printed JSON output
+  chrome-cli examples --pretty"
+    )]
+    Examples(ExamplesArgs),
+
     /// Display man pages for chrome-cli commands
     #[command(
         long_about = "Display man pages for chrome-cli commands. Without arguments, displays \
@@ -2049,5 +2070,12 @@ pub struct CompletionsArgs {
 #[derive(Args)]
 pub struct ManArgs {
     /// Subcommand to display man page for (omit for top-level)
+    pub command: Option<String>,
+}
+
+/// Arguments for the `examples` subcommand.
+#[derive(Args)]
+pub struct ExamplesArgs {
+    /// Command group to show examples for (e.g., navigate, tabs, page)
     pub command: Option<String>,
 }

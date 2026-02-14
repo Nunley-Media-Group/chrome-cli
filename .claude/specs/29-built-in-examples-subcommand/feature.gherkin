@@ -1,0 +1,107 @@
+# File: tests/features/examples.feature
+#
+# Generated from: .claude/specs/29-built-in-examples-subcommand/requirements.md
+# Issue: #29
+
+Feature: Built-in Examples Subcommand
+  As a developer or AI agent using chrome-cli
+  I want a dedicated examples subcommand that prints usage examples
+  So that I can discover working CLI invocations without parsing --help output
+
+  # --- Happy Path ---
+
+  Scenario: List all command groups with summary examples
+    Given chrome-cli is installed
+    When I run "chrome-cli examples"
+    Then the output lists every command group with a description and one example
+    And the output contains "connect"
+    And the output contains "tabs"
+    And the output contains "navigate"
+    And the output contains "page"
+    And the output contains "js"
+    And the output contains "console"
+    And the output contains "network"
+    And the output contains "interact"
+    And the output contains "form"
+    And the output contains "emulate"
+    And the output contains "perf"
+    And the output contains "dialog"
+    And the output contains "config"
+    And the exit code is 0
+
+  Scenario: Show detailed examples for a specific command group
+    Given chrome-cli is installed
+    When I run "chrome-cli examples navigate"
+    Then the output contains at least 3 examples
+    And each example includes a command string starting with "chrome-cli navigate"
+    And each example includes a description comment
+    And the exit code is 0
+
+  # --- Output Formats ---
+
+  Scenario: Plain text output is the default
+    Given chrome-cli is installed
+    When I run "chrome-cli examples"
+    Then the output is human-readable plain text
+    And the output does not start with "["
+    And the output does not start with "{"
+    And the exit code is 0
+
+  Scenario: JSON output for summary listing
+    Given chrome-cli is installed
+    When I run "chrome-cli examples --json"
+    Then the output is a valid JSON array
+    And each entry has a "command" field
+    And each entry has a "description" field
+    And each entry has an "examples" array
+    And each example has a "cmd" field
+    And each example has a "description" field
+    And the exit code is 0
+
+  Scenario: JSON output for a specific command group
+    Given chrome-cli is installed
+    When I run "chrome-cli examples navigate --json"
+    Then the output is a valid JSON object
+    And the "command" field is "navigate"
+    And the "examples" array has at least 3 entries
+    And the exit code is 0
+
+  Scenario: Pretty-printed JSON output
+    Given chrome-cli is installed
+    When I run "chrome-cli examples --pretty"
+    Then the output is a valid JSON array
+    And the output contains indentation (multi-line formatted)
+    And the exit code is 0
+
+  # --- Error Handling ---
+
+  Scenario: Error on unknown command group
+    Given chrome-cli is installed
+    When I run "chrome-cli examples nonexistent"
+    Then the exit code is 1
+    And stderr contains an error message about unknown command
+
+  # --- Coverage ---
+
+  Scenario Outline: Each command group has at least 3 examples
+    Given chrome-cli is installed
+    When I run "chrome-cli examples <group> --json"
+    Then the output is a valid JSON object
+    And the "examples" array has at least 3 entries
+    And the exit code is 0
+
+    Examples:
+      | group    |
+      | connect  |
+      | tabs     |
+      | navigate |
+      | page     |
+      | js       |
+      | console  |
+      | network  |
+      | interact |
+      | form     |
+      | emulate  |
+      | perf     |
+      | dialog   |
+      | config   |
