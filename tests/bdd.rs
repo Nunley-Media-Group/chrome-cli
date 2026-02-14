@@ -2208,4 +2208,7 @@ async fn main() {
 
     // Help text — all scenarios are CLI-testable (no Chrome needed, just --help output).
     CliWorld::run("tests/features/help-text.feature").await;
+
+    // Man page generation — all scenarios are CLI-testable (no Chrome needed).
+    CliWorld::run("tests/features/man-page-generation.feature").await;
 }

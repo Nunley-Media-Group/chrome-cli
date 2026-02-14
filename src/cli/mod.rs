@@ -1,4 +1,6 @@
 #![allow(clippy::doc_markdown)]
+// Items used by the binary crate may appear unused from the library crate's perspective.
+#![allow(dead_code)]
 
 use std::path::PathBuf;
 
@@ -107,10 +109,12 @@ pub struct GlobalOpts {
 
 impl GlobalOpts {
     /// Returns the port if explicitly provided, or the default (9222).
+    /// Default CDP port when none is explicitly provided.
+    const DEFAULT_PORT: u16 = 9222;
+
     #[must_use]
     pub fn port_or_default(&self) -> u16 {
-        self.port
-            .unwrap_or(chrome_cli::connection::DEFAULT_CDP_PORT)
+        self.port.unwrap_or(Self::DEFAULT_PORT)
     }
 }
 
@@ -459,6 +463,27 @@ EXAMPLES:
   chrome-cli completions elvish >> ~/.elvish/rc.elv"
     )]
     Completions(CompletionsArgs),
+
+    /// Display man pages for chrome-cli commands
+    #[command(
+        long_about = "Display man pages for chrome-cli commands. Without arguments, displays \
+            the main chrome-cli man page. With a subcommand name, displays the man page for \
+            that specific command. Output is in roff format, suitable for piping to a pager.",
+        after_long_help = "\
+EXAMPLES:
+  # Display the main chrome-cli man page
+  chrome-cli man
+
+  # Display the man page for the connect command
+  chrome-cli man connect
+
+  # Display the man page for the tabs command
+  chrome-cli man tabs
+
+  # Pipe to a pager
+  chrome-cli man navigate | less"
+    )]
+    Man(ManArgs),
 }
 
 /// Chrome release channel to use when launching.
@@ -2018,4 +2043,11 @@ pub struct ConfigInitArgs {
 pub struct CompletionsArgs {
     /// Shell to generate completions for (bash, zsh, fish, powershell, elvish)
     pub shell: Shell,
+}
+
+/// Arguments for the `man` subcommand.
+#[derive(Args)]
+pub struct ManArgs {
+    /// Subcommand to display man page for (omit for top-level)
+    pub command: Option<String>,
 }

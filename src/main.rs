@@ -26,7 +26,9 @@ use chrome_cli::connection::{self, extract_port_from_ws_url};
 use chrome_cli::error::{AppError, ExitCode};
 use chrome_cli::session::{self, SessionData};
 
-use cli::{ChromeChannel, Cli, Command, CompletionsArgs, ConfigCommand, ConnectArgs, GlobalOpts};
+use cli::{
+    ChromeChannel, Cli, Command, CompletionsArgs, ConfigCommand, ConnectArgs, GlobalOpts, ManArgs,
+};
 
 #[tokio::main]
 async fn main() {
@@ -63,6 +65,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Perf(args) => perf::execute_perf(&global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
         Command::Completions(args) => execute_completions(args),
+        Command::Man(args) => execute_man(args),
     }
 }
 
@@ -183,6 +186,37 @@ fn execute_completions(args: &CompletionsArgs) -> Result<(), AppError> {
     let mut cmd = Cli::command();
     clap_complete::generate(args.shell, &mut cmd, "chrome-cli", &mut std::io::stdout());
     Ok(())
+}
+
+fn execute_man(args: &ManArgs) -> Result<(), AppError> {
+    let cmd = Cli::command();
+
+    let target = match &args.command {
+        None => cmd,
+        Some(name) => find_subcommand(&cmd, name).ok_or_else(|| AppError {
+            message: format!("unknown command: {name}"),
+            code: ExitCode::GeneralError,
+        })?,
+    };
+
+    let man = clap_mangen::Man::new(target);
+    man.render(&mut std::io::stdout()).map_err(|e| AppError {
+        message: format!("failed to render man page: {e}"),
+        code: ExitCode::GeneralError,
+    })?;
+    Ok(())
+}
+
+fn find_subcommand(cmd: &clap::Command, name: &str) -> Option<clap::Command> {
+    let parent_name = cmd.get_name().to_string();
+    for sub in cmd.get_subcommands() {
+        if sub.get_name() == name {
+            let full_name = format!("{parent_name}-{name}");
+            let leaked: &'static str = Box::leak(full_name.into_boxed_str());
+            return Some(sub.clone().name(leaked));
+        }
+    }
+    None
 }
 
 #[derive(Serialize)]

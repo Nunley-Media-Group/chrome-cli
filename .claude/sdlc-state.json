@@ -1,8 +1,8 @@
 {
-  "currentStep": 7,
-  "currentIssue": 26,
-  "currentBranch": "26-comprehensive-help-text",
-  "featureName": "26-comprehensive-help-text",
-  "lastTransitionAt": "2026-02-14T14:32:04Z",
+  "currentStep": 4,
+  "currentIssue": 27,
+  "currentBranch": "27-man-page-generation",
+  "featureName": "27-man-page-generation",
+  "lastTransitionAt": "2026-02-14T14:40:02Z",
   "retries": {}
 }
