@@ -1731,6 +1731,17 @@ const KEYBOARD_TESTABLE_SCENARIOS: &[&str] = &[
     "Key rejects duplicate modifier",
 ];
 
+/// Form BDD scenarios that can be tested without a running Chrome instance.
+/// These are pure CLI argument validation and help text scenarios.
+const FORM_TESTABLE_SCENARIOS: &[&str] = &[
+    "Fill requires target and value arguments",
+    "Clear requires a target argument",
+    "Form help displays all subcommands",
+    "Fill help displays all options",
+    "Fill-many help displays all options",
+    "Clear help displays all options",
+];
+
 #[tokio::main]
 async fn main() {
     WorkflowWorld::run("tests/features/release-pipeline.feature").await;
@@ -1793,6 +1804,15 @@ async fn main() {
             |_feature, _rule, scenario| {
                 KEYBOARD_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
+        )
+        .await;
+
+    // Form input — only CLI-testable scenarios (argument validation, help text).
+    // Scenarios requiring a running Chrome instance are commented out in the feature file.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/form.feature",
+            |_feature, _rule, scenario| FORM_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
         )
         .await;
 }
