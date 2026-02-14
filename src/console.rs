@@ -7,9 +7,7 @@ use chrome_cli::cdp::{CdpClient, CdpConfig};
 use chrome_cli::connection::{ManagedSession, resolve_connection, resolve_target};
 use chrome_cli::error::{AppError, ExitCode};
 
-use crate::cli::{
-    ConsoleArgs, ConsoleCommand, ConsoleFollowArgs, ConsoleReadArgs, GlobalOpts,
-};
+use crate::cli::{ConsoleArgs, ConsoleCommand, ConsoleFollowArgs, ConsoleReadArgs, GlobalOpts};
 
 // =============================================================================
 // Output types
@@ -119,7 +117,10 @@ fn print_detail_plain(detail: &ConsoleMessageDetail) {
             } else {
                 &frame.function_name
             };
-            println!("    at {func} ({}:{}:{})", frame.file, frame.line, frame.column);
+            println!(
+                "    at {func} ({}:{}:{})",
+                frame.file, frame.line, frame.column
+            );
         }
     }
 }
@@ -336,12 +337,7 @@ fn resolve_type_filter(type_arg: Option<&str>, errors_only: bool) -> Option<Vec<
     if errors_only {
         return Some(vec!["error".to_string(), "assert".to_string()]);
     }
-    type_arg.map(|types| {
-        types
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .collect()
-    })
+    type_arg.map(|types| types.split(',').map(|t| t.trim().to_string()).collect())
 }
 
 /// Filter messages by type list.
@@ -486,12 +482,13 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
                 code: ExitCode::GeneralError,
             });
         }
-        let detail = parse_console_event_detail(&events_to_process[id].params, id).ok_or_else(
-            || AppError {
-                message: format!("Failed to parse message ID {id}"),
-                code: ExitCode::GeneralError,
-            },
-        )?;
+        let detail =
+            parse_console_event_detail(&events_to_process[id].params, id).ok_or_else(|| {
+                AppError {
+                    message: format!("Failed to parse message ID {id}"),
+                    code: ExitCode::GeneralError,
+                }
+            })?;
 
         if global.output.plain {
             print_detail_plain(&detail);
@@ -732,8 +729,9 @@ mod tests {
 
     #[test]
     fn format_args_object() {
-        let args =
-            vec![serde_json::json!({"type": "object", "className": "Object", "description": "Object"})];
+        let args = vec![
+            serde_json::json!({"type": "object", "className": "Object", "description": "Object"}),
+        ];
         assert_eq!(format_console_args(&args), "Object");
     }
 
@@ -816,7 +814,11 @@ mod tests {
         ];
         let filtered = filter_by_type(messages, &["error".to_string(), "warn".to_string()]);
         assert_eq!(filtered.len(), 2);
-        assert!(filtered.iter().all(|m| m.msg_type == "error" || m.msg_type == "warn"));
+        assert!(
+            filtered
+                .iter()
+                .all(|m| m.msg_type == "error" || m.msg_type == "warn")
+        );
     }
 
     // =========================================================================

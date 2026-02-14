@@ -1072,9 +1072,7 @@ async fn dispatch_page_scroll(
     smooth: bool,
 ) -> Result<(), AppError> {
     let behavior = if smooth { "smooth" } else { "instant" };
-    let expr = format!(
-        "window.scrollBy({{left: {dx}, top: {dy}, behavior: '{behavior}'}})"
-    );
+    let expr = format!("window.scrollBy({{left: {dx}, top: {dy}, behavior: '{behavior}'}})");
     session
         .send_command(
             "Runtime.evaluate",
@@ -1093,9 +1091,7 @@ async fn dispatch_page_scroll_to(
     smooth: bool,
 ) -> Result<(), AppError> {
     let behavior = if smooth { "smooth" } else { "instant" };
-    let expr = format!(
-        "window.scrollTo({{left: {x}, top: {y}, behavior: '{behavior}'}})"
-    );
+    let expr = format!("window.scrollTo({{left: {x}, top: {y}, behavior: '{behavior}'}})");
     session
         .send_command(
             "Runtime.evaluate",
@@ -1277,7 +1273,10 @@ async fn execute_scroll(global: &GlobalOpts, args: &ScrollArgs) -> Result<(), Ap
         if args.smooth {
             wait_for_smooth_container_scroll(&mut managed, cid).await?;
         }
-        compute_delta(before, get_container_scroll_position(&mut managed, cid).await?)
+        compute_delta(
+            before,
+            get_container_scroll_position(&mut managed, cid).await?,
+        )
     } else {
         mode_label = "direction";
         let before = get_scroll_position(&mut managed).await?;
@@ -1308,8 +1307,14 @@ async fn execute_scroll(global: &GlobalOpts, args: &ScrollArgs) -> Result<(), Ap
     };
 
     let result = ScrollResult {
-        scrolled: Coords { x: scrolled_x, y: scrolled_y },
-        position: Coords { x: final_x, y: final_y },
+        scrolled: Coords {
+            x: scrolled_x,
+            y: scrolled_y,
+        },
+        position: Coords {
+            x: final_x,
+            y: final_y,
+        },
         snapshot,
     };
 
@@ -2149,10 +2154,7 @@ mod tests {
     fn scroll_result_without_snapshot_omits_field() {
         let result = ScrollResult {
             scrolled: Coords { x: 200.0, y: 0.0 },
-            position: Coords {
-                x: 200.0,
-                y: 100.0,
-            },
+            position: Coords { x: 200.0, y: 100.0 },
             snapshot: None,
         };
         let json_str = serde_json::to_string(&result).unwrap();

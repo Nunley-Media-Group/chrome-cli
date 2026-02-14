@@ -318,6 +318,34 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn emulation_failed(description: &str) -> Self {
+        Self {
+            message: format!("Emulation failed: {description}"),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn invalid_viewport(input: &str) -> Self {
+        Self {
+            message: format!(
+                "Invalid viewport format: expected WIDTHxHEIGHT (e.g. 1280x720): {input}"
+            ),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
+    pub fn invalid_geolocation(input: &str) -> Self {
+        Self {
+            message: format!(
+                "Invalid geolocation format: expected LAT,LONG (e.g. 37.7749,-122.4194): {input}"
+            ),
+            code: ExitCode::GeneralError,
+        }
+    }
+
+    #[must_use]
     pub fn stale_uid(uid: &str) -> Self {
         Self {
             message: format!(
@@ -601,6 +629,32 @@ mod tests {
         assert!(err.message.contains("Dialog handling failed"));
         assert!(err.message.contains("could not dismiss"));
         assert!(matches!(err.code, ExitCode::ProtocolError));
+    }
+
+    #[test]
+    fn emulation_failed_error() {
+        let err = AppError::emulation_failed("CDP returned error");
+        assert!(err.message.contains("Emulation failed"));
+        assert!(err.message.contains("CDP returned error"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn invalid_viewport_error() {
+        let err = AppError::invalid_viewport("badformat");
+        assert!(err.message.contains("Invalid viewport format"));
+        assert!(err.message.contains("WIDTHxHEIGHT"));
+        assert!(err.message.contains("badformat"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn invalid_geolocation_error() {
+        let err = AppError::invalid_geolocation("not-a-coord");
+        assert!(err.message.contains("Invalid geolocation format"));
+        assert!(err.message.contains("LAT,LONG"));
+        assert!(err.message.contains("not-a-coord"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
     }
 
     #[test]

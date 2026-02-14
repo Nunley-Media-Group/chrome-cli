@@ -166,7 +166,7 @@ pub enum Command {
             custom user agents, viewport dimensions, device scale factor, and network throttling \
             profiles."
     )]
-    Emulate,
+    Emulate(EmulateArgs),
 
     /// Performance tracing and metrics
     #[command(
@@ -327,6 +327,9 @@ pub enum PageCommand {
 
     /// Capture a screenshot of the page, an element, or a region
     Screenshot(PageScreenshotArgs),
+
+    /// Resize the viewport to the given dimensions
+    Resize(PageResizeArgs),
 }
 
 /// Image format for screenshots.
@@ -993,4 +996,105 @@ pub struct NetworkFollowArgs {
     /// Include request and response headers in stream output
     #[arg(long)]
     pub verbose: bool,
+}
+
+/// Arguments for `page resize`.
+#[derive(Args)]
+pub struct PageResizeArgs {
+    /// Viewport size as WIDTHxHEIGHT (e.g. 1280x720)
+    pub size: String,
+}
+
+/// Arguments for the `emulate` subcommand group.
+#[derive(Args)]
+pub struct EmulateArgs {
+    #[command(subcommand)]
+    pub command: EmulateCommand,
+}
+
+/// Emulate subcommands.
+#[derive(Subcommand)]
+pub enum EmulateCommand {
+    /// Apply one or more emulation overrides
+    Set(EmulateSetArgs),
+
+    /// Clear all emulation overrides
+    Reset,
+
+    /// Show current emulation settings
+    Status,
+}
+
+/// Arguments for `emulate set`.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Args)]
+pub struct EmulateSetArgs {
+    /// Network condition profile: offline, slow-4g, 4g, 3g, none
+    #[arg(long, value_enum)]
+    pub network: Option<NetworkProfile>,
+
+    /// CPU throttling rate (1 = no throttling, 2-20 = slowdown factor)
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=20))]
+    pub cpu: Option<u32>,
+
+    /// Set geolocation override as LAT,LONG (e.g. 37.7749,-122.4194)
+    #[arg(long, conflicts_with = "no_geolocation")]
+    pub geolocation: Option<String>,
+
+    /// Clear geolocation override
+    #[arg(long, conflicts_with = "geolocation")]
+    pub no_geolocation: bool,
+
+    /// Set custom user agent string
+    #[arg(long, conflicts_with = "no_user_agent")]
+    pub user_agent: Option<String>,
+
+    /// Reset user agent to browser default
+    #[arg(long, conflicts_with = "user_agent")]
+    pub no_user_agent: bool,
+
+    /// Force color scheme: dark, light, auto
+    #[arg(long, value_enum)]
+    pub color_scheme: Option<ColorScheme>,
+
+    /// Set viewport dimensions as WIDTHxHEIGHT (e.g. 375x667)
+    #[arg(long)]
+    pub viewport: Option<String>,
+
+    /// Set device pixel ratio (e.g. 2.0)
+    #[arg(long)]
+    pub device_scale: Option<f64>,
+
+    /// Emulate mobile device (touch events, mobile viewport)
+    #[arg(long)]
+    pub mobile: bool,
+}
+
+/// Network condition profiles for emulation.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum NetworkProfile {
+    /// Fully offline (no network)
+    Offline,
+    /// Slow 4G (150ms latency, 1.6 Mbps down, 750 Kbps up)
+    #[value(name = "slow-4g")]
+    Slow4g,
+    /// 4G (20ms latency, 4 Mbps down, 3 Mbps up)
+    #[value(name = "4g")]
+    FourG,
+    /// 3G (100ms latency, 750 Kbps down, 250 Kbps up)
+    #[value(name = "3g")]
+    ThreeG,
+    /// No throttling (disable network emulation)
+    None,
+}
+
+/// Color scheme for emulation.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ColorScheme {
+    /// Force dark mode
+    Dark,
+    /// Force light mode
+    Light,
+    /// Reset to browser default
+    Auto,
 }

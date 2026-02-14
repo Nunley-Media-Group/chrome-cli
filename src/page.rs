@@ -7,8 +7,8 @@ use chrome_cli::connection::{ManagedSession, resolve_connection, resolve_target}
 use chrome_cli::error::{AppError, ExitCode};
 
 use crate::cli::{
-    GlobalOpts, PageArgs, PageCommand, PageFindArgs, PageScreenshotArgs, PageSnapshotArgs,
-    PageTextArgs, ScreenshotFormat,
+    GlobalOpts, PageArgs, PageCommand, PageFindArgs, PageResizeArgs, PageScreenshotArgs,
+    PageSnapshotArgs, PageTextArgs, ScreenshotFormat,
 };
 
 // =============================================================================
@@ -105,7 +105,12 @@ pub async fn execute_page(global: &GlobalOpts, args: &PageArgs) -> Result<(), Ap
         PageCommand::Snapshot(snap_args) => execute_snapshot(global, snap_args).await,
         PageCommand::Find(find_args) => execute_find(global, find_args).await,
         PageCommand::Screenshot(ss_args) => execute_screenshot(global, ss_args).await,
+        PageCommand::Resize(resize_args) => execute_page_resize(global, resize_args).await,
     }
+}
+
+async fn execute_page_resize(global: &GlobalOpts, args: &PageResizeArgs) -> Result<(), AppError> {
+    crate::emulate::execute_resize(global, &args.size).await
 }
 
 // =============================================================================

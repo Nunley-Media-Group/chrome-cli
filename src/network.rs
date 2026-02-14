@@ -317,12 +317,7 @@ impl StatusFilter {
 
 /// Resolve `--type` into an optional type filter list.
 fn resolve_type_filter(type_arg: Option<&str>) -> Option<Vec<String>> {
-    type_arg.map(|types| {
-        types
-            .split(',')
-            .map(|t| t.trim().to_lowercase())
-            .collect()
-    })
+    type_arg.map(|types| types.split(',').map(|t| t.trim().to_lowercase()).collect())
 }
 
 /// Filter requests by resource type.
@@ -337,7 +332,10 @@ fn filter_by_type(
 }
 
 /// Filter requests by URL substring.
-fn filter_by_url(requests: Vec<NetworkRequestSummary>, pattern: &str) -> Vec<NetworkRequestSummary> {
+fn filter_by_url(
+    requests: Vec<NetworkRequestSummary>,
+    pattern: &str,
+) -> Vec<NetworkRequestSummary> {
     requests
         .into_iter()
         .filter(|r| r.url.contains(pattern))
@@ -577,10 +575,7 @@ async fn collect_and_correlate(
     let mut next_id: usize = 0;
 
     for event in &raw_events {
-        let request_id = event.params["requestId"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let request_id = event.params["requestId"].as_str().unwrap_or("").to_string();
         if request_id.is_empty() {
             continue;
         }
@@ -608,8 +603,7 @@ async fn collect_and_correlate(
                         .as_str()
                         .unwrap_or("GET")
                         .to_string();
-                    existing.request_headers =
-                        event.params["request"]["headers"].clone();
+                    existing.request_headers = event.params["request"]["headers"].clone();
                 } else {
                     let builder = NetworkRequestBuilder {
                         cdp_request_id: request_id.clone(),
@@ -648,7 +642,9 @@ async fn collect_and_correlate(
             NetworkEventType::ResponseReceived => {
                 if let Some(builder) = builders.get_mut(&request_id) {
                     #[allow(clippy::cast_possible_truncation)]
-                    let status = event.params["response"]["status"].as_u64().map(|s| s as u16);
+                    let status = event.params["response"]["status"]
+                        .as_u64()
+                        .map(|s| s as u16);
                     builder.status = status;
                     builder.status_text = event.params["response"]["statusText"]
                         .as_str()
@@ -665,16 +661,13 @@ async fn collect_and_correlate(
                 if let Some(builder) = builders.get_mut(&request_id) {
                     builder.completed = true;
                     builder.encoded_data_length = event.params["encodedDataLength"].as_u64();
-                    builder.loading_finished_timestamp =
-                        event.params["timestamp"].as_f64();
+                    builder.loading_finished_timestamp = event.params["timestamp"].as_f64();
                 }
             }
             NetworkEventType::LoadingFailed => {
                 if let Some(builder) = builders.get_mut(&request_id) {
                     builder.failed = true;
-                    builder.error_text = event.params["errorText"]
-                        .as_str()
-                        .map(String::from);
+                    builder.error_text = event.params["errorText"].as_str().map(String::from);
                 }
             }
         }
@@ -695,9 +688,9 @@ async fn collect_and_correlate(
 
 /// Convert a builder into a summary for list output.
 fn builder_to_summary(builder: &NetworkRequestBuilder) -> NetworkRequestSummary {
-    let duration_ms = builder.loading_finished_timestamp.map(|end_ts| {
-        (end_ts - builder.timestamp) * 1000.0
-    });
+    let duration_ms = builder
+        .loading_finished_timestamp
+        .map(|end_ts| (end_ts - builder.timestamp) * 1000.0);
 
     NetworkRequestSummary {
         id: builder.assigned_id,
@@ -857,34 +850,31 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
     }
 
     // Build timing info
-    let timing = builder
-        .timing
-        .as_ref()
-        .map_or_else(
-            || TimingInfo {
-                dns_ms: 0.0,
-                connect_ms: 0.0,
-                tls_ms: 0.0,
-                ttfb_ms: 0.0,
-                download_ms: 0.0,
-            },
-            |t| {
-                let mut ti = extract_timing(t);
-                // Calculate download time from timing + loading finished
-                if let Some(end_ts) = builder.loading_finished_timestamp {
-                    let request_time = t["requestTime"].as_f64().unwrap_or(0.0);
-                    let receive_headers_end = t["receiveHeadersEnd"].as_f64().unwrap_or(0.0);
-                    if request_time > 0.0 && receive_headers_end > 0.0 {
-                        let headers_done = request_time + receive_headers_end / 1000.0;
-                        ti.download_ms = (end_ts - headers_done) * 1000.0;
-                        if ti.download_ms < 0.0 {
-                            ti.download_ms = 0.0;
-                        }
+    let timing = builder.timing.as_ref().map_or_else(
+        || TimingInfo {
+            dns_ms: 0.0,
+            connect_ms: 0.0,
+            tls_ms: 0.0,
+            ttfb_ms: 0.0,
+            download_ms: 0.0,
+        },
+        |t| {
+            let mut ti = extract_timing(t);
+            // Calculate download time from timing + loading finished
+            if let Some(end_ts) = builder.loading_finished_timestamp {
+                let request_time = t["requestTime"].as_f64().unwrap_or(0.0);
+                let receive_headers_end = t["receiveHeadersEnd"].as_f64().unwrap_or(0.0);
+                if request_time > 0.0 && receive_headers_end > 0.0 {
+                    let headers_done = request_time + receive_headers_end / 1000.0;
+                    ti.download_ms = (end_ts - headers_done) * 1000.0;
+                    if ti.download_ms < 0.0 {
+                        ti.download_ms = 0.0;
                     }
                 }
-                ti
-            },
-        );
+            }
+            ti
+        },
+    );
 
     let duration_ms = builder
         .loading_finished_timestamp
@@ -1133,10 +1123,7 @@ fn emit_stream_event(
 ) {
     // Apply filters
     if let Some(types) = type_filter {
-        if !types
-            .iter()
-            .any(|t| t == &req.resource_type.to_lowercase())
-        {
+        if !types.iter().any(|t| t == &req.resource_type.to_lowercase()) {
             return;
         }
     }
@@ -1381,7 +1368,13 @@ mod tests {
     fn filter_by_url_substring() {
         let requests = vec![
             make_request(0, "GET", "https://api.example.com/data", Some(200), "xhr"),
-            make_request(1, "GET", "https://cdn.example.com/image.png", Some(200), "image"),
+            make_request(
+                1,
+                "GET",
+                "https://cdn.example.com/image.png",
+                Some(200),
+                "image",
+            ),
         ];
         let filtered = filter_by_url(requests, "api.example.com");
         assert_eq!(filtered.len(), 1);
@@ -1390,9 +1383,13 @@ mod tests {
 
     #[test]
     fn filter_by_url_no_match() {
-        let requests = vec![
-            make_request(0, "GET", "https://example.com/page", Some(200), "document"),
-        ];
+        let requests = vec![make_request(
+            0,
+            "GET",
+            "https://example.com/page",
+            Some(200),
+            "document",
+        )];
         let filtered = filter_by_url(requests, "api.nowhere.com");
         assert!(filtered.is_empty());
     }
@@ -1465,7 +1462,15 @@ mod tests {
 
     fn make_requests(count: usize) -> Vec<NetworkRequestSummary> {
         (0..count)
-            .map(|i| make_request(i, "GET", &format!("https://example.com/{i}"), Some(200), "document"))
+            .map(|i| {
+                make_request(
+                    i,
+                    "GET",
+                    &format!("https://example.com/{i}"),
+                    Some(200),
+                    "document",
+                )
+            })
             .collect()
     }
 

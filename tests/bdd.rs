@@ -1742,6 +1742,19 @@ const FORM_TESTABLE_SCENARIOS: &[&str] = &[
     "Clear help displays all options",
 ];
 
+/// Emulate BDD scenarios that can be tested without a running Chrome instance.
+/// These are pure CLI argument validation and help text scenarios.
+const EMULATE_TESTABLE_SCENARIOS: &[&str] = &[
+    "Emulate help displays all subcommands",
+    "Emulate set help displays all flags",
+    "Invalid network profile produces error",
+    "CPU throttling rate out of range produces error",
+    "Geolocation and no-geolocation are mutually exclusive",
+    "User-agent and no-user-agent are mutually exclusive",
+    "Page resize help displays size argument",
+    "Page resize with invalid format produces error",
+];
+
 /// Console BDD scenarios that can be tested without a running Chrome instance.
 /// These are pure CLI argument validation, help text, and conflict scenarios.
 const CONSOLE_TESTABLE_SCENARIOS: &[&str] = &[
@@ -1843,9 +1856,7 @@ async fn main() {
     CliWorld::cucumber()
         .filter_run_and_exit(
             "tests/features/scroll.feature",
-            |_feature, _rule, scenario| {
-                SCROLL_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
-            },
+            |_feature, _rule, scenario| SCROLL_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
         )
         .await;
 
@@ -1856,6 +1867,17 @@ async fn main() {
             "tests/features/console.feature",
             |_feature, _rule, scenario| {
                 CONSOLE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Emulate — only CLI-testable scenarios (argument validation, help text, conflicts).
+    // Scenarios requiring a running Chrome instance are commented out in the feature file.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/emulate.feature",
+            |_feature, _rule, scenario| {
+                EMULATE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

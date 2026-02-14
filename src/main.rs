@@ -1,6 +1,7 @@
 mod cli;
 mod console;
 mod dialog;
+mod emulate;
 mod form;
 mod interact;
 mod js;
@@ -49,7 +50,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Network(args) => network::execute_network(&cli.global, args).await,
         Command::Interact(args) => interact::execute_interact(&cli.global, args).await,
         Command::Form(args) => form::execute_form(&cli.global, args).await,
-        Command::Emulate => Err(AppError::not_implemented("emulate")),
+        Command::Emulate(args) => emulate::execute_emulate(&cli.global, args).await,
         Command::Perf(args) => perf::execute_perf(&cli.global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&cli.global, args).await,
     }
