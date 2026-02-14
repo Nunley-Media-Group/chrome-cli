@@ -155,10 +155,10 @@ pub enum Command {
 
     /// Form input and submission
     #[command(
-        long_about = "Fill in form fields, select dropdown options, toggle checkboxes, upload \
-            files, and submit forms. Supports targeting fields by selector, name, or label."
+        long_about = "Fill in form fields, select dropdown options, toggle checkboxes, and clear \
+            fields. Supports targeting fields by UID (from accessibility snapshot) or CSS selector."
     )]
-    Form,
+    Form(FormArgs),
 
     /// Device and network emulation
     #[command(
@@ -723,6 +723,66 @@ pub struct KeyArgs {
     /// Number of times to press the key
     #[arg(long, default_value_t = 1)]
     pub repeat: u32,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for the `form` subcommand group.
+#[derive(Args)]
+pub struct FormArgs {
+    #[command(subcommand)]
+    pub command: FormCommand,
+}
+
+/// Form subcommands.
+#[derive(Subcommand)]
+pub enum FormCommand {
+    /// Fill a form field by UID or CSS selector
+    Fill(FormFillArgs),
+
+    /// Fill multiple form fields at once from JSON
+    FillMany(FormFillManyArgs),
+
+    /// Clear a form field's value
+    Clear(FormClearArgs),
+}
+
+/// Arguments for `form fill`.
+#[derive(Args)]
+pub struct FormFillArgs {
+    /// Target element (UID like 's1' or CSS selector like 'css:#email')
+    pub target: String,
+
+    /// Value to set on the form field
+    pub value: String,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `form fill-many`.
+#[derive(Args)]
+pub struct FormFillManyArgs {
+    /// Inline JSON array of {uid, value} objects
+    pub json: Option<String>,
+
+    /// Read JSON from a file instead of inline argument
+    #[arg(long)]
+    pub file: Option<PathBuf>,
+
+    /// Include updated accessibility snapshot in output
+    #[arg(long)]
+    pub include_snapshot: bool,
+}
+
+/// Arguments for `form clear`.
+#[derive(Args)]
+pub struct FormClearArgs {
+    /// Target element (UID like 's1' or CSS selector like 'css:#email')
+    pub target: String,
 
     /// Include updated accessibility snapshot in output
     #[arg(long)]
