@@ -16,6 +16,11 @@ use crate::cli::{
 /// Default trace timeout in milliseconds (30 seconds).
 const DEFAULT_TRACE_TIMEOUT_MS: u64 = 30_000;
 
+/// Post-load stabilization delay in milliseconds.
+/// Allows Chrome to finalize LCP candidates, flush layout shift scores,
+/// and complete network timing events before stopping the trace.
+const POST_LOAD_SETTLE_MS: u64 = 3_000;
+
 /// Default performance trace categories.
 const TRACE_CATEGORIES: &str = "devtools.timeline,v8.execute,blink.user_timing,loading,\
     disabled-by-default-devtools.timeline,disabled-by-default-lighthouse";
@@ -48,22 +53,16 @@ struct PerfStopResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CoreWebVitals {
-    #[serde(skip_serializing_if = "Option::is_none")]
     lcp_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     cls: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     ttfb_ms: Option<f64>,
 }
 
 #[derive(Serialize)]
 struct PerfVitalsResult {
     url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     lcp_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     cls: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     ttfb_ms: Option<f64>,
 }
 
@@ -528,6 +527,30 @@ fn extract_ttfb(events: &[TraceEvent]) -> Option<f64> {
 
     match (request_ts, response_ts) {
         (Some(req), Some(resp)) => Some((resp - req) / 1000.0), // µs → ms
+        _ => extract_ttfb_fallback(events),
+    }
+}
+
+/// Fallback TTFB extraction using `navigationStart` and `responseStart` events
+/// from `blink.user_timing` when `ResourceSendRequest`/`ResourceReceiveResponse`
+/// pairs are not found (e.g., cached responses).
+fn extract_ttfb_fallback(events: &[TraceEvent]) -> Option<f64> {
+    let mut nav_start: Option<f64> = None;
+    let mut resp_start: Option<f64> = None;
+
+    for event in events {
+        if event.cat.contains("blink.user_timing") {
+            if event.name == "navigationStart" && nav_start.is_none() {
+                nav_start = Some(event.ts);
+            }
+            if event.name == "responseStart" && resp_start.is_none() {
+                resp_start = Some(event.ts);
+            }
+        }
+    }
+
+    match (nav_start, resp_start) {
+        (Some(nav), Some(resp)) => Some((resp - nav) / 1000.0), // µs → ms
         _ => None,
     }
 }
@@ -756,6 +779,9 @@ async fn execute_vitals(global: &GlobalOpts, args: &PerfVitalsArgs) -> Result<()
     // Wait for page load
     wait_for_event(load_rx, DEFAULT_TRACE_TIMEOUT_MS, "page load").await?;
 
+    // Allow Chrome to finalize LCP, CLS, and TTFB trace events
+    tokio::time::sleep(Duration::from_millis(POST_LOAD_SETTLE_MS)).await;
+
     // Stop and collect trace
     let data_rx = managed.subscribe("Tracing.dataCollected").await?;
     let complete_rx = managed.subscribe("Tracing.tracingComplete").await?;
@@ -769,6 +795,8 @@ async fn execute_vitals(global: &GlobalOpts, args: &PerfVitalsArgs) -> Result<()
         ttfb_ms: None,
     });
 
+    let all_missing = vitals.lcp_ms.is_none() && vitals.cls.is_none() && vitals.ttfb_ms.is_none();
+
     let result = PerfVitalsResult {
         url,
         lcp_ms: vitals.lcp_ms,
@@ -777,7 +805,17 @@ async fn execute_vitals(global: &GlobalOpts, args: &PerfVitalsArgs) -> Result<()
     };
 
     let plain = format_vitals_plain(&result);
-    print_output(&result, &global.output, Some(&plain))
+    print_output(&result, &global.output, Some(&plain))?;
+
+    if all_missing {
+        eprintln!("Warning: all vitals metrics (lcp_ms, cls, ttfb_ms) could not be collected");
+        return Err(AppError {
+            message: "no vitals metrics collected".to_string(),
+            code: ExitCode::GeneralError,
+        });
+    }
+
+    Ok(())
 }
 
 // =============================================================================
@@ -829,34 +867,33 @@ fn format_stop_plain(result: &PerfStopResult) -> String {
     out.push_str(&format!("Trace saved: {}\n", result.file));
     out.push_str(&format!("Duration: {}ms\n", result.duration_ms));
     out.push_str(&format!("Size: {} bytes\n", result.size_bytes));
-    if let Some(lcp) = result.vitals.lcp_ms {
-        out.push_str(&format!("LCP: {lcp:.1}ms\n"));
-    }
-    if let Some(cls) = result.vitals.cls {
-        out.push_str(&format!("CLS: {cls:.3}\n"));
-    }
-    if let Some(ttfb) = result.vitals.ttfb_ms {
-        out.push_str(&format!("TTFB: {ttfb:.1}ms\n"));
-    }
+    let lcp = result
+        .vitals
+        .lcp_ms
+        .map_or("N/A".to_string(), |v| format!("{v:.1}ms"));
+    let cls = result
+        .vitals
+        .cls
+        .map_or("N/A".to_string(), |v| format!("{v:.3}"));
+    let ttfb = result
+        .vitals
+        .ttfb_ms
+        .map_or("N/A".to_string(), |v| format!("{v:.1}ms"));
+    out.push_str(&format!("LCP: {lcp}\n"));
+    out.push_str(&format!("CLS: {cls}\n"));
+    out.push_str(&format!("TTFB: {ttfb}\n"));
     out
 }
 
 fn format_vitals_plain(result: &PerfVitalsResult) -> String {
-    let mut parts = Vec::new();
-    if let Some(lcp) = result.lcp_ms {
-        parts.push(format!("LCP: {lcp:.1}ms"));
-    }
-    if let Some(cls) = result.cls {
-        parts.push(format!("CLS: {cls:.3}"));
-    }
-    if let Some(ttfb) = result.ttfb_ms {
-        parts.push(format!("TTFB: {ttfb:.1}ms"));
-    }
-    if parts.is_empty() {
-        "No vitals data available\n".to_string()
-    } else {
-        format!("{}\n", parts.join("  "))
-    }
+    let lcp = result
+        .lcp_ms
+        .map_or("N/A".to_string(), |v| format!("{v:.1}ms"));
+    let cls = result.cls.map_or("N/A".to_string(), |v| format!("{v:.3}"));
+    let ttfb = result
+        .ttfb_ms
+        .map_or("N/A".to_string(), |v| format!("{v:.1}ms"));
+    format!("LCP: {lcp}  CLS: {cls}  TTFB: {ttfb}\n")
 }
 
 fn format_analyze_plain(result: &PerfAnalyzeResult) -> String {
@@ -935,9 +972,12 @@ mod tests {
             },
         };
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
-        assert!(json["vitals"].get("lcp_ms").is_none());
-        assert!(json["vitals"].get("cls").is_none());
-        assert!(json["vitals"].get("ttfb_ms").is_none());
+        assert!(json["vitals"].get("lcp_ms").is_some());
+        assert!(json["vitals"]["lcp_ms"].is_null());
+        assert!(json["vitals"].get("cls").is_some());
+        assert!(json["vitals"]["cls"].is_null());
+        assert!(json["vitals"].get("ttfb_ms").is_some());
+        assert!(json["vitals"]["ttfb_ms"].is_null());
     }
 
     #[test]
@@ -1119,6 +1159,66 @@ mod tests {
             serde_json::json!({"data": {"requestId": "1", "url": "https://example.com/"}}),
         )];
         assert!(extract_ttfb(&events).is_none());
+    }
+
+    #[test]
+    fn extract_ttfb_fallback_uses_navigation_timing() {
+        // No ResourceSendRequest/ResourceReceiveResponse, but has blink.user_timing events
+        let events = vec![
+            make_trace_event(
+                "navigationStart",
+                "blink.user_timing",
+                1_000_000.0,
+                0.0,
+                serde_json::json!({}),
+            ),
+            make_trace_event(
+                "responseStart",
+                "blink.user_timing",
+                1_150_000.0,
+                0.0,
+                serde_json::json!({}),
+            ),
+        ];
+        let ttfb = extract_ttfb(&events);
+        assert!(ttfb.is_some());
+        assert!((ttfb.unwrap() - 150.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn perf_vitals_result_with_none_values_serializes_null() {
+        let result = PerfVitalsResult {
+            url: "https://example.com".to_string(),
+            lcp_ms: None,
+            cls: None,
+            ttfb_ms: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["url"], "https://example.com");
+        assert!(json.get("lcp_ms").is_some());
+        assert!(json["lcp_ms"].is_null());
+        assert!(json.get("cls").is_some());
+        assert!(json["cls"].is_null());
+        assert!(json.get("ttfb_ms").is_some());
+        assert!(json["ttfb_ms"].is_null());
+    }
+
+    #[test]
+    fn format_stop_plain_with_none_vitals_shows_na() {
+        let result = PerfStopResult {
+            file: "/tmp/trace.json".to_string(),
+            duration_ms: 100,
+            size_bytes: 500,
+            vitals: CoreWebVitals {
+                lcp_ms: None,
+                cls: None,
+                ttfb_ms: None,
+            },
+        };
+        let plain = format_stop_plain(&result);
+        assert!(plain.contains("LCP: N/A"));
+        assert!(plain.contains("CLS: N/A"));
+        assert!(plain.contains("TTFB: N/A"));
     }
 
     // =========================================================================
@@ -1317,7 +1417,9 @@ mod tests {
             ttfb_ms: None,
         };
         let plain = format_vitals_plain(&result);
-        assert!(plain.contains("No vitals data"));
+        assert!(plain.contains("LCP: N/A"));
+        assert!(plain.contains("CLS: N/A"));
+        assert!(plain.contains("TTFB: N/A"));
     }
 
     // =========================================================================
