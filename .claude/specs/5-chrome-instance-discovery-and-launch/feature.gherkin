@@ -1,0 +1,154 @@
+# File: tests/features/chrome-discovery-launch.feature
+#
+# Generated from: .claude/specs/5-chrome-instance-discovery-and-launch/requirements.md
+# Issue: #5
+
+Feature: Chrome instance discovery and launch
+  As a developer or automation engineer
+  I want chrome-cli to discover running Chrome instances and launch new ones
+  So that I can seamlessly connect to Chrome for browser automation
+
+  # --- Discovery: Happy Paths ---
+
+  @requires-chrome
+  Scenario: Discover Chrome via HTTP debug endpoint
+    Given a Chrome instance is running with remote debugging on port 9222
+    When I run "chrome-cli connect --port 9222"
+    Then the output should be valid JSON
+    And the JSON output should contain key "ws_url" with a WebSocket URL
+    And the JSON output should contain key "port" with value 9222
+    And the exit code should be 0
+
+  Scenario: Discover Chrome via DevToolsActivePort file
+    Given a DevToolsActivePort file exists in the Chrome user data directory
+    And the file contains port 9222 and a WebSocket path
+    When I run "chrome-cli connect"
+    Then the output should be valid JSON
+    And the JSON output should contain key "ws_url"
+    And the exit code should be 0
+
+  @requires-chrome
+  Scenario: List available targets from running Chrome
+    Given a Chrome instance is running with remote debugging on port 9222
+    And Chrome has at least 2 open tabs
+    When the tool queries the targets endpoint on port 9222
+    Then the response should contain at least 2 targets
+    And each target should have an "id" and "type" field
+
+  # --- Connection: Direct WebSocket URL ---
+
+  Scenario: Connect via direct WebSocket URL
+    Given a Chrome instance is running with WebSocket URL "ws://127.0.0.1:9222/devtools/browser/test-id"
+    When I run "chrome-cli connect --ws-url ws://127.0.0.1:9222/devtools/browser/test-id"
+    Then the output should be valid JSON
+    And the JSON output should contain key "ws_url" with value "ws://127.0.0.1:9222/devtools/browser/test-id"
+    And the exit code should be 0
+
+  # --- Launch: Happy Paths ---
+
+  @requires-chrome
+  Scenario: Launch Chrome with remote debugging
+    Given Chrome is installed on the system
+    When I run "chrome-cli connect --launch"
+    Then the output should be valid JSON
+    And the JSON output should contain key "ws_url" with a WebSocket URL
+    And the JSON output should contain key "port" with a positive integer
+    And the JSON output should contain key "pid" with a positive integer
+    And the exit code should be 0
+
+  @requires-chrome
+  Scenario: Launch Chrome in headless mode
+    Given Chrome is installed on the system
+    When I run "chrome-cli connect --launch --headless"
+    Then the output should be valid JSON
+    And the JSON output should contain key "ws_url" with a WebSocket URL
+    And the JSON output should contain key "pid" with a positive integer
+    And the exit code should be 0
+
+  @requires-chrome
+  Scenario: Launch specific Chrome channel
+    Given Chrome Canary is installed on the system
+    When I run "chrome-cli connect --launch --channel canary"
+    Then the output should be valid JSON
+    And the JSON output should contain key "ws_url" with a WebSocket URL
+    And the exit code should be 0
+
+  @requires-chrome
+  Scenario: Launch Chrome with custom executable path
+    Given a Chrome executable exists at "/custom/path/to/chrome"
+    When I run "chrome-cli connect --launch --chrome-path /custom/path/to/chrome"
+    Then the output should be valid JSON
+    And the JSON output should contain key "ws_url" with a WebSocket URL
+    And the exit code should be 0
+
+  @requires-chrome
+  Scenario: Launch Chrome with additional flags
+    Given Chrome is installed on the system
+    When I run "chrome-cli connect --launch --chrome-arg --disable-gpu --chrome-arg --no-sandbox"
+    Then the output should be valid JSON
+    And Chrome should have been launched with the additional flags
+    And the exit code should be 0
+
+  # --- Auto-discover or launch ---
+
+  @requires-chrome
+  Scenario: Auto-discover running Chrome instance
+    Given a Chrome instance is running with remote debugging on port 9222
+    When I run "chrome-cli connect"
+    Then the tool should discover the running instance
+    And the output should be valid JSON
+    And the JSON output should contain key "ws_url"
+    And the exit code should be 0
+
+  @requires-chrome
+  Scenario: Auto-launch when no Chrome instance is running
+    Given no Chrome instance is running with remote debugging enabled
+    And Chrome is installed on the system
+    When I run "chrome-cli connect"
+    Then the tool should launch a new Chrome instance
+    And the output should be valid JSON
+    And the JSON output should contain key "pid" with a positive integer
+    And the exit code should be 0
+
+  # --- Error Handling ---
+
+  Scenario: Chrome not installed error
+    Given Chrome is not installed on the system
+    And the CHROME_PATH environment variable is not set
+    When I run "chrome-cli connect --launch"
+    Then stderr should contain "Chrome not found"
+    And stderr should suggest using "--chrome-path"
+    And the exit code should be 1
+
+  Scenario: Connection timeout when Chrome does not start
+    Given Chrome is installed but configured to hang on startup
+    When I run "chrome-cli connect --launch --timeout 1000"
+    Then stderr should contain "timed out"
+    And the exit code should be 4
+
+  Scenario: Port not running Chrome with CDP
+    Given port 9222 is not serving Chrome DevTools Protocol
+    When I run "chrome-cli connect --port 9222"
+    Then stderr should contain an error about connecting to Chrome
+    And the exit code should be 2
+
+  # --- Cross-platform ---
+
+  Scenario Outline: Chrome executable discovery per platform
+    Given the current platform is "<platform>"
+    When the tool searches for Chrome on the "<channel>" channel
+    Then it should check the following paths: "<paths>"
+
+    Examples:
+      | platform | channel | paths                                                                               |
+      | macos    | stable  | /Applications/Google Chrome.app/Contents/MacOS/Google Chrome                        |
+      | macos    | canary  | /Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary           |
+      | linux    | stable  | google-chrome, google-chrome-stable, chromium-browser, chromium                      |
+
+  # --- Cleanup ---
+
+  @requires-chrome
+  Scenario: Temporary user data directory cleanup
+    Given Chrome was launched with a temporary user data directory
+    When the chrome-cli process exits
+    Then the temporary user data directory should be removed

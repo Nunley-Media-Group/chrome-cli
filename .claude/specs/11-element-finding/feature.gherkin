@@ -1,4 +1,4 @@
-# File: tests/features/element-finding.feature
+# File: tests/features/page_find.feature
 #
 # Generated from: .claude/specs/11-element-finding/requirements.md
 # Issue: #11
@@ -95,10 +95,3 @@ Feature: Element finding by text, CSS selector, and accessibility attributes
     When I run "chrome-cli page find nonexistent-element-xyz"
     Then an empty JSON array "[]" is returned
     And the exit code is 0
-
-  # --- Error Cases ---
-
-  Scenario: Neither query nor selector provided
-    When I run "chrome-cli page find"
-    Then an error is returned with message "either a text query or --selector is required"
-    And the exit code is 1

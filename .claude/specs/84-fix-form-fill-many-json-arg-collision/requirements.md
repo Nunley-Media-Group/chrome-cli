@@ -5,7 +5,7 @@
 **Status**: Approved
 **Author**: Claude
 **Severity**: Critical
-**Related Spec**: N/A
+**Related Spec**: `.claude/specs/16-form-input-and-filling/`
 
 ---
 

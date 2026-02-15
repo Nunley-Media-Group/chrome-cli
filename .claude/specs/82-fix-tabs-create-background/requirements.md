@@ -5,7 +5,7 @@
 **Status**: Draft
 **Author**: Claude
 **Severity**: Medium
-**Related Spec**: `.claude/specs/tab-management/` — AC6
+**Related Spec**: `.claude/specs/7-tab-management/` — AC6
 
 ---
 

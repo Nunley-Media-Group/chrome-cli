@@ -45,8 +45,8 @@ Feature: CDP WebSocket Client
 
   Scenario: Session multiplexing over single WebSocket
     Given a connected CDP client
-    And a CDP session "session-1" attached to target "session-1"
-    And a CDP session "session-2" attached to target "session-2"
+    And a CDP session "session-1" attached to target "target-1"
+    And a CDP session "session-2" attached to target "target-2"
     When I send a command on session "session-1"
     And I send a command on session "session-2"
     Then the command for session "session-1" includes sessionId "session-1"

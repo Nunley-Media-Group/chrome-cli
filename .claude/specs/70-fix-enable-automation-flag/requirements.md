@@ -5,6 +5,7 @@
 **Status**: Draft
 **Author**: Claude
 **Severity**: Medium
+**Related Spec**: `.claude/specs/5-chrome-instance-discovery-and-launch/`
 
 ---
 

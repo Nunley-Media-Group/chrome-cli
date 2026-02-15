@@ -5,7 +5,7 @@
 **Status**: Draft
 **Author**: Claude
 **Severity**: Critical
-**Related Spec**: N/A
+**Related Spec**: `.claude/specs/22-performance-tracing/`
 
 ---
 

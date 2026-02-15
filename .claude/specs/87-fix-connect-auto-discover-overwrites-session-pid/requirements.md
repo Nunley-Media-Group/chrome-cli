@@ -5,7 +5,7 @@
 **Status**: Draft
 **Author**: Claude
 **Severity**: High
-**Related Spec**: `.claude/specs/session-connection-management/` — AC8
+**Related Spec**: `.claude/specs/6-session-and-connection-management/` — AC8
 
 ---
 

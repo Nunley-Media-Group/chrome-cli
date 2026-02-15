@@ -1,6 +1,6 @@
 # File: tests/features/interact.feature
 #
-# Generated from: .claude/specs/mouse-interactions/requirements.md
+# Generated from: .claude/specs/14-mouse-interactions/requirements.md
 # Issue: #14
 
 Feature: Mouse Interactions

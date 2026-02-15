@@ -1,6 +1,6 @@
 # File: tests/features/chrome-discovery-launch.feature
 #
-# Generated from: .claude/specs/chrome-discovery-launch/requirements.md
+# Generated from: .claude/specs/5-chrome-instance-discovery-and-launch/requirements.md
 # Issue: #5
 
 Feature: Chrome instance discovery and launch
