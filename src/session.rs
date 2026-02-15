@@ -382,7 +382,11 @@ mod tests {
 
         // Simulate auto-discover on same port (pid: None)
         let pid = resolve_pid(&path, None, 9222);
-        assert_eq!(pid, Some(54321), "PID should be preserved from existing session");
+        assert_eq!(
+            pid,
+            Some(54321),
+            "PID should be preserved from existing session"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -417,7 +421,10 @@ mod tests {
 
         let path = dir.join("session.json");
         let pid = resolve_pid(&path, None, 9222);
-        assert_eq!(pid, None, "No PID should be injected when no prior session exists");
+        assert_eq!(
+            pid, None,
+            "No PID should be injected when no prior session exists"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
