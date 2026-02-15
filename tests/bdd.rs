@@ -3449,6 +3449,16 @@ async fn main() {
         )
         .await;
 
+    // Connect PID preservation fix (issue #87) — all scenarios require a running Chrome instance
+    // for auto-discover. The feature file documents regression scenarios; the fix is validated
+    // by unit tests in session.rs (pid_preserved_when_ports_match, etc.).
+    SessionWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/87-fix-connect-auto-discover-overwrites-session-pid.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
     // Mouse interactions — only CLI argument validation scenarios can be tested without Chrome.
     // All scenarios requiring actual element interaction need a running Chrome instance.
     CliWorld::cucumber()

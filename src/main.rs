@@ -276,11 +276,25 @@ fn warn_if_remote_host(host: &str) {
 }
 
 /// Write session data after a successful connect. Non-fatal on failure.
+///
+/// When `info.pid` is `None` (e.g. auto-discover or direct WS URL), this checks
+/// the existing session file and preserves its PID if the port matches. This
+/// prevents losing the PID stored by a prior `--launch` when reconnecting to the
+/// same Chrome instance.
 fn save_session(info: &ConnectionInfo) {
+    // Preserve PID from existing session when reconnecting to the same port.
+    let pid = info.pid.or_else(|| {
+        session::read_session()
+            .ok()
+            .flatten()
+            .filter(|existing| existing.port == info.port)
+            .and_then(|existing| existing.pid)
+    });
+
     let data = SessionData {
         ws_url: info.ws_url.clone(),
         port: info.port,
-        pid: info.pid,
+        pid,
         timestamp: session::now_iso8601(),
     };
     if let Err(e) = session::write_session(&data) {

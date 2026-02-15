@@ -349,6 +349,108 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Simulate the PID-preservation logic from `save_session()`: read existing
+    /// session, carry PID forward if ports match and incoming PID is None.
+    fn resolve_pid(
+        path: &std::path::Path,
+        incoming_pid: Option<u32>,
+        incoming_port: u16,
+    ) -> Option<u32> {
+        incoming_pid.or_else(|| {
+            read_session_from(path)
+                .ok()
+                .flatten()
+                .filter(|existing| existing.port == incoming_port)
+                .and_then(|existing| existing.pid)
+        })
+    }
+
+    #[test]
+    fn pid_preserved_when_ports_match() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-pid-preserve");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+
+        // Write initial session with PID (simulates --launch)
+        let launch = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/aaa".into(),
+            port: 9222,
+            pid: Some(54321),
+            timestamp: "2026-02-15T00:00:00Z".into(),
+        };
+        write_session_to(&path, &launch).unwrap();
+
+        // Simulate auto-discover on same port (pid: None)
+        let pid = resolve_pid(&path, None, 9222);
+        assert_eq!(
+            pid,
+            Some(54321),
+            "PID should be preserved from existing session"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pid_not_preserved_when_ports_differ() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-pid-nopreserve");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+
+        // Write initial session with PID on port 9222
+        let launch = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/bbb".into(),
+            port: 9222,
+            pid: Some(99999),
+            timestamp: "2026-02-15T00:00:00Z".into(),
+        };
+        write_session_to(&path, &launch).unwrap();
+
+        // Simulate auto-discover on DIFFERENT port (pid: None)
+        let pid = resolve_pid(&path, None, 9333);
+        assert_eq!(pid, None, "PID should NOT be carried from a different port");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pid_not_injected_when_no_prior_session() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-pid-noinject");
+        let _ = std::fs::remove_dir_all(&dir);
+        // Do NOT create the session file
+
+        let path = dir.join("session.json");
+        let pid = resolve_pid(&path, None, 9222);
+        assert_eq!(
+            pid, None,
+            "No PID should be injected when no prior session exists"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn incoming_pid_takes_priority_over_existing() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-pid-priority");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+
+        // Write existing session with PID
+        let existing = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/ccc".into(),
+            port: 9222,
+            pid: Some(11111),
+            timestamp: "2026-02-15T00:00:00Z".into(),
+        };
+        write_session_to(&path, &existing).unwrap();
+
+        // Incoming ConnectionInfo has its own PID (e.g. new --launch)
+        let pid = resolve_pid(&path, Some(22222), 9222);
+        assert_eq!(pid, Some(22222), "Incoming PID should take priority");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn session_error_display() {
         assert_eq!(
