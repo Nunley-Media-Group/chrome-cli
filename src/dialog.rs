@@ -7,7 +7,6 @@ use chrome_cli::connection::{ManagedSession, resolve_connection, resolve_target}
 use chrome_cli::error::{AppError, ExitCode};
 
 use crate::cli::{DialogAction, DialogArgs, DialogCommand, DialogHandleArgs, GlobalOpts};
-use crate::emulate::apply_emulate_state;
 
 // =============================================================================
 // Output types
@@ -108,15 +107,23 @@ fn cdp_config(global: &GlobalOpts) -> CdpConfig {
 // Session setup
 // =============================================================================
 
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
+/// Create a CDP session for dialog commands.
+///
+/// Unlike the standard `setup_session()` used by other commands, this skips
+/// `apply_emulate_state()` because emulation overrides (user-agent, viewport,
+/// device scale) are irrelevant for dialog interaction **and** can block when
+/// a dialog is already open (e.g. `Runtime.evaluate` inside
+/// `apply_emulate_state()` hangs until the dialog is dismissed).
+async fn setup_dialog_session(
+    global: &GlobalOpts,
+) -> Result<(CdpClient, ManagedSession), AppError> {
     let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
     let target = resolve_target(&conn.host, conn.port, global.tab.as_deref()).await?;
 
     let config = cdp_config(global);
     let client = CdpClient::connect(&conn.ws_url, config).await?;
     let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
+    let managed = ManagedSession::new(session);
 
     Ok((client, managed))
 }
@@ -142,12 +149,13 @@ pub async fn execute_dialog(global: &GlobalOpts, args: &DialogArgs) -> Result<()
 // =============================================================================
 
 async fn execute_handle(global: &GlobalOpts, args: &DialogHandleArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+    let (_client, managed) = setup_dialog_session(global).await?;
 
-    // Enable Page domain
-    managed.ensure_domain("Page").await?;
-
-    // Subscribe to dialog opening event to capture metadata
+    // Subscribe to dialog opening event to capture metadata.
+    // `Page.handleJavaScriptDialog` and event subscriptions work without
+    // `Page.enable` — CDP delivers dialog events at the session level once
+    // attached, so we intentionally skip `ensure_domain("Page")` here to
+    // avoid blocking when a dialog is already open.
     let dialog_rx = managed.subscribe("Page.javascriptDialogOpening").await?;
 
     // Build CDP params
@@ -207,17 +215,17 @@ async fn execute_handle(global: &GlobalOpts, args: &DialogHandleArgs) -> Result<
 const DIALOG_PROBE_TIMEOUT_MS: u64 = 200;
 
 async fn execute_info(global: &GlobalOpts) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+    let (_client, managed) = setup_dialog_session(global).await?;
 
-    // Enable required domains
-    managed.ensure_domain("Page").await?;
-    managed.ensure_domain("Runtime").await?;
-
-    // Subscribe to dialog opening event
+    // Subscribe to dialog opening event.
+    // CDP delivers dialog events at the session level without `Page.enable`.
     let dialog_rx = managed.subscribe("Page.javascriptDialogOpening").await?;
 
     // Probe: try Runtime.evaluate("0") with a short timeout.
     // If a dialog is blocking, this will time out.
+    // We intentionally skip `ensure_domain("Runtime")` — `Runtime.evaluate`
+    // works without `Runtime.enable`, and `Runtime.enable` itself would block
+    // when a dialog is open.
     let probe = managed.send_command(
         "Runtime.evaluate",
         Some(serde_json::json!({ "expression": "0" })),
@@ -399,5 +407,33 @@ mod tests {
         };
         // Just verify it doesn't panic
         print_info_plain(&result);
+    }
+
+    #[test]
+    fn drain_dialog_event_with_event() {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.try_send(CdpEvent {
+            method: "Page.javascriptDialogOpening".into(),
+            params: serde_json::json!({
+                "type": "confirm",
+                "message": "Delete?",
+                "defaultPrompt": ""
+            }),
+            session_id: None,
+        })
+        .unwrap();
+        let (dtype, msg, default) = drain_dialog_event(rx);
+        assert_eq!(dtype, "confirm");
+        assert_eq!(msg, "Delete?");
+        assert_eq!(default, "");
+    }
+
+    #[test]
+    fn drain_dialog_event_empty_channel() {
+        let (_tx, rx) = tokio::sync::mpsc::channel::<CdpEvent>(1);
+        let (dtype, msg, default) = drain_dialog_event(rx);
+        assert_eq!(dtype, "unknown");
+        assert_eq!(msg, "");
+        assert_eq!(default, "");
     }
 }

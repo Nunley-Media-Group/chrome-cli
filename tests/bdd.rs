@@ -3439,6 +3439,16 @@ async fn main() {
         )
         .await;
 
+    // Dialog timeout fix (issue #86) — all scenarios require a running Chrome instance with an
+    // open dialog, so none can run in CI without Chrome. The feature file documents the regression
+    // scenarios for manual/integration testing.
+    DialogWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/dialog-timeout-fix.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require Chrome with open dialog
+        )
+        .await;
+
     // Mouse interactions — only CLI argument validation scenarios can be tested without Chrome.
     // All scenarios requiring actual element interaction need a running Chrome instance.
     CliWorld::cucumber()
