@@ -62,6 +62,20 @@ pub struct ResizeOutput {
 // Emulation state persistence
 // =============================================================================
 
+/// Persisted geolocation override state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeolocationState {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+/// Persisted viewport override state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewportState {
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Persisted emulation state for CDP-only overrides that cannot be queried via
 /// JavaScript. Written by `emulate set`, read by `emulate status`, deleted by
 /// `emulate reset`.
@@ -72,6 +86,16 @@ pub struct EmulateState {
     pub network: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_scale_factor: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub geolocation: Option<GeolocationState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_scheme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<ViewportState>,
 }
 
 /// Returns the path to the emulation state file: `~/.chrome-cli/emulate-state.json`.
@@ -184,6 +208,165 @@ fn delete_emulate_state_from(path: &Path) -> Result<(), AppError> {
 fn delete_emulate_state() -> Result<(), AppError> {
     let path = emulate_state_path()?;
     delete_emulate_state_from(&path)
+}
+
+// =============================================================================
+// Re-apply persisted emulation state to a new session
+// =============================================================================
+
+/// Read persisted emulation state and re-apply all active overrides to the
+/// given CDP session. Called by command modules after `setup_session()` so that
+/// overrides set via `emulate set` survive across CLI invocations.
+///
+/// If no state file exists, this is a no-op.
+///
+/// # Errors
+///
+/// Returns `AppError` if reading the state file fails or a CDP command fails.
+#[allow(clippy::too_many_lines)]
+pub async fn apply_emulate_state(managed: &mut ManagedSession) -> Result<(), AppError> {
+    let Some(state) = read_emulate_state()? else {
+        return Ok(());
+    };
+
+    // User agent
+    if let Some(ref ua) = state.user_agent {
+        managed
+            .send_command(
+                "Emulation.setUserAgentOverride",
+                Some(serde_json::json!({ "userAgent": ua })),
+            )
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+    }
+
+    // Device metrics (viewport, scale, mobile)
+    let has_viewport = state.viewport.is_some();
+    let has_scale = state.device_scale_factor.is_some();
+    if has_viewport || has_scale || state.mobile {
+        let (width, height) = state
+            .viewport
+            .as_ref()
+            .map_or((0, 0), |v| (v.width, v.height));
+        let scale = state.device_scale_factor.unwrap_or(1.0);
+
+        // If we only have scale/mobile but no viewport, query current dimensions
+        let (width, height) = if width == 0 || height == 0 {
+            let result = managed
+                .send_command(
+                    "Runtime.evaluate",
+                    Some(serde_json::json!({
+                        "expression": "JSON.stringify({w:window.innerWidth,h:window.innerHeight})",
+                        "returnByValue": true,
+                    })),
+                )
+                .await
+                .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+
+            let val_str = result["result"]["value"]
+                .as_str()
+                .unwrap_or(r#"{"w":1280,"h":720}"#);
+            let dims: serde_json::Value =
+                serde_json::from_str(val_str).unwrap_or(serde_json::json!({"w":1280,"h":720}));
+
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let w = dims["w"].as_u64().unwrap_or(1280) as u32;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let h = dims["h"].as_u64().unwrap_or(720) as u32;
+            (w, h)
+        } else {
+            (width, height)
+        };
+
+        managed
+            .send_command(
+                "Emulation.setDeviceMetricsOverride",
+                Some(serde_json::json!({
+                    "width": width,
+                    "height": height,
+                    "deviceScaleFactor": scale,
+                    "mobile": state.mobile,
+                })),
+            )
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+
+        if state.mobile {
+            managed
+                .send_command(
+                    "Emulation.setTouchEmulationEnabled",
+                    Some(serde_json::json!({ "enabled": true })),
+                )
+                .await
+                .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+        }
+    }
+
+    // Geolocation
+    if let Some(ref geo) = state.geolocation {
+        managed
+            .send_command(
+                "Emulation.setGeolocationOverride",
+                Some(serde_json::json!({
+                    "latitude": geo.latitude,
+                    "longitude": geo.longitude,
+                    "accuracy": 1,
+                })),
+            )
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+    }
+
+    // Color scheme
+    if let Some(ref scheme) = state.color_scheme {
+        let value = match scheme.as_str() {
+            "dark" => "dark",
+            "light" => "light",
+            _ => "",
+        };
+        managed
+            .send_command(
+                "Emulation.setEmulatedMedia",
+                Some(serde_json::json!({
+                    "features": [{ "name": "prefers-color-scheme", "value": value }]
+                })),
+            )
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+    }
+
+    // Network throttling
+    if let Some(ref network) = state.network {
+        managed
+            .ensure_domain("Network")
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+
+        let params = match network.as_str() {
+            "offline" => network_profile_params(NetworkProfile::Offline),
+            "slow-4g" => network_profile_params(NetworkProfile::Slow4g),
+            "4g" => network_profile_params(NetworkProfile::FourG),
+            "3g" => network_profile_params(NetworkProfile::ThreeG),
+            _ => network_profile_params(NetworkProfile::None),
+        };
+        managed
+            .send_command("Network.emulateNetworkConditions", Some(params))
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+    }
+
+    // CPU throttling
+    if let Some(cpu) = state.cpu {
+        managed
+            .send_command(
+                "Emulation.setCPUThrottlingRate",
+                Some(serde_json::json!({ "rate": cpu })),
+            )
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+    }
+
+    Ok(())
 }
 
 // =============================================================================
@@ -589,6 +772,31 @@ async fn execute_set(global: &GlobalOpts, args: &EmulateSetArgs) -> Result<(), A
     if args.cpu.is_some() {
         persisted.cpu = status.cpu;
     }
+    if args.user_agent.is_some() {
+        persisted.user_agent.clone_from(&status.user_agent);
+    } else if args.no_user_agent {
+        persisted.user_agent = None;
+    }
+    if args.device_scale.is_some() {
+        persisted.device_scale_factor = status.device_scale_factor;
+    }
+    if args.geolocation.is_some() {
+        persisted.geolocation = status.geolocation.as_ref().map(|g| GeolocationState {
+            latitude: g.latitude,
+            longitude: g.longitude,
+        });
+    } else if args.no_geolocation {
+        persisted.geolocation = None;
+    }
+    if args.color_scheme.is_some() {
+        persisted.color_scheme.clone_from(&status.color_scheme);
+    }
+    if args.viewport.is_some() {
+        persisted.viewport = status.viewport.as_ref().map(|v| ViewportState {
+            width: v.width,
+            height: v.height,
+        });
+    }
     write_emulate_state(&persisted)?;
 
     // Output
@@ -739,17 +947,26 @@ async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
 
     let device_scale_factor = data["devicePixelRatio"].as_f64();
 
-    // Read persisted CDP-only state (mobile, network, cpu)
+    // Read persisted state — persisted overrides take precedence over JS-queried values
     let persisted = read_emulate_state()?.unwrap_or_default();
 
     let status = EmulateStatusOutput {
         network: persisted.network,
         cpu: persisted.cpu,
-        geolocation: None,
-        user_agent,
-        color_scheme,
-        viewport,
-        device_scale_factor,
+        geolocation: persisted.geolocation.map(|g| GeolocationOutput {
+            latitude: g.latitude,
+            longitude: g.longitude,
+        }),
+        user_agent: persisted.user_agent.or(user_agent),
+        color_scheme: persisted.color_scheme.or(color_scheme),
+        viewport: persisted
+            .viewport
+            .map(|v| ViewportOutput {
+                width: v.width,
+                height: v.height,
+            })
+            .or(viewport),
+        device_scale_factor: persisted.device_scale_factor.or(device_scale_factor),
         mobile: persisted.mobile,
     };
 
@@ -1093,6 +1310,17 @@ mod tests {
             mobile: true,
             network: Some("slow-4g".to_string()),
             cpu: Some(4),
+            user_agent: Some("TestBot/1.0".to_string()),
+            device_scale_factor: Some(2.0),
+            geolocation: Some(GeolocationState {
+                latitude: 37.7749,
+                longitude: -122.4194,
+            }),
+            color_scheme: Some("dark".to_string()),
+            viewport: Some(ViewportState {
+                width: 375,
+                height: 812,
+            }),
         };
 
         write_emulate_state_to(&path, &state).unwrap();
@@ -1101,6 +1329,15 @@ mod tests {
         assert!(read.mobile);
         assert_eq!(read.network.as_deref(), Some("slow-4g"));
         assert_eq!(read.cpu, Some(4));
+        assert_eq!(read.user_agent.as_deref(), Some("TestBot/1.0"));
+        assert_eq!(read.device_scale_factor, Some(2.0));
+        let geo = read.geolocation.unwrap();
+        assert!((geo.latitude - 37.7749).abs() < f64::EPSILON);
+        assert!((geo.longitude - (-122.4194)).abs() < f64::EPSILON);
+        assert_eq!(read.color_scheme.as_deref(), Some("dark"));
+        let vp = read.viewport.unwrap();
+        assert_eq!(vp.width, 375);
+        assert_eq!(vp.height, 812);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1139,17 +1376,38 @@ mod tests {
         assert!(!state.mobile);
         assert!(state.network.is_none());
         assert!(state.cpu.is_none());
+        assert!(state.user_agent.is_none());
+        assert!(state.device_scale_factor.is_none());
+        assert!(state.geolocation.is_none());
+        assert!(state.color_scheme.is_none());
+        assert!(state.viewport.is_none());
     }
 
     #[test]
     fn emulate_state_skips_none_fields_in_json() {
-        let state = EmulateState {
-            mobile: false,
-            network: None,
-            cpu: None,
-        };
+        let state = EmulateState::default();
         let json = serde_json::to_string(&state).unwrap();
         assert!(!json.contains("network"));
         assert!(!json.contains("cpu"));
+        assert!(!json.contains("user_agent"));
+        assert!(!json.contains("device_scale_factor"));
+        assert!(!json.contains("geolocation"));
+        assert!(!json.contains("color_scheme"));
+        assert!(!json.contains("viewport"));
+    }
+
+    #[test]
+    fn emulate_state_backward_compatible_deserialization() {
+        // Old state files only had mobile, network, cpu — new fields should deserialize as None
+        let old_json = r#"{"mobile":true,"network":"slow-4g","cpu":4}"#;
+        let state: EmulateState = serde_json::from_str(old_json).unwrap();
+        assert!(state.mobile);
+        assert_eq!(state.network.as_deref(), Some("slow-4g"));
+        assert_eq!(state.cpu, Some(4));
+        assert!(state.user_agent.is_none());
+        assert!(state.device_scale_factor.is_none());
+        assert!(state.geolocation.is_none());
+        assert!(state.color_scheme.is_none());
+        assert!(state.viewport.is_none());
     }
 }
