@@ -169,7 +169,7 @@ pub fn build_tree(nodes: &[serde_json::Value], verbose: bool) -> BuildResult {
     let mut node_count: usize = 0;
     let truncated = total_nodes > MAX_NODES;
 
-    let root = build_subtree(
+    let mut roots = build_subtree(
         &root_id,
         &lookup,
         verbose,
@@ -177,15 +177,19 @@ pub fn build_tree(nodes: &[serde_json::Value], verbose: bool) -> BuildResult {
         &mut uid_map,
         &mut node_count,
         truncated,
-    )
-    .unwrap_or_else(|| SnapshotNode {
-        role: "document".to_string(),
-        name: String::new(),
-        uid: None,
-        properties: None,
-        backend_dom_node_id: None,
-        children: vec![],
-    });
+    );
+    let root = if roots.len() == 1 {
+        roots.remove(0)
+    } else {
+        SnapshotNode {
+            role: "document".to_string(),
+            name: String::new(),
+            uid: None,
+            properties: None,
+            backend_dom_node_id: None,
+            children: vec![],
+        }
+    };
 
     BuildResult {
         root,
@@ -203,15 +207,32 @@ fn build_subtree(
     uid_map: &mut HashMap<String, i64>,
     node_count: &mut usize,
     truncated: bool,
-) -> Option<SnapshotNode> {
+) -> Vec<SnapshotNode> {
     if truncated && *node_count >= MAX_NODES {
-        return None;
+        return vec![];
     }
 
-    let ax = lookup.get(node_id)?;
+    let Some(ax) = lookup.get(node_id) else {
+        return vec![];
+    };
 
+    // Ignored nodes are transparent: skip rendering them but promote their children
     if ax.ignored {
-        return None;
+        return ax
+            .child_ids
+            .iter()
+            .flat_map(|cid| {
+                build_subtree(
+                    cid,
+                    lookup,
+                    verbose,
+                    uid_counter,
+                    uid_map,
+                    node_count,
+                    truncated,
+                )
+            })
+            .collect();
     }
 
     *node_count += 1;
@@ -238,11 +259,11 @@ fn build_subtree(
         None
     };
 
-    // Recursively build children
+    // Recursively build children (flat_map to flatten promoted children from ignored nodes)
     let children: Vec<SnapshotNode> = ax
         .child_ids
         .iter()
-        .filter_map(|cid| {
+        .flat_map(|cid| {
             build_subtree(
                 cid,
                 lookup,
@@ -255,14 +276,14 @@ fn build_subtree(
         })
         .collect();
 
-    Some(SnapshotNode {
+    vec![SnapshotNode {
         role: ax.role.clone(),
         name: ax.name.clone(),
         uid,
         properties,
         backend_dom_node_id: ax.backend_dom_node_id,
         children,
-    })
+    }]
 }
 
 // =============================================================================
@@ -709,6 +730,177 @@ mod tests {
         let result = build_tree(&nodes, false);
         assert_eq!(result.root.children.len(), 1);
         assert_eq!(result.root.children[0].role, "button");
+    }
+
+    #[test]
+    fn build_tree_promotes_children_of_ignored_ancestor() {
+        // Root → ignored(id=2) → heading(id=3), link(id=4)
+        // The heading and link should be promoted to root's children.
+        let nodes = vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "RootWebArea"},
+                "name": {"type": "computedString", "value": "Example"},
+                "properties": [],
+                "childIds": ["2"],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "ignored": true,
+                "role": {"type": "role", "value": "none"},
+                "name": {"type": "computedString", "value": ""},
+                "properties": [],
+                "childIds": ["3", "4"],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "ignored": false,
+                "role": {"type": "role", "value": "heading"},
+                "name": {"type": "computedString", "value": "Example Domain"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+            json!({
+                "nodeId": "4",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "Learn more"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 30
+            }),
+        ];
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.role, "RootWebArea");
+        assert_eq!(result.root.children.len(), 2);
+        assert_eq!(result.root.children[0].role, "heading");
+        assert_eq!(result.root.children[0].name, "Example Domain");
+        assert_eq!(result.root.children[1].role, "link");
+        assert_eq!(result.root.children[1].name, "Learn more");
+    }
+
+    #[test]
+    fn build_tree_deeply_nested_ignored_chain_promotes_through_all() {
+        // Root → ignored(id=2) → ignored(id=3) → ignored(id=4) → heading(id=5), paragraph(id=6)
+        let nodes = vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "RootWebArea"},
+                "name": {"type": "computedString", "value": "Deep"},
+                "properties": [],
+                "childIds": ["2"],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "ignored": true,
+                "role": {"type": "role", "value": "none"},
+                "name": {"type": "computedString", "value": ""},
+                "properties": [],
+                "childIds": ["3"],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "ignored": true,
+                "role": {"type": "role", "value": "none"},
+                "name": {"type": "computedString", "value": ""},
+                "properties": [],
+                "childIds": ["4"],
+                "backendDOMNodeId": 11
+            }),
+            json!({
+                "nodeId": "4",
+                "ignored": true,
+                "role": {"type": "role", "value": "none"},
+                "name": {"type": "computedString", "value": ""},
+                "properties": [],
+                "childIds": ["5", "6"],
+                "backendDOMNodeId": 12
+            }),
+            json!({
+                "nodeId": "5",
+                "ignored": false,
+                "role": {"type": "role", "value": "heading"},
+                "name": {"type": "computedString", "value": "Title"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+            json!({
+                "nodeId": "6",
+                "ignored": false,
+                "role": {"type": "role", "value": "paragraph"},
+                "name": {"type": "computedString", "value": "Content"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 30
+            }),
+        ];
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.role, "RootWebArea");
+        assert_eq!(result.root.children.len(), 2);
+        assert_eq!(result.root.children[0].role, "heading");
+        assert_eq!(result.root.children[0].name, "Title");
+        assert_eq!(result.root.children[1].role, "paragraph");
+        assert_eq!(result.root.children[1].name, "Content");
+    }
+
+    #[test]
+    fn build_tree_ignored_ancestor_interactive_children_get_uids() {
+        // Root → ignored(id=2) → button(id=3), link(id=4)
+        // Interactive children promoted through ignored ancestor should get UIDs.
+        let nodes = vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "RootWebArea"},
+                "name": {"type": "computedString", "value": "Page"},
+                "properties": [],
+                "childIds": ["2"],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "ignored": true,
+                "role": {"type": "role", "value": "none"},
+                "name": {"type": "computedString", "value": ""},
+                "properties": [],
+                "childIds": ["3", "4"],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "ignored": false,
+                "role": {"type": "role", "value": "button"},
+                "name": {"type": "computedString", "value": "Submit"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+            json!({
+                "nodeId": "4",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "Cancel"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 30
+            }),
+        ];
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.children.len(), 2);
+        assert_eq!(result.root.children[0].uid.as_deref(), Some("s1"));
+        assert_eq!(result.root.children[0].role, "button");
+        assert_eq!(result.root.children[1].uid.as_deref(), Some("s2"));
+        assert_eq!(result.root.children[1].role, "link");
+        assert_eq!(result.uid_map.get("s1"), Some(&20));
+        assert_eq!(result.uid_map.get("s2"), Some(&30));
     }
 
     #[test]
