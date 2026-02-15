@@ -2627,8 +2627,8 @@ fn has_ci_badge(world: &mut ReadmeWorld) {
 }
 
 #[then(expr = "it contains a license badge showing {string} and {string}")]
-#[allow(clippy::used_underscore_binding)]
-fn has_license_badge(world: &mut ReadmeWorld, lic1: String, _lic2: String) {
+fn has_license_badge(world: &mut ReadmeWorld, lic1: String, lic2: String) {
+    let _ = lic2;
     let content = &world.readme_content;
     assert!(
         content.contains("img.shields.io/badge/license"),
@@ -2937,6 +2937,7 @@ struct ClaudeCodeGuideWorld {
 }
 
 impl ClaudeCodeGuideWorld {
+    #[allow(clippy::unused_self)]
     fn load_file(&self, relative_path: &str) -> String {
         let path = project_root().join(relative_path);
         std::fs::read_to_string(&path)
@@ -3229,7 +3230,7 @@ fn guide_recommends_for_debugging(world: &mut ClaudeCodeGuideWorld, cmd: String)
 fn guide_documents_exit_codes(world: &mut ClaudeCodeGuideWorld) {
     let lower = world.current_section.to_lowercase();
     assert!(
-        lower.contains("exit code") && lower.contains("0"),
+        lower.contains("exit code") && lower.contains('0'),
         "Error handling section does not document exit code conventions"
     );
 }

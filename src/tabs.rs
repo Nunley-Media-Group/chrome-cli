@@ -160,6 +160,19 @@ async fn execute_create(
 ) -> Result<(), AppError> {
     let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
 
+    // When --background is used, record the currently active tab so we can
+    // re-activate it after creation (Chrome does not reliably honor the
+    // `background` parameter in Target.createTarget).
+    let original_active_id = if background {
+        let targets = query_targets(&conn.host, conn.port).await?;
+        targets
+            .iter()
+            .find(|t| t.target_type == "page")
+            .map(|t| t.id.clone())
+    } else {
+        None
+    };
+
     let config = cdp_config(global);
     let client = CdpClient::connect(&conn.ws_url, config).await?;
 
@@ -174,6 +187,14 @@ async fn execute_create(
         .await?;
 
     let target_id = result["targetId"].as_str().unwrap_or_default().to_string();
+
+    // Re-activate the original tab if --background was requested
+    if let Some(ref active_id) = original_active_id {
+        let activate_params = serde_json::json!({ "targetId": active_id });
+        client
+            .send_command("Target.activateTarget", Some(activate_params))
+            .await?;
+    }
 
     // Re-query to get the new tab's resolved URL and title
     let targets = query_targets(&conn.host, conn.port).await?;
