@@ -1,0 +1,39 @@
+# File: tests/features/form.feature (append to existing)
+#
+# Generated from: .claude/specs/84-fix-form-fill-many-json-arg-collision/requirements.md
+# Issue: #84
+# Type: Defect regression
+
+@regression
+Feature: form fill-many json arg collision fix
+  The `form fill-many` command previously panicked when invoked with inline JSON
+  because the positional argument was named `json`, colliding with the global
+  `--json` output format flag. This was fixed by renaming the positional field
+  from `json` to `input`.
+
+  # --- Bug Is Fixed ---
+
+  @regression
+  Scenario: fill-many accepts inline JSON positional argument without panicking
+    Given chrome-cli is built
+    When I run "chrome-cli form fill-many '[{\"uid\":\"s1\",\"value\":\"test\"}]' --pretty"
+    Then the exit code should not be 101
+
+  # --- Related Behavior Still Works ---
+
+  @regression
+  Scenario: fill-many help still shows all options after rename
+    Given chrome-cli is built
+    When I run "chrome-cli form fill-many --help"
+    Then the exit code should be 0
+    And stdout should contain "--file"
+    And stdout should contain "--include-snapshot"
+    And stdout should contain "JSON"
+
+  # --- Edge Case ---
+
+  @regression
+  Scenario: fill-many with --json flag does not panic
+    Given chrome-cli is built
+    When I run "chrome-cli form fill-many '[{\"uid\":\"s1\",\"value\":\"test\"}]' --json"
+    Then the exit code should not be 101

@@ -420,6 +420,16 @@ fn exit_code_should_be_nonzero(world: &mut CliWorld) {
     );
 }
 
+#[then(expr = "the exit code should not be {int}")]
+fn exit_code_should_not_be(world: &mut CliWorld, rejected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_ne!(
+        actual, rejected,
+        "Expected exit code to not be {rejected}, but it was\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
 // =============================================================================
 // CdpWorld — CDP WebSocket client BDD tests
 // =============================================================================
@@ -3345,6 +3355,9 @@ const FORM_TESTABLE_SCENARIOS: &[&str] = &[
     "Fill help displays all options",
     "Fill-many help displays all options",
     "Clear help displays all options",
+    "fill-many accepts inline JSON positional argument without panicking",
+    "fill-many help still shows all options after rename",
+    "fill-many with --json flag does not panic",
 ];
 
 /// Emulate BDD scenarios that can be tested without a running Chrome instance.

@@ -419,7 +419,7 @@ async fn execute_fill_many(global: &GlobalOpts, args: &FormFillManyArgs) -> Resu
     // Parse the JSON input (inline or from file)
     let json_str = if let Some(file_path) = &args.file {
         read_json_file(file_path)?
-    } else if let Some(json) = &args.json {
+    } else if let Some(json) = &args.input {
         json.clone()
     } else {
         return Err(AppError {

@@ -1579,7 +1579,8 @@ pub struct FormFillArgs {
 #[derive(Args)]
 pub struct FormFillManyArgs {
     /// Inline JSON array of {uid, value} objects
-    pub json: Option<String>,
+    #[arg(value_name = "JSON")]
+    pub input: Option<String>,
 
     /// Read JSON from a file instead of inline argument
     #[arg(long)]
