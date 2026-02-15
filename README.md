@@ -198,16 +198,17 @@ chrome-cli network block "*.ads.example.com"
 <summary><strong>Performance tracing</strong></summary>
 
 ```sh
-# Start a trace
-chrome-cli perf start
+# Record a trace for 5 seconds
+chrome-cli perf record --duration 5000
 
-# ... perform actions ...
+# Record until Ctrl+C, with page reload
+chrome-cli perf record --reload
 
-# Stop and save the trace
-chrome-cli perf stop --file trace.json
+# Save to a specific file
+chrome-cli perf record --duration 5000 --file trace.json
 
-# Get performance metrics
-chrome-cli perf metrics
+# Get Core Web Vitals
+chrome-cli perf vitals
 ```
 
 </details>

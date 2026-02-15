@@ -355,14 +355,14 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: None,
                 },
                 ExampleEntry {
-                    cmd: "chrome-cli perf start --reload".into(),
-                    description: "Start a trace with page reload".into(),
-                    flags: Some(vec!["--reload".into()]),
+                    cmd: "chrome-cli perf record --duration 5000".into(),
+                    description: "Record a trace for 5 seconds".into(),
+                    flags: Some(vec!["--duration".into()]),
                 },
                 ExampleEntry {
-                    cmd: "chrome-cli perf stop".into(),
-                    description: "Stop the active trace and collect data".into(),
-                    flags: None,
+                    cmd: "chrome-cli perf record --reload --duration 5000".into(),
+                    description: "Record a trace with page reload".into(),
+                    flags: Some(vec!["--reload".into(), "--duration".into()]),
                 },
                 ExampleEntry {
                     cmd: "chrome-cli perf analyze RenderBlocking --trace-file trace.json".into(),

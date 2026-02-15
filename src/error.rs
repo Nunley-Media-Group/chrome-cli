@@ -172,7 +172,7 @@ impl AppError {
     #[must_use]
     pub fn no_active_trace() -> Self {
         Self {
-            message: "No active trace. Run 'chrome-cli perf start' first.".into(),
+            message: "No active trace. Use 'chrome-cli perf record' to record a trace.".into(),
             code: ExitCode::GeneralError,
         }
     }
@@ -558,7 +558,7 @@ mod tests {
     fn no_active_trace_error() {
         let err = AppError::no_active_trace();
         assert!(err.message.contains("No active trace"));
-        assert!(err.message.contains("perf start"));
+        assert!(err.message.contains("perf record"));
         assert!(matches!(err.code, ExitCode::GeneralError));
     }
 

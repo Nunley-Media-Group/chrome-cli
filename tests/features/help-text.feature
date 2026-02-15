@@ -291,14 +291,9 @@ Feature: Comprehensive help text
     When I run "chrome-cli emulate status --help"
     Then stdout should contain "EXAMPLES"
 
-  Scenario: perf start help includes examples
+  Scenario: perf record help includes examples
     Given chrome-cli is built
-    When I run "chrome-cli perf start --help"
-    Then stdout should contain "EXAMPLES"
-
-  Scenario: perf stop help includes examples
-    Given chrome-cli is built
-    When I run "chrome-cli perf stop --help"
+    When I run "chrome-cli perf record --help"
     Then stdout should contain "EXAMPLES"
 
   Scenario: perf analyze help includes examples

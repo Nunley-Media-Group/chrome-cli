@@ -2,6 +2,7 @@
 #
 # Generated from: .claude/specs/performance-tracing/requirements.md
 # Issue: #22
+# Updated for issue #76: replaced perf start/stop with perf record
 
 Feature: Performance tracing and metrics
   As a developer or automation engineer
@@ -12,56 +13,33 @@ Feature: Performance tracing and metrics
     Given Chrome is running with CDP enabled
     And a page is loaded at "https://example.com"
 
-  # --- Happy Path: Start ---
+  # --- Happy Path: Record ---
 
-  Scenario: Start a performance trace with default options
-    When I run "chrome-cli perf start"
-    Then the output JSON has "tracing" set to true
-    And the output JSON has a "file" field with a valid file path
-    And the exit code should be 0
-
-  Scenario: Start a trace with page reload
-    When I run "chrome-cli perf start --reload"
-    Then the page is reloaded before tracing begins
-    And the output JSON has "tracing" set to true
-    And the exit code should be 0
-
-  Scenario: Start a trace with auto-stop
-    When I run "chrome-cli perf start --auto-stop"
-    Then the trace automatically stops after page load completes
-    And the output JSON has a "file" field
-    And the output JSON has a "duration_ms" field
-    And the output JSON has a "vitals" object
-    And the exit code should be 0
-
-  Scenario: Start a trace with a custom output file
-    When I run "chrome-cli perf start --file /tmp/my-trace.json"
-    Then the output JSON has "file" set to "/tmp/my-trace.json"
-    And the exit code should be 0
-
-  Scenario: Start a trace targeting a specific tab
-    Given Chrome has multiple tabs open
-    When I run "chrome-cli perf start --tab <ID>"
-    Then the trace is recorded for the specified tab
-    And the exit code should be 0
-
-  # --- Happy Path: Stop ---
-
-  Scenario: Stop an active trace
-    Given a performance trace is currently recording
-    When I run "chrome-cli perf stop"
-    Then the trace stops recording
-    And trace data is saved to a file
-    And the output JSON has a "file" field
+  Scenario: Record a performance trace with duration
+    When I run "chrome-cli perf record --duration 2000"
+    Then the output JSON has a "file" field with a valid file path
     And the output JSON has a "duration_ms" field
     And the output JSON has a "size_bytes" field
     And the output JSON has a "vitals" object with Core Web Vitals
     And the exit code should be 0
 
-  Scenario: Stop a trace with custom output file
-    Given a performance trace is currently recording
-    When I run "chrome-cli perf stop --file /tmp/output-trace.json"
-    Then the trace data is saved to "/tmp/output-trace.json"
+  Scenario: Record a trace with page reload
+    When I run "chrome-cli perf record --reload --duration 3000"
+    Then the page is reloaded before tracing begins
+    And the output JSON has a "file" field
+    And the output JSON has a "duration_ms" field
+    And the output JSON has a "vitals" object
+    And the exit code should be 0
+
+  Scenario: Record a trace with a custom output file
+    When I run "chrome-cli perf record --duration 2000 --file /tmp/my-trace.json"
+    Then the output JSON has "file" set to "/tmp/my-trace.json"
+    And the exit code should be 0
+
+  Scenario: Record a trace targeting a specific tab
+    Given Chrome has multiple tabs open
+    When I run "chrome-cli perf record --duration 2000 --tab <ID>"
+    Then the trace is recorded for the specified tab
     And the exit code should be 0
 
   # --- Happy Path: Analyze ---
@@ -85,12 +63,6 @@ Feature: Performance tracing and metrics
     And the exit code should be 0
 
   # --- Error Handling ---
-
-  Scenario: Stop when no trace is active
-    Given no performance trace is currently recording
-    When I run "chrome-cli perf stop"
-    Then the error output contains "No active trace"
-    And the exit code should be non-zero
 
   Scenario: Analyze with an invalid insight name
     Given a trace file exists at "/tmp/trace.json"

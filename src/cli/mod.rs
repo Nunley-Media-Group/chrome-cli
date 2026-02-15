@@ -385,15 +385,17 @@ EXAMPLES:
   # Quick Core Web Vitals measurement
   chrome-cli perf vitals
 
-  # Start a trace, reload the page, then stop
-  chrome-cli perf start --reload
-  chrome-cli perf stop
+  # Record a trace until Ctrl+C
+  chrome-cli perf record
+
+  # Record a trace for 5 seconds
+  chrome-cli perf record --duration 5000
+
+  # Record with page reload
+  chrome-cli perf record --reload --duration 5000
 
   # Analyze a trace for render-blocking resources
-  chrome-cli perf analyze RenderBlocking --trace-file trace.json
-
-  # Auto-stop trace after page load
-  chrome-cli perf start --reload --auto-stop"
+  chrome-cli perf analyze RenderBlocking --trace-file trace.json"
     )]
     Perf(PerfArgs),
 
@@ -931,43 +933,28 @@ pub struct PerfArgs {
 /// Performance tracing subcommands.
 #[derive(Subcommand)]
 pub enum PerfCommand {
-    /// Start a performance trace recording
+    /// Record a performance trace (long-running, stops on Ctrl+C or --duration)
     #[command(
-        long_about = "Start recording a performance trace. The trace captures JavaScript \
-            execution, layout, paint, network, and other browser activity. Use --reload to \
-            automatically reload the page before tracing. Use --auto-stop to stop recording \
-            after the page load completes. The trace is saved to a JSON file that can be \
-            opened in Chrome DevTools or analyzed with 'perf analyze'.",
+        long_about = "Record a performance trace in a single long-running session. The trace \
+            captures JavaScript execution, layout, paint, network, and other browser activity. \
+            Recording continues until you press Ctrl+C or the --duration timeout elapses. \
+            Use --reload to reload the page before recording. The trace is saved to a JSON \
+            file that can be opened in Chrome DevTools or analyzed with 'perf analyze'.",
         after_long_help = "\
 EXAMPLES:
-  # Start tracing
-  chrome-cli perf start
+  # Record until Ctrl+C
+  chrome-cli perf record
 
-  # Start with page reload
-  chrome-cli perf start --reload
+  # Record for 5 seconds
+  chrome-cli perf record --duration 5000
 
-  # Auto-stop after page load
-  chrome-cli perf start --reload --auto-stop
+  # Record with page reload
+  chrome-cli perf record --reload --duration 5000
 
   # Save to a specific file
-  chrome-cli perf start --file my-trace.json"
+  chrome-cli perf record --file my-trace.json"
     )]
-    Start(PerfStartArgs),
-
-    /// Stop the active trace and collect data
-    #[command(
-        long_about = "Stop the active performance trace and save the collected data. Returns \
-            JSON with the trace file path and summary metrics. The trace file can be opened \
-            in Chrome DevTools (Performance tab) or analyzed with 'perf analyze'.",
-        after_long_help = "\
-EXAMPLES:
-  # Stop and save
-  chrome-cli perf stop
-
-  # Stop and save to a specific file
-  chrome-cli perf stop --file trace-output.json"
-    )]
-    Stop(PerfStopArgs),
+    Record(PerfRecordArgs),
 
     /// Analyze a specific performance insight from a trace
     #[command(
@@ -1004,24 +991,16 @@ EXAMPLES:
     Vitals(PerfVitalsArgs),
 }
 
-/// Arguments for `perf start`.
+/// Arguments for `perf record`.
 #[derive(Args)]
-pub struct PerfStartArgs {
-    /// Reload the page before tracing
+pub struct PerfRecordArgs {
+    /// Reload the page before recording
     #[arg(long)]
     pub reload: bool,
-    /// Automatically stop after page load completes
+    /// Auto-stop after this many milliseconds
     #[arg(long)]
-    pub auto_stop: bool,
+    pub duration: Option<u64>,
     /// Path to save the trace file (default: auto-generated)
-    #[arg(long)]
-    pub file: Option<PathBuf>,
-}
-
-/// Arguments for `perf stop`.
-#[derive(Args)]
-pub struct PerfStopArgs {
-    /// Override output file path for the trace
     #[arg(long)]
     pub file: Option<PathBuf>,
 }

@@ -10,7 +10,7 @@ use chrome_cli::connection::{ManagedSession, resolve_connection, resolve_target}
 use chrome_cli::error::{AppError, ExitCode};
 
 use crate::cli::{
-    GlobalOpts, PerfAnalyzeArgs, PerfArgs, PerfCommand, PerfStartArgs, PerfStopArgs, PerfVitalsArgs,
+    GlobalOpts, PerfAnalyzeArgs, PerfArgs, PerfCommand, PerfRecordArgs, PerfVitalsArgs,
 };
 
 /// Default trace timeout in milliseconds (30 seconds).
@@ -38,13 +38,7 @@ const VALID_INSIGHTS: &[&str] = &[
 // =============================================================================
 
 #[derive(Serialize)]
-struct PerfStartResult {
-    tracing: bool,
-    file: String,
-}
-
-#[derive(Serialize)]
-struct PerfStopResult {
+struct PerfRecordResult {
     file: String,
     duration_ms: u64,
     size_bytes: u64,
@@ -123,8 +117,7 @@ fn cdp_config(global: &GlobalOpts) -> CdpConfig {
 /// Returns `AppError` if the subcommand fails.
 pub async fn execute_perf(global: &GlobalOpts, args: &PerfArgs) -> Result<(), AppError> {
     match &args.command {
-        PerfCommand::Start(start_args) => execute_start(global, start_args).await,
-        PerfCommand::Stop(stop_args) => execute_stop(global, stop_args).await,
+        PerfCommand::Record(record_args) => execute_record(global, record_args).await,
         PerfCommand::Analyze(analyze_args) => execute_analyze(global, analyze_args),
         PerfCommand::Vitals(vitals_args) => execute_vitals(global, vitals_args).await,
     }
@@ -161,10 +154,10 @@ fn resolve_trace_path(file: Option<&PathBuf>) -> PathBuf {
 }
 
 // =============================================================================
-// perf start
+// perf record
 // =============================================================================
 
-async fn execute_start(global: &GlobalOpts, args: &PerfStartArgs) -> Result<(), AppError> {
+async fn execute_record(global: &GlobalOpts, args: &PerfRecordArgs) -> Result<(), AppError> {
     let trace_path = resolve_trace_path(args.file.as_ref());
     let (_client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
@@ -172,7 +165,7 @@ async fn execute_start(global: &GlobalOpts, args: &PerfStartArgs) -> Result<(), 
     }
 
     // Enable required domains
-    if args.reload || args.auto_stop {
+    if args.reload {
         managed.ensure_domain("Page").await?;
     }
 
@@ -198,41 +191,30 @@ async fn execute_start(global: &GlobalOpts, args: &PerfStartArgs) -> Result<(), 
         wait_for_event(load_rx, DEFAULT_TRACE_TIMEOUT_MS, "page load").await?;
     }
 
-    // Handle --auto-stop
-    if args.auto_stop {
-        // If we didn't already reload, wait for page load
-        if !args.reload {
-            let load_rx = managed.subscribe("Page.loadEventFired").await?;
-            wait_for_event(load_rx, DEFAULT_TRACE_TIMEOUT_MS, "page load").await?;
+    // Wait for Ctrl+C or --duration timeout
+    let deadline = args
+        .duration
+        .map(|ms| tokio::time::Instant::now() + Duration::from_millis(ms));
+
+    tokio::select! {
+        () = async {
+            if let Some(d) = deadline {
+                tokio::time::sleep_until(d).await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        } => {
+            // Duration timeout elapsed
         }
-
-        // Stop and collect
-        let result = stop_and_collect(&managed, &trace_path).await?;
-
-        let plain = format_stop_plain(&result);
-        return print_output(&result, &global.output, Some(&plain));
+        _ = tokio::signal::ctrl_c() => {
+            // Ctrl+C received
+        }
     }
 
-    // Non-auto-stop: return immediately
-    let result = PerfStartResult {
-        tracing: true,
-        file: trace_path.display().to_string(),
-    };
-    let plain = format!("Tracing started. File: {}\n", trace_path.display());
-    print_output(&result, &global.output, Some(&plain))
-}
-
-// =============================================================================
-// perf stop
-// =============================================================================
-
-async fn execute_stop(global: &GlobalOpts, args: &PerfStopArgs) -> Result<(), AppError> {
-    let trace_path = resolve_trace_path(args.file.as_ref());
-    let (_client, managed) = setup_session(global).await?;
-
+    // Stop and collect
     let result = stop_and_collect(&managed, &trace_path).await?;
 
-    let plain = format_stop_plain(&result);
+    let plain = format_record_plain(&result);
     print_output(&result, &global.output, Some(&plain))
 }
 
@@ -240,7 +222,7 @@ async fn execute_stop(global: &GlobalOpts, args: &PerfStopArgs) -> Result<(), Ap
 async fn stop_and_collect(
     managed: &ManagedSession,
     trace_path: &Path,
-) -> Result<PerfStopResult, AppError> {
+) -> Result<PerfRecordResult, AppError> {
     let start_time = std::time::Instant::now();
 
     // Subscribe to trace events
@@ -282,7 +264,7 @@ async fn stop_and_collect(
         ttfb_ms: None,
     });
 
-    Ok(PerfStopResult {
+    Ok(PerfRecordResult {
         file: trace_path.display().to_string(),
         duration_ms,
         size_bytes: metadata.len(),
@@ -585,7 +567,7 @@ fn execute_analyze(global: &GlobalOpts, args: &PerfAnalyzeArgs) -> Result<(), Ap
         "LCPBreakdown" => analyze_lcp_breakdown(&trace.trace_events),
         "RenderBlocking" => analyze_render_blocking(&trace.trace_events),
         "LongTasks" => analyze_long_tasks(&trace.trace_events),
-        _ => unreachable!(),
+        _ => return Err(AppError::unknown_insight(&args.insight)),
     };
 
     let result = PerfAnalyzeResult {
@@ -862,7 +844,7 @@ async fn wait_for_event(
 // Plain text formatters
 // =============================================================================
 
-fn format_stop_plain(result: &PerfStopResult) -> String {
+fn format_record_plain(result: &PerfRecordResult) -> String {
     let mut out = String::new();
     out.push_str(&format!("Trace saved: {}\n", result.file));
     out.push_str(&format!("Duration: {}ms\n", result.duration_ms));
@@ -928,19 +910,8 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn perf_start_result_serialization() {
-        let result = PerfStartResult {
-            tracing: true,
-            file: "/tmp/chrome-trace-123.json".to_string(),
-        };
-        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["tracing"], true);
-        assert_eq!(json["file"], "/tmp/chrome-trace-123.json");
-    }
-
-    #[test]
-    fn perf_stop_result_serialization() {
-        let result = PerfStopResult {
+    fn perf_record_result_serialization() {
+        let result = PerfRecordResult {
             file: "/tmp/trace.json".to_string(),
             duration_ms: 3456,
             size_bytes: 1_234_567,
@@ -960,8 +931,8 @@ mod tests {
     }
 
     #[test]
-    fn perf_stop_result_with_none_vitals() {
-        let result = PerfStopResult {
+    fn perf_record_result_with_none_vitals() {
+        let result = PerfRecordResult {
             file: "/tmp/trace.json".to_string(),
             duration_ms: 100,
             size_bytes: 500,
@@ -1204,8 +1175,8 @@ mod tests {
     }
 
     #[test]
-    fn format_stop_plain_with_none_vitals_shows_na() {
-        let result = PerfStopResult {
+    fn format_record_plain_with_none_vitals_shows_na() {
+        let result = PerfRecordResult {
             file: "/tmp/trace.json".to_string(),
             duration_ms: 100,
             size_bytes: 500,
@@ -1215,7 +1186,7 @@ mod tests {
                 ttfb_ms: None,
             },
         };
-        let plain = format_stop_plain(&result);
+        let plain = format_record_plain(&result);
         assert!(plain.contains("LCP: N/A"));
         assert!(plain.contains("CLS: N/A"));
         assert!(plain.contains("TTFB: N/A"));
@@ -1375,8 +1346,8 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn format_stop_plain_contains_metrics() {
-        let result = PerfStopResult {
+    fn format_record_plain_contains_metrics() {
+        let result = PerfRecordResult {
             file: "/tmp/trace.json".to_string(),
             duration_ms: 3456,
             size_bytes: 1_234_567,
@@ -1386,7 +1357,7 @@ mod tests {
                 ttfb_ms: Some(180.3),
             },
         };
-        let plain = format_stop_plain(&result);
+        let plain = format_record_plain(&result);
         assert!(plain.contains("/tmp/trace.json"));
         assert!(plain.contains("3456ms"));
         assert!(plain.contains("LCP:"));
@@ -1452,5 +1423,49 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_file(&path);
+    }
+
+    // =========================================================================
+    // Regression: perf record output format (issue #76)
+    // =========================================================================
+
+    #[test]
+    fn perf_record_result_has_expected_json_fields() {
+        let result = PerfRecordResult {
+            file: "/tmp/trace.json".to_string(),
+            duration_ms: 5000,
+            size_bytes: 2_000_000,
+            vitals: CoreWebVitals {
+                lcp_ms: Some(800.0),
+                cls: Some(0.01),
+                ttfb_ms: Some(120.0),
+            },
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        // Verify all expected fields are present (not "tracing" from old PerfStartResult)
+        assert!(json.get("file").is_some());
+        assert!(json.get("duration_ms").is_some());
+        assert!(json.get("size_bytes").is_some());
+        assert!(json.get("vitals").is_some());
+        // Old field should NOT exist
+        assert!(json.get("tracing").is_none());
+    }
+
+    #[test]
+    fn format_record_plain_shows_trace_saved() {
+        let result = PerfRecordResult {
+            file: "/tmp/my-trace.json".to_string(),
+            duration_ms: 5000,
+            size_bytes: 100_000,
+            vitals: CoreWebVitals {
+                lcp_ms: Some(500.0),
+                cls: None,
+                ttfb_ms: None,
+            },
+        };
+        let plain = format_record_plain(&result);
+        assert!(plain.contains("Trace saved: /tmp/my-trace.json"));
+        assert!(plain.contains("5000ms"));
+        assert!(plain.contains("100000 bytes"));
     }
 }
