@@ -11,6 +11,7 @@ use crate::cli::{
     FormArgs, FormClearArgs, FormCommand, FormFillArgs, FormFillManyArgs, FormUploadArgs,
     GlobalOpts,
 };
+use crate::emulate::apply_emulate_state;
 use crate::snapshot;
 
 // =============================================================================
@@ -121,7 +122,8 @@ async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession
     let config = cdp_config(global);
     let client = CdpClient::connect(&conn.ws_url, config).await?;
     let session = client.create_session(&target.id).await?;
-    let managed = ManagedSession::new(session);
+    let mut managed = ManagedSession::new(session);
+    apply_emulate_state(&mut managed).await?;
 
     Ok((client, managed))
 }

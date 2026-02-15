@@ -12,6 +12,7 @@ use chrome_cli::error::{AppError, ExitCode};
 use crate::cli::{
     GlobalOpts, NetworkArgs, NetworkCommand, NetworkFollowArgs, NetworkGetArgs, NetworkListArgs,
 };
+use crate::emulate::apply_emulate_state;
 
 // =============================================================================
 // Output types
@@ -232,7 +233,8 @@ async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession
     let config = cdp_config(global);
     let client = CdpClient::connect(&conn.ws_url, config).await?;
     let session = client.create_session(&target.id).await?;
-    let managed = ManagedSession::new(session);
+    let mut managed = ManagedSession::new(session);
+    apply_emulate_state(&mut managed).await?;
 
     Ok((client, managed))
 }
