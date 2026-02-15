@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -124,6 +124,27 @@ pub fn find_available_port() -> Result<u16, ChromeError> {
     Ok(port)
 }
 
+/// Build the Chrome command-line arguments from a launch configuration.
+fn build_chrome_args(config: &LaunchConfig, data_dir: &Path) -> Vec<String> {
+    let mut args = vec![
+        format!("--remote-debugging-port={}", config.port),
+        format!("--user-data-dir={}", data_dir.display()),
+        "--no-first-run".to_string(),
+        "--no-default-browser-check".to_string(),
+        "--enable-automation".to_string(),
+    ];
+
+    if config.headless {
+        args.push("--headless=new".to_string());
+    }
+
+    for arg in &config.extra_args {
+        args.push(arg.clone());
+    }
+
+    args
+}
+
 /// Launch a Chrome process with the given configuration.
 ///
 /// Polls the Chrome debug endpoint until it responds or the timeout expires.
@@ -136,8 +157,8 @@ pub async fn launch_chrome(
     config: LaunchConfig,
     timeout: Duration,
 ) -> Result<ChromeProcess, ChromeError> {
-    let (data_dir, temp_dir) = if let Some(dir) = config.user_data_dir {
-        (dir, None)
+    let (data_dir, temp_dir) = if let Some(ref dir) = config.user_data_dir {
+        (dir.clone(), None)
     } else {
         let dir = std::env::temp_dir().join(format!("chrome-cli-{}", random_suffix()));
         std::fs::create_dir_all(&dir)?;
@@ -145,17 +166,10 @@ pub async fn launch_chrome(
         (dir, Some(td))
     };
 
+    let args = build_chrome_args(&config, &data_dir);
+
     let mut cmd = Command::new(&config.executable);
-    cmd.arg(format!("--remote-debugging-port={}", config.port))
-        .arg(format!("--user-data-dir={}", data_dir.display()))
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check");
-
-    if config.headless {
-        cmd.arg("--headless=new");
-    }
-
-    for arg in &config.extra_args {
+    for arg in &args {
         cmd.arg(arg);
     }
 
@@ -210,6 +224,56 @@ mod tests {
     fn find_available_port_returns_valid_port() {
         let port = find_available_port().unwrap();
         assert!(port > 0, "Expected a positive port number, got {port}");
+    }
+
+    fn default_launch_config(port: u16) -> LaunchConfig {
+        LaunchConfig {
+            executable: PathBuf::from("/usr/bin/chrome"),
+            port,
+            headless: false,
+            extra_args: vec![],
+            user_data_dir: None,
+        }
+    }
+
+    #[test]
+    fn automation_flag_is_included_on_launch() {
+        let config = default_launch_config(9222);
+        let data_dir = PathBuf::from("/tmp/test-data");
+        let args = build_chrome_args(&config, &data_dir);
+        assert!(
+            args.iter().any(|a| a == "--enable-automation"),
+            "Expected --enable-automation in args: {args:?}"
+        );
+    }
+
+    #[test]
+    fn headless_mode_includes_automation_flag() {
+        let mut config = default_launch_config(9222);
+        config.headless = true;
+        let data_dir = PathBuf::from("/tmp/test-data");
+        let args = build_chrome_args(&config, &data_dir);
+        assert!(
+            args.iter().any(|a| a == "--enable-automation"),
+            "Expected --enable-automation in args: {args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "--headless=new"),
+            "Expected --headless=new in args: {args:?}"
+        );
+    }
+
+    #[test]
+    fn extra_args_do_not_conflict_with_automation_flag() {
+        let mut config = default_launch_config(9222);
+        config.extra_args = vec!["--enable-automation".to_string()];
+        let data_dir = PathBuf::from("/tmp/test-data");
+        let args = build_chrome_args(&config, &data_dir);
+        // Should contain --enable-automation (at least once) without error
+        assert!(
+            args.iter().any(|a| a == "--enable-automation"),
+            "Expected --enable-automation in args: {args:?}"
+        );
     }
 
     #[test]
