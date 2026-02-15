@@ -163,3 +163,26 @@ Feature: Form input and filling
   #   When I run "chrome-cli form fill s999 'value'"
   #   Then the exit code should be nonzero
   #   And stderr should contain "UID"
+
+  # --- Regression: Issue #84 — json arg name collision ---
+
+  @regression
+  Scenario: fill-many accepts inline JSON positional argument without panicking
+    Given chrome-cli is built
+    When I run "chrome-cli form fill-many '[{"uid":"s1","value":"test"}]' --pretty"
+    Then the exit code should not be 101
+
+  @regression
+  Scenario: fill-many help still shows all options after rename
+    Given chrome-cli is built
+    When I run "chrome-cli form fill-many --help"
+    Then the exit code should be 0
+    And stdout should contain "--file"
+    And stdout should contain "--include-snapshot"
+    And stdout should contain "JSON"
+
+  @regression
+  Scenario: fill-many with --json flag does not panic
+    Given chrome-cli is built
+    When I run "chrome-cli form fill-many '[{"uid":"s1","value":"test"}]' --json"
+    Then the exit code should not be 101
