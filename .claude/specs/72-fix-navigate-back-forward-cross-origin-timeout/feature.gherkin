@@ -1,0 +1,41 @@
+# File: tests/features/cross-origin-history-navigation.feature
+#
+# Generated from: .claude/specs/72-fix-navigate-back-forward-cross-origin-timeout/requirements.md
+# Issue: #72
+# Type: Defect regression
+
+@regression
+Feature: Cross-origin back/forward navigation
+  The navigate back and navigate forward commands previously timed out
+  after 30 seconds when the browser history contained cross-origin entries.
+  This was fixed by using Page.frameNavigated instead of Page.loadEventFired
+  to detect navigation completion.
+
+  # --- Bug Is Fixed ---
+
+  @regression
+  Scenario: AC1 - Cross-origin navigate back succeeds
+    Given a tab is open with "https://example.com"
+    And the tab has navigated to "https://www.iana.org/domains/reserved"
+    When I run "chrome-cli navigate back"
+    Then the exit code is 0
+    And the JSON output has key "url" containing "example.com"
+
+  @regression
+  Scenario: AC2 - Cross-origin navigate forward succeeds
+    Given a tab is open with "https://example.com"
+    And the tab has navigated to "https://www.iana.org/domains/reserved"
+    And the tab has navigated back
+    When I run "chrome-cli navigate forward"
+    Then the exit code is 0
+    And the JSON output has key "url" containing "iana.org"
+
+  # --- Related Behavior Still Works ---
+
+  @regression
+  Scenario: AC3 - Same-origin navigate back still works
+    Given a tab is open with "https://example.com"
+    And the tab has navigated to "https://example.com/about"
+    When I run "chrome-cli navigate back"
+    Then the exit code is 0
+    And the JSON output has key "url" containing "example.com"

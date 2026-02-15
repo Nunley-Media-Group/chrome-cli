@@ -101,6 +101,14 @@ Feature: URL Navigation
     And the JSON output has key "url"
     And the specified tab navigated back
 
+  @regression
+  Scenario: AC9b - Cross-origin navigate back succeeds
+    Given a tab is open with "https://example.com"
+    And the tab has navigated to "https://www.iana.org/domains/reserved"
+    When I run "chrome-cli navigate back"
+    Then the exit code is 0
+    And the JSON output has key "url" containing "example.com"
+
   # --- History: Forward ---
 
   Scenario: AC11 - Navigate forward in browser history
@@ -116,6 +124,15 @@ Feature: URL Navigation
     When I run "chrome-cli navigate forward --tab <TAB_ID>"
     Then the exit code is 0
     And the specified tab navigated forward
+
+  @regression
+  Scenario: AC12b - Cross-origin navigate forward succeeds
+    Given a tab is open with "https://example.com"
+    And the tab has navigated to "https://www.iana.org/domains/reserved"
+    And the tab has navigated back
+    When I run "chrome-cli navigate forward"
+    Then the exit code is 0
+    And the JSON output has key "url" containing "iana.org"
 
   # --- Reload ---
 

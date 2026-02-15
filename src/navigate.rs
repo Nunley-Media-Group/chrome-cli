@@ -227,8 +227,8 @@ async fn execute_back(global: &GlobalOpts) -> Result<(), AppError> {
     let target_entry = &entries[current_index - 1];
     let entry_id = target_entry["id"].as_i64().unwrap_or(0);
 
-    // Subscribe to load event before navigating
-    let load_rx = managed.subscribe("Page.loadEventFired").await?;
+    // Subscribe to frameNavigated before navigating (fires reliably for cross-origin)
+    let nav_rx = managed.subscribe("Page.frameNavigated").await?;
 
     // Navigate to history entry
     managed
@@ -238,8 +238,8 @@ async fn execute_back(global: &GlobalOpts) -> Result<(), AppError> {
         )
         .await?;
 
-    // Wait for load
-    wait_for_event(load_rx, DEFAULT_NAVIGATE_TIMEOUT_MS, "load").await?;
+    // Wait for navigation
+    wait_for_event(nav_rx, DEFAULT_NAVIGATE_TIMEOUT_MS, "navigation").await?;
 
     let (page_url, page_title) = get_page_info(&managed).await?;
 
@@ -286,7 +286,7 @@ async fn execute_forward(global: &GlobalOpts) -> Result<(), AppError> {
     let target_entry = &entries[next_index];
     let entry_id = target_entry["id"].as_i64().unwrap_or(0);
 
-    let load_rx = managed.subscribe("Page.loadEventFired").await?;
+    let nav_rx = managed.subscribe("Page.frameNavigated").await?;
 
     managed
         .send_command(
@@ -295,7 +295,7 @@ async fn execute_forward(global: &GlobalOpts) -> Result<(), AppError> {
         )
         .await?;
 
-    wait_for_event(load_rx, DEFAULT_NAVIGATE_TIMEOUT_MS, "load").await?;
+    wait_for_event(nav_rx, DEFAULT_NAVIGATE_TIMEOUT_MS, "navigation").await?;
 
     let (page_url, page_title) = get_page_info(&managed).await?;
 
