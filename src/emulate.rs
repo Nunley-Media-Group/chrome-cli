@@ -100,7 +100,12 @@ fn write_emulate_state_to(path: &Path, state: &EmulateState) -> Result<(), AppEr
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).map_err(
+                |e| AppError {
+                    message: format!("emulate state dir permissions error: {e}"),
+                    code: ExitCode::GeneralError,
+                },
+            )?;
         }
     }
 
@@ -118,7 +123,12 @@ fn write_emulate_state_to(path: &Path, state: &EmulateState) -> Result<(), AppEr
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600));
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |e| AppError {
+                message: format!("emulate state file permissions error: {e}"),
+                code: ExitCode::GeneralError,
+            },
+        )?;
     }
 
     std::fs::rename(&tmp_path, path).map_err(|e| AppError {
