@@ -37,7 +37,10 @@ impl fmt::Display for ChromeError {
             Self::NotFound(msg) => write!(f, "Chrome not found: {msg}"),
             Self::LaunchFailed(msg) => write!(f, "Chrome launch failed: {msg}"),
             Self::StartupTimeout { port } => {
-                write!(f, "Chrome startup timed out on port {port}")
+                write!(
+                    f,
+                    "Chrome startup timed out on port {port}. Try --timeout to increase the wait time, or --headless for headless mode"
+                )
             }
             Self::HttpError(msg) => write!(f, "Chrome HTTP error: {msg}"),
             Self::ParseError(msg) => write!(f, "Chrome parse error: {msg}"),
@@ -107,7 +110,10 @@ mod tests {
     #[test]
     fn display_startup_timeout() {
         let err = ChromeError::StartupTimeout { port: 9222 };
-        assert_eq!(err.to_string(), "Chrome startup timed out on port 9222");
+        assert_eq!(
+            err.to_string(),
+            "Chrome startup timed out on port 9222. Try --timeout to increase the wait time, or --headless for headless mode"
+        );
     }
 
     #[test]

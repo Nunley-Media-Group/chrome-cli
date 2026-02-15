@@ -142,6 +142,71 @@ pub async fn discover_chrome(host: &str, port: u16) -> Result<(String, u16), Chr
         .map_err(|e| ChromeError::NotRunning(format!("discovery failed on {host}:{port}: {e}")))
 }
 
+/// Check whether `buf` contains a complete HTTP response (headers + full body per Content-Length).
+fn is_http_response_complete(buf: &[u8]) -> bool {
+    let Some(header_end) = find_header_end(buf) else {
+        return false;
+    };
+    let body_start = header_end + 4; // skip past \r\n\r\n
+    let headers = &buf[..header_end];
+    match parse_content_length(headers) {
+        Some(cl) => buf.len() >= body_start + cl,
+        None => true, // no Content-Length; headers are complete, assume body is too
+    }
+}
+
+/// Find the byte offset of `\r\n\r\n` in `buf`, returning the position of the first `\r`.
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
+}
+
+/// Parse `Content-Length` from raw header bytes (case-insensitive).
+fn parse_content_length(headers: &[u8]) -> Option<usize> {
+    let header_str = std::str::from_utf8(headers).ok()?;
+    for line in header_str.lines() {
+        if let Some((key, value)) = line.split_once(':') {
+            if key.trim().eq_ignore_ascii_case("content-length") {
+                return value.trim().parse().ok();
+            }
+        }
+    }
+    None
+}
+
+/// Parse a raw HTTP response buffer into the body string.
+///
+/// Validates the status line is 200 OK and extracts the body after headers.
+fn parse_http_response(buf: &[u8]) -> Result<String, ChromeError> {
+    let header_end = find_header_end(buf)
+        .ok_or_else(|| ChromeError::HttpError("malformed HTTP response".into()))?;
+    let body_start = header_end + 4;
+
+    let headers = std::str::from_utf8(&buf[..header_end])
+        .map_err(|e| ChromeError::HttpError(format!("invalid UTF-8 in headers: {e}")))?;
+
+    // Check for HTTP 200 status
+    let status_line = headers
+        .lines()
+        .next()
+        .ok_or_else(|| ChromeError::HttpError("empty response".into()))?;
+    if !status_line.contains(" 200 ") {
+        return Err(ChromeError::HttpError(format!(
+            "unexpected HTTP status: {status_line}"
+        )));
+    }
+
+    // Extract body: use Content-Length if available, otherwise take everything after headers
+    let body_bytes = if let Some(cl) = parse_content_length(&buf[..header_end]) {
+        let end = (body_start + cl).min(buf.len());
+        &buf[body_start..end]
+    } else {
+        &buf[body_start..]
+    };
+
+    String::from_utf8(body_bytes.to_vec())
+        .map_err(|e| ChromeError::HttpError(format!("invalid UTF-8 in body: {e}")))
+}
+
 /// Perform a simple HTTP GET request using blocking I/O in a `spawn_blocking` context.
 async fn http_get(host: &str, port: u16, path: &str) -> Result<String, ChromeError> {
     let addr = format!("{host}:{port}");
@@ -163,29 +228,36 @@ async fn http_get(host: &str, port: u16, path: &str) -> Result<String, ChromeErr
             .write_all(request_clone.as_bytes())
             .map_err(|e| ChromeError::HttpError(format!("write failed: {e}")))?;
 
-        let mut response = String::new();
-        stream
-            .read_to_string(&mut response)
-            .map_err(|e| ChromeError::HttpError(format!("read failed: {e}")))?;
-
-        // Check for HTTP 200 status
-        let status_line = response
-            .lines()
-            .next()
-            .ok_or_else(|| ChromeError::HttpError("empty response".into()))?;
-        if !status_line.contains("200") {
-            return Err(ChromeError::HttpError(format!(
-                "unexpected HTTP status: {status_line}"
-            )));
+        // Read response incrementally, stopping once we have Content-Length bytes
+        // of body. This avoids blocking on EOF when Chrome keeps the connection open.
+        let mut buf = Vec::with_capacity(4096);
+        let mut tmp = [0u8; 4096];
+        loop {
+            match stream.read(&mut tmp) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    buf.extend_from_slice(&tmp[..n]);
+                    if is_http_response_complete(&buf) {
+                        break;
+                    }
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    // Timeout/EAGAIN: if we already have a complete response, use it
+                    if is_http_response_complete(&buf) {
+                        break;
+                    }
+                    return Err(ChromeError::HttpError(format!("read timed out: {e}")));
+                }
+                Err(e) => {
+                    return Err(ChromeError::HttpError(format!("read failed: {e}")));
+                }
+            }
         }
 
-        // Extract body after \r\n\r\n
-        let body = response
-            .split_once("\r\n\r\n")
-            .map(|(_, b)| b.to_string())
-            .ok_or_else(|| ChromeError::HttpError("malformed HTTP response".into()))?;
-
-        Ok(body)
+        parse_http_response(&buf)
     })
     .await
     .map_err(|e| ChromeError::HttpError(format!("task join failed: {e}")))?
@@ -270,5 +342,60 @@ mod tests {
         let dir = std::path::Path::new("/nonexistent/chrome-cli-test");
         let result = read_devtools_active_port_from(dir);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_http_response_with_content_length() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, world!";
+        let body = parse_http_response(raw).unwrap();
+        assert_eq!(body, "Hello, world!");
+    }
+
+    #[test]
+    fn parse_http_response_without_content_length() {
+        let raw = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"ok\":true}";
+        let body = parse_http_response(raw).unwrap();
+        assert_eq!(body, "{\"ok\":true}");
+    }
+
+    #[test]
+    fn parse_http_response_content_length_zero() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        let body = parse_http_response(raw).unwrap();
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn parse_http_response_malformed_no_separator() {
+        let raw = b"HTTP/1.1 200 OK\nno double crlf here";
+        let result = parse_http_response(raw);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_http_response_non_200_status() {
+        let raw = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        let result = parse_http_response(raw);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn is_http_response_complete_with_content_length() {
+        let partial = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHe";
+        assert!(!is_http_response_complete(partial));
+
+        let complete = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello";
+        assert!(is_http_response_complete(complete));
+    }
+
+    #[test]
+    fn is_http_response_complete_no_headers_yet() {
+        assert!(!is_http_response_complete(b"HTTP/1.1 200 OK\r\n"));
+    }
+
+    #[test]
+    fn is_http_response_complete_without_content_length() {
+        let response = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nbody";
+        assert!(is_http_response_complete(response));
     }
 }

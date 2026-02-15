@@ -1,0 +1,56 @@
+# File: tests/features/68-fix-connect-launch-timeout.feature
+#
+# Generated from: .claude/specs/68-fix-connect-launch-timeout/requirements.md
+# Issue: #68
+# Type: Defect regression
+
+@regression
+Feature: http_get blocks waiting for EOF that Chrome never sends
+  The http_get() function in discovery.rs previously used read_to_string()
+  which blocked waiting for EOF/connection close. Chrome's DevTools HTTP server
+  does not close the TCP connection promptly, causing every poll attempt to
+  waste 5 seconds and ultimately timing out.
+  This was fixed by replacing read_to_string with Content-Length-aware chunked reading.
+
+  # --- Bug Is Fixed ---
+
+  @regression
+  Scenario: Successful launch and connect
+    Given Chrome is installed and no existing connection session exists
+    When the user runs "chrome-cli connect --launch"
+    Then Chrome is launched and the DevTools port is detected
+    And a session is saved
+    And connection metadata is printed as JSON with exit code 0
+
+  # --- Related Behavior Still Works ---
+
+  @regression
+  Scenario: Headless mode still works
+    Given Chrome is installed
+    When the user runs "chrome-cli connect --launch --headless"
+    Then Chrome is launched in headless mode
+    And the connection succeeds within the default 30-second timeout
+
+  @regression
+  Scenario: http_get handles Content-Length response without EOF
+    Given Chrome's DevTools HTTP server sends a complete response with "Content-Length" header
+    And the server does not immediately close the TCP connection
+    When http_get reads the response
+    Then the response body is returned based on Content-Length
+    And the function does not block waiting for connection close
+
+  @regression
+  Scenario: Cross-platform HTTP response reading
+    Given Chrome's DevTools HTTP server sends a valid response
+    When http_get reads from the DevTools server
+    Then the response is correctly parsed regardless of connection close timing
+
+  # --- Error Case ---
+
+  @regression
+  Scenario: Actionable error message on startup timeout
+    Given Chrome is launched but the DevTools server never becomes ready
+    When the startup timeout expires
+    Then the error message includes the port number
+    And the error message suggests using "--timeout" to increase the wait time
+    And the error message suggests "--headless" as an alternative
