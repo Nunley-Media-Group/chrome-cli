@@ -37,6 +37,7 @@ const INTERACTIVE_ROLES: &[&str] = &[
 
 struct AxNode {
     node_id: String,
+    parent_id: Option<String>,
     ignored: bool,
     role: String,
     name: String,
@@ -73,6 +74,7 @@ fn parse_ax_nodes(nodes: &[serde_json::Value]) -> Vec<AxNode> {
 
             AxNode {
                 node_id: n["nodeId"].as_str().unwrap_or_default().to_string(),
+                parent_id: n["parentId"].as_str().map(String::from),
                 ignored: n["ignored"].as_bool().unwrap_or(false),
                 role: n["role"]["value"].as_str().unwrap_or_default().to_string(),
                 name: n["name"]["value"].as_str().unwrap_or_default().to_string(),
@@ -118,8 +120,43 @@ pub struct BuildResult {
 /// Assigns sequential UIDs (`s1`, `s2`, ...) to interactive elements in depth-first order.
 /// Returns the root node and the uid-to-`backendDOMNodeId` mapping.
 pub fn build_tree(nodes: &[serde_json::Value], verbose: bool) -> BuildResult {
-    let ax_nodes = parse_ax_nodes(nodes);
+    let mut ax_nodes = parse_ax_nodes(nodes);
     let total_nodes = ax_nodes.len();
+
+    // Find root (first node, or first non-ignored node)
+    let root_id = ax_nodes
+        .iter()
+        .find(|n| !n.ignored)
+        .map(|n| n.node_id.clone())
+        .unwrap_or_default();
+
+    // Fallback: if root has empty child_ids but there are other nodes,
+    // reconstruct child_ids from parentId references.
+    let root_has_children = ax_nodes
+        .iter()
+        .any(|n| n.node_id == root_id && !n.child_ids.is_empty());
+
+    if !root_has_children && total_nodes > 1 {
+        // Build parent_id → Vec<child_id> map from parentId fields
+        let mut parent_to_children: HashMap<String, Vec<String>> =
+            HashMap::with_capacity(total_nodes);
+        for node in &ax_nodes {
+            if let Some(ref pid) = node.parent_id {
+                parent_to_children
+                    .entry(pid.clone())
+                    .or_default()
+                    .push(node.node_id.clone());
+            }
+        }
+        // Inject computed child_ids into nodes that have none
+        for node in &mut ax_nodes {
+            if node.child_ids.is_empty() {
+                if let Some(children) = parent_to_children.remove(&node.node_id) {
+                    node.child_ids = children;
+                }
+            }
+        }
+    }
 
     // Build lookup: node_id → AxNode
     let mut lookup: HashMap<&str, &AxNode> = HashMap::with_capacity(ax_nodes.len());
@@ -127,20 +164,13 @@ pub fn build_tree(nodes: &[serde_json::Value], verbose: bool) -> BuildResult {
         lookup.insert(&node.node_id, node);
     }
 
-    // Find root (first node, or first non-ignored node)
-    let root_id = ax_nodes
-        .iter()
-        .find(|n| !n.ignored)
-        .map(|n| n.node_id.as_str())
-        .unwrap_or_default();
-
     let mut uid_counter: usize = 0;
     let mut uid_map: HashMap<String, i64> = HashMap::new();
     let mut node_count: usize = 0;
     let truncated = total_nodes > MAX_NODES;
 
     let root = build_subtree(
-        root_id,
+        &root_id,
         &lookup,
         verbose,
         &mut uid_counter,
@@ -1001,5 +1031,177 @@ mod tests {
         let hits = search_tree(&build.root, "", None, false, 100);
         let roles: Vec<&str> = hits.iter().map(|h| h.role.as_str()).collect();
         assert_eq!(roles, ["document", "button", "button", "link", "heading"]);
+    }
+
+    // =========================================================================
+    // parentId fallback tests (issue #73)
+    // =========================================================================
+
+    /// CDP response with parentId but empty childIds — simulates the bug scenario
+    /// where Chrome returns nodes without top-down child references.
+    fn parent_id_only_nodes() -> Vec<serde_json::Value> {
+        vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "RootWebArea"},
+                "name": {"type": "computedString", "value": "Google"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "parentId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "textbox"},
+                "name": {"type": "computedString", "value": "Search"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "parentId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "button"},
+                "name": {"type": "computedString", "value": "Google Search"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+            json!({
+                "nodeId": "4",
+                "parentId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "About"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 30
+            }),
+        ]
+    }
+
+    #[test]
+    fn build_tree_parent_id_fallback_produces_populated_tree() {
+        let nodes = parent_id_only_nodes();
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.role, "RootWebArea");
+        assert_eq!(result.root.name, "Google");
+        assert_eq!(result.root.children.len(), 3);
+        assert_eq!(result.root.children[0].role, "textbox");
+        assert_eq!(result.root.children[1].role, "button");
+        assert_eq!(result.root.children[2].role, "link");
+    }
+
+    #[test]
+    fn build_tree_parent_id_fallback_assigns_uids() {
+        let nodes = parent_id_only_nodes();
+        let result = build_tree(&nodes, false);
+        // All three children are interactive roles
+        assert_eq!(result.root.children[0].uid.as_deref(), Some("s1")); // textbox
+        assert_eq!(result.root.children[1].uid.as_deref(), Some("s2")); // button
+        assert_eq!(result.root.children[2].uid.as_deref(), Some("s3")); // link
+        assert_eq!(result.uid_map.len(), 3);
+        assert_eq!(result.uid_map.get("s1"), Some(&10));
+        assert_eq!(result.uid_map.get("s2"), Some(&20));
+        assert_eq!(result.uid_map.get("s3"), Some(&30));
+    }
+
+    #[test]
+    fn build_tree_parent_id_fallback_nested_hierarchy() {
+        // Tests multi-level tree reconstruction from parentId
+        let nodes = vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "RootWebArea"},
+                "name": {"type": "computedString", "value": "Page"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "parentId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "navigation"},
+                "name": {"type": "computedString", "value": "Nav"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "parentId": "2",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "Home"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+            json!({
+                "nodeId": "4",
+                "parentId": "2",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "About"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 30
+            }),
+        ];
+        let result = build_tree(&nodes, false);
+        assert_eq!(result.root.children.len(), 1); // navigation
+        let nav = &result.root.children[0];
+        assert_eq!(nav.role, "navigation");
+        assert_eq!(nav.children.len(), 2); // two links
+        assert_eq!(nav.children[0].role, "link");
+        assert_eq!(nav.children[0].name, "Home");
+        assert_eq!(nav.children[1].role, "link");
+        assert_eq!(nav.children[1].name, "About");
+    }
+
+    #[test]
+    fn build_tree_child_ids_take_precedence_over_parent_id() {
+        // When childIds are present, parentId should NOT cause duplication
+        let nodes = vec![
+            json!({
+                "nodeId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "document"},
+                "name": {"type": "computedString", "value": "Test"},
+                "properties": [],
+                "childIds": ["2", "3"],
+                "backendDOMNodeId": 1
+            }),
+            json!({
+                "nodeId": "2",
+                "parentId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "button"},
+                "name": {"type": "computedString", "value": "OK"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 10
+            }),
+            json!({
+                "nodeId": "3",
+                "parentId": "1",
+                "ignored": false,
+                "role": {"type": "role", "value": "link"},
+                "name": {"type": "computedString", "value": "More"},
+                "properties": [],
+                "childIds": [],
+                "backendDOMNodeId": 20
+            }),
+        ];
+        let result = build_tree(&nodes, false);
+        // childIds path should be used — root has childIds so fallback does NOT activate
+        assert_eq!(result.root.children.len(), 2);
+        assert_eq!(result.root.children[0].role, "button");
+        assert_eq!(result.root.children[1].role, "link");
     }
 }
