@@ -3459,6 +3459,16 @@ async fn main() {
         )
         .await;
 
+    // Background tab creation fix (issue #95) — all scenarios require a running Chrome instance
+    // for tab creation and activation verification. The feature file documents regression scenarios;
+    // the fix is validated by the verification polling loop in tabs.rs.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/95-fix-tabs-create-background.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
     // Mouse interactions — only CLI argument validation scenarios can be tested without Chrome.
     // All scenarios requiring actual element interaction need a running Chrome instance.
     CliWorld::cucumber()
