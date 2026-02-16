@@ -3518,6 +3518,16 @@ async fn main() {
         )
         .await;
 
+    // Network list empty array fix (issue #102) — all scenarios require a running Chrome instance
+    // for network request capture. The feature file documents regression scenarios; the fix is
+    // validated by unit tests in network.rs (filtering, pagination, serialization).
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/102-fix-network-list-empty-array.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
     // Background tab creation fix (issue #95) — all scenarios require a running Chrome instance
     // for tab creation and activation verification. The feature file documents regression scenarios;
     // the fix is validated by the verification polling loop in tabs.rs.
