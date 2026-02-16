@@ -96,6 +96,9 @@ pub struct EmulateState {
     pub color_scheme: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub viewport: Option<ViewportState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub baseline_viewport: Option<ViewportState>,
 }
 
 /// Returns the path to the emulation state file: `~/.chrome-cli/emulate-state.json`.
@@ -708,9 +711,42 @@ async fn execute_set(global: &GlobalOpts, args: &EmulateSetArgs) -> Result<(), A
         }
     }
 
+    // Read persisted state early so we can check baseline_viewport before overriding
+    let mut persisted = read_emulate_state()?.unwrap_or_default();
+
     let viewport_requested = args.viewport.is_some() || args.device_scale.is_some() || args.mobile;
 
     if viewport_requested {
+        // Capture baseline viewport before the first override
+        if persisted.baseline_viewport.is_none() {
+            let result = managed
+                .send_command(
+                    "Runtime.evaluate",
+                    Some(serde_json::json!({
+                        "expression": "JSON.stringify({w:window.innerWidth,h:window.innerHeight})",
+                        "returnByValue": true,
+                    })),
+                )
+                .await
+                .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+
+            let val_str = result["result"]["value"]
+                .as_str()
+                .unwrap_or(r#"{"w":1280,"h":720}"#);
+            let dims: serde_json::Value =
+                serde_json::from_str(val_str).unwrap_or(serde_json::json!({"w":1280,"h":720}));
+
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let bw = dims["w"].as_u64().unwrap_or(1280) as u32;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let bh = dims["h"].as_u64().unwrap_or(720) as u32;
+
+            persisted.baseline_viewport = Some(ViewportState {
+                width: bw,
+                height: bh,
+            });
+        }
+
         let (width, height) = if let Some(ref vp_str) = args.viewport {
             parse_viewport(vp_str)?
         } else {
@@ -773,7 +809,6 @@ async fn execute_set(global: &GlobalOpts, args: &EmulateSetArgs) -> Result<(), A
     }
 
     // --- Persist CDP-only state ---
-    let mut persisted = read_emulate_state()?.unwrap_or_default();
     if args.mobile || args.viewport.is_some() {
         persisted.mobile = args.mobile;
     }
@@ -875,7 +910,26 @@ async fn execute_reset(global: &GlobalOpts) -> Result<(), AppError> {
         .await
         .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
 
-    // Clear device metrics
+    // Read persisted state before deleting so we can restore baseline viewport
+    let persisted = read_emulate_state()?.unwrap_or_default();
+
+    // Restore baseline viewport if one was captured, then clear the override
+    if let Some(ref baseline) = persisted.baseline_viewport {
+        managed
+            .send_command(
+                "Emulation.setDeviceMetricsOverride",
+                Some(serde_json::json!({
+                    "width": baseline.width,
+                    "height": baseline.height,
+                    "deviceScaleFactor": 1,
+                    "mobile": false,
+                })),
+            )
+            .await
+            .map_err(|e| AppError::emulation_failed(&e.to_string()))?;
+    }
+
+    // Clear device metrics override constraint
     managed
         .send_command("Emulation.clearDeviceMetricsOverride", None)
         .await
@@ -1332,6 +1386,10 @@ mod tests {
                 width: 375,
                 height: 812,
             }),
+            baseline_viewport: Some(ViewportState {
+                width: 756,
+                height: 417,
+            }),
         };
 
         write_emulate_state_to(&path, &state).unwrap();
@@ -1349,6 +1407,9 @@ mod tests {
         let vp = read.viewport.unwrap();
         assert_eq!(vp.width, 375);
         assert_eq!(vp.height, 812);
+        let bvp = read.baseline_viewport.unwrap();
+        assert_eq!(bvp.width, 756);
+        assert_eq!(bvp.height, 417);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1392,6 +1453,7 @@ mod tests {
         assert!(state.geolocation.is_none());
         assert!(state.color_scheme.is_none());
         assert!(state.viewport.is_none());
+        assert!(state.baseline_viewport.is_none());
     }
 
     #[test]
@@ -1405,6 +1467,7 @@ mod tests {
         assert!(!json.contains("geolocation"));
         assert!(!json.contains("color_scheme"));
         assert!(!json.contains("viewport"));
+        assert!(!json.contains("baseline_viewport"));
     }
 
     #[test]
@@ -1420,5 +1483,6 @@ mod tests {
         assert!(state.geolocation.is_none());
         assert!(state.color_scheme.is_none());
         assert!(state.viewport.is_none());
+        assert!(state.baseline_viewport.is_none());
     }
 }
