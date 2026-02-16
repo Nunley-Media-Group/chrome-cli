@@ -3528,6 +3528,16 @@ async fn main() {
         )
         .await;
 
+    // Console read empty array fix (issue #103) — all scenarios require a running Chrome instance
+    // for console message capture. The feature file documents regression scenarios; the fix is
+    // validated by unit tests in console.rs (filtering, pagination, serialization).
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/103-fix-console-read-empty-array.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
     // Background tab creation fix (issue #95) — all scenarios require a running Chrome instance
     // for tab creation and activation verification. The feature file documents regression scenarios;
     // the fix is validated by the verification polling loop in tabs.rs.

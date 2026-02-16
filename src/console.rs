@@ -382,17 +382,24 @@ pub async fn execute_console(global: &GlobalOpts, args: &ConsoleArgs) -> Result<
 // Read: list and detail modes
 // =============================================================================
 
+/// Default timeout for the reload+drain cycle in milliseconds.
+const DEFAULT_RELOAD_TIMEOUT_MS: u64 = 5000;
+
+/// Idle window after page load event to catch trailing console messages from deferred scripts (ms).
+const POST_LOAD_IDLE_MS: u64 = 200;
+
 #[allow(clippy::too_many_lines)]
 async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
 
+    let total_timeout =
+        Duration::from_millis(global.timeout.unwrap_or(DEFAULT_RELOAD_TIMEOUT_MS));
+
     // Enable Runtime domain for console events
     managed.ensure_domain("Runtime").await?;
 
-    // Enable Page domain for navigation tracking if --include-preserved
-    if args.include_preserved {
-        managed.ensure_domain("Page").await?;
-    }
+    // Enable Page domain for reload and navigation tracking
+    managed.ensure_domain("Page").await?;
 
     // Subscribe to console events
     let mut console_rx = managed
@@ -404,29 +411,49 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
             custom_json: None,
         })?;
 
-    // Subscribe to navigation events if needed
-    let mut nav_rx = if args.include_preserved {
-        Some(
-            managed
-                .subscribe("Page.frameNavigated")
-                .await
-                .map_err(|e| AppError {
-                    message: format!("Failed to subscribe to navigation events: {e}"),
-                    code: ExitCode::GeneralError,
-                    custom_json: None,
-                })?,
-        )
-    } else {
-        None
-    };
+    // Subscribe to navigation events for tracking
+    let mut nav_rx = managed
+        .subscribe("Page.frameNavigated")
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to subscribe to navigation events: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
 
-    // Drain events with a short timeout to collect pending messages
+    // Subscribe to page load event to know when reload completes
+    let mut load_event_rx = managed
+        .subscribe("Page.loadEventFired")
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to subscribe to page load events: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    // Trigger a page reload to replay page scripts and regenerate console events
+    managed
+        .send_command("Page.reload", Some(serde_json::json!({})))
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to reload page: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    // Collect events until page load completes + idle window, with total timeout
     let mut raw_events = Vec::new();
     let mut current_nav_id: u32 = 0;
-    let drain_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(100);
+    let mut page_loaded = false;
+    let absolute_deadline = tokio::time::Instant::now() + total_timeout;
+    let mut idle_deadline: Option<tokio::time::Instant> = None;
 
     loop {
-        let remaining = drain_deadline.saturating_duration_since(tokio::time::Instant::now());
+        let effective_deadline = match idle_deadline {
+            Some(idle) => idle.min(absolute_deadline),
+            None => absolute_deadline,
+        };
+        let remaining = effective_deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             break;
         }
@@ -443,18 +470,24 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
                     None => break,
                 }
             }
-            event = async {
-                if let Some(rx) = nav_rx.as_mut() {
-                    rx.recv().await
-                } else {
-                    // Never resolves
-                    std::future::pending().await
+            event = nav_rx.recv() => {
+                match event {
+                    Some(_) => current_nav_id += 1,
+                    None => break,
                 }
-            } => {
-                if event.is_some() {
-                    current_nav_id += 1;
-                } else {
-                    break;
+            }
+            event = load_event_rx.recv() => {
+                match event {
+                    Some(_) => {
+                        if !page_loaded {
+                            page_loaded = true;
+                            idle_deadline = Some(
+                                tokio::time::Instant::now()
+                                    + tokio::time::Duration::from_millis(POST_LOAD_IDLE_MS),
+                            );
+                        }
+                    }
+                    None => break,
                 }
             }
             () = tokio::time::sleep(remaining) => break,
