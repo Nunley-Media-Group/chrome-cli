@@ -194,6 +194,19 @@ async fn execute_create(
         client
             .send_command("Target.activateTarget", Some(activate_params))
             .await?;
+
+        // Verify activation propagated to /json/list ordering.
+        // Chrome's HTTP endpoint may not immediately reflect the
+        // Target.activateTarget command, so poll until the original tab
+        // is back in the first-page-target position.
+        for _ in 0..10 {
+            let check = query_targets(&conn.host, conn.port).await?;
+            let first_page = check.iter().find(|t| t.target_type == "page");
+            if first_page.is_some_and(|t| t.id == *active_id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     // Re-query to get the new tab's resolved URL and title
