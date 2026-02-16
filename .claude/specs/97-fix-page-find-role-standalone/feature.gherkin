@@ -1,0 +1,51 @@
+# File: tests/features/element-finding.feature (additions)
+#
+# Generated from: .claude/specs/97-fix-page-find-role-standalone/requirements.md
+# Issue: #97
+# Type: Defect regression
+
+@regression
+Feature: page find --role as standalone search criterion
+  The `page find` command previously rejected `--role` as a standalone
+  search criterion, requiring a text query or `--selector` even when
+  `--role` alone was sufficient. This was fixed by including `--role`
+  in the input validation guard.
+
+  Background:
+    Given Chrome is running with CDP enabled
+    And a page is loaded with known interactive elements
+
+  # --- Bug Is Fixed ---
+
+  @regression
+  Scenario: Role-only search returns matching elements
+    Given the page contains a textbox and a button
+    When I run "chrome-cli page find --role textbox"
+    Then a JSON array is returned
+    And each element has role "textbox"
+    And each element includes "uid", "role", "name", and "boundingBox" fields
+    And the exit code is 0
+
+  # --- Related Behavior Still Works ---
+
+  @regression
+  Scenario: Combined role and text query still filters correctly
+    Given the page contains a link "Next" and a button "Next"
+    When I run "chrome-cli page find Next --role link"
+    Then only the link element with name "Next" is returned
+    And the button "Next" is not in the results
+
+  # --- Edge Case ---
+
+  @regression
+  Scenario: Role-only search with no matches returns empty array
+    Given the page is loaded
+    When I run "chrome-cli page find --role nonexistent-role"
+    Then an empty JSON array "[]" is returned
+    And the exit code is 0
+
+  @regression
+  Scenario: No search criterion provided returns error
+    When I run "chrome-cli page find"
+    Then an error is returned with message "a text query, --selector, or --role is required"
+    And the exit code is 1
