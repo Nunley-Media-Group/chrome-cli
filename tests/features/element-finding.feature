@@ -88,6 +88,24 @@ Feature: Element finding by text, CSS selector, and accessibility attributes
     Then only the link element with name "Next" is returned
     And the button "Next" is not in the results
 
+  # --- Role-Only Search (Issue #97) ---
+
+  @regression
+  Scenario: Role-only search returns matching elements
+    Given the page contains a textbox and a button
+    When I run "chrome-cli page find --role textbox"
+    Then a JSON array is returned
+    And each element has role "textbox"
+    And each element includes "uid", "role", "name", and "boundingBox" fields
+    And the exit code is 0
+
+  @regression
+  Scenario: Role-only search with no matches returns empty array
+    Given the page is loaded
+    When I run "chrome-cli page find --role nonexistent-role"
+    Then an empty JSON array "[]" is returned
+    And the exit code is 0
+
   # --- Edge Cases ---
 
   Scenario: No matches found returns empty array
@@ -98,7 +116,7 @@ Feature: Element finding by text, CSS selector, and accessibility attributes
 
   # --- Error Cases ---
 
-  Scenario: Neither query nor selector provided
+  Scenario: Neither query, selector, nor role provided
     When I run "chrome-cli page find"
-    Then an error is returned with message "either a text query or --selector is required"
+    Then an error is returned with message "a text query, --selector, or --role is required"
     And the exit code is 1

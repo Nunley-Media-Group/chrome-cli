@@ -509,10 +509,10 @@ async fn capture_snapshot(
 }
 
 async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<(), AppError> {
-    // Validate: at least one of query or selector must be provided
-    if args.query.is_none() && args.selector.is_none() {
+    // Validate: at least one of query, selector, or role must be provided
+    if args.query.is_none() && args.selector.is_none() && args.role.is_none() {
         return Err(AppError {
-            message: "either a text query or --selector is required".to_string(),
+            message: "a text query, --selector, or --role is required".to_string(),
             code: ExitCode::GeneralError,
             custom_json: None,
         });
