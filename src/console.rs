@@ -392,8 +392,7 @@ const POST_LOAD_IDLE_MS: u64 = 200;
 async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
 
-    let total_timeout =
-        Duration::from_millis(global.timeout.unwrap_or(DEFAULT_RELOAD_TIMEOUT_MS));
+    let total_timeout = Duration::from_millis(global.timeout.unwrap_or(DEFAULT_RELOAD_TIMEOUT_MS));
 
     // Enable Runtime domain for console events
     managed.ensure_domain("Runtime").await?;
