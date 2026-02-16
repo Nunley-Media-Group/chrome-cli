@@ -53,18 +53,10 @@ async fn main() {
                         && !trimmed.starts_with("For more information")
                         && !trimmed.starts_with("Usage:")
                 })
-                .map(|line| {
-                    line.strip_prefix("error: ")
-                        .unwrap_or(line)
-                        .trim()
-                })
+                .map(|line| line.strip_prefix("error: ").unwrap_or(line).trim())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let clean = if clean.is_empty() {
-                msg
-            } else {
-                clean
-            };
+            let clean = if clean.is_empty() { msg } else { clean };
             let app_err = AppError {
                 message: clean,
                 code: ExitCode::GeneralError,
