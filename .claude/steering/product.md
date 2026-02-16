@@ -7,38 +7,36 @@ All feature development should align with these guidelines.
 
 ## Mission
 
-**chrome-cli provides browser automation for developers and power users by exposing the Chrome DevTools Protocol through a fast, ergonomic command-line interface.**
-
-<!-- TODO: Refine this mission statement to match your specific vision -->
+**chrome-cli provides browser automation for developers and AI agents by exposing the Chrome DevTools Protocol through a fast, ergonomic command-line interface.**
 
 ---
 
 ## Target Users
 
-### Primary: Developer / Automation Engineer
+### Primary: AI Agents (Claude Code, MCP clients)
 
 | Characteristic | Implication |
 |----------------|-------------|
-| Comfortable with CLI tools | CLI-first UX, scriptable output formats (JSON, plain text) |
-| Writes CI/CD pipelines | Non-interactive mode, exit codes, deterministic behavior |
+| Consumes structured JSON output | All commands produce JSON on stdout, JSON errors on stderr |
+| Operates non-interactively | Deterministic exit codes, no prompts, timeout controls |
+| Chains multi-step browser workflows | Session persistence, tab targeting, accessibility-tree-driven interaction |
+
+### Secondary: Developer / Automation Engineer
+
+| Characteristic | Implication |
+|----------------|-------------|
+| Comfortable with CLI tools | CLI-first UX, scriptable output, shell pipeline composition |
+| Writes CI/CD pipelines | Headless mode, non-interactive, deterministic behavior |
 | Needs browser automation | CDP commands for navigation, screenshots, DOM interaction |
-
-### Secondary: QA / Testing Engineer
-
-| Characteristic | Implication |
-|----------------|-------------|
-| Runs browser-based test suites | Headless Chrome management, page load waiting |
-| Needs reproducible results | Consistent behavior across runs, timeout controls |
-
-<!-- TODO: Customize personas to match your actual target users -->
 
 ---
 
 ## Core Value Proposition
 
-1. **Speed** — Native Rust binary, instant startup, no runtime overhead
+1. **Speed** — Native Rust binary, sub-50ms startup, no runtime overhead
 2. **Simplicity** — Single binary, no Node.js/Python dependency, just `chrome-cli <command>`
-3. **Scriptability** — Composable CLI commands with structured output for shell pipelines
+3. **Scriptability** — Composable CLI commands with structured JSON output for shell pipelines and AI agents
+4. **AI-native** — Accessibility-tree snapshots, structured output, and session management designed for agent consumption
 
 ---
 
@@ -46,11 +44,10 @@ All feature development should align with these guidelines.
 
 | Principle | Description |
 |-----------|-------------|
-| CLI-first | Every feature should work non-interactively in scripts and pipelines |
+| CLI-first | Every feature works non-interactively in scripts and pipelines |
 | Zero config | Sensible defaults; auto-discover Chrome installation |
-| Cross-platform | macOS, Linux, and Windows support from day one |
-
-<!-- TODO: Refine principles to guide decision-making when requirements conflict -->
+| Cross-platform | macOS, Linux, and Windows support |
+| Structured output | JSON on stdout, JSON errors on stderr, meaningful exit codes |
 
 ---
 
@@ -66,74 +63,57 @@ All feature development should align with these guidelines.
 
 ## Feature Prioritization
 
-### Must Have (MVP)
-- Connect to running Chrome instance via CDP
-- Navigate to URL
-- Take page screenshot
-- Execute JavaScript in page context
-- List open tabs/targets
-
-### Should Have
-- Launch and manage Chrome process
-- Wait for page load / network idle
-- DOM query and interaction commands
-- Structured JSON output mode
-
-### Could Have
-- PDF export
-- Performance profiling commands
-- Network request interception
-- Cookie management
+### Must Have (Shipped)
+- Connect to / launch Chrome instance via CDP
+- Session management with auto-discovery and reconnection
+- Tab management (list, create, close, activate)
+- URL navigation (navigate, back, forward, reload)
+- Page inspection (text, accessibility tree snapshot, element finding)
+- Screenshots (viewport and full-page)
+- JavaScript execution in page context
+- Form filling by accessibility UID
+- Mouse, keyboard, and scroll interactions
+- Console message reading and monitoring
+- Network request monitoring and interception
+- Device / network / CPU emulation
+- Performance tracing and Core Web Vitals
+- Browser dialog handling (alert, confirm, prompt, beforeunload)
+- Configuration file support
+- Shell completions (Bash, Zsh, Fish, PowerShell, Elvish)
+- Man page generation and viewer
+- Built-in examples subcommand
+- Capabilities manifest subcommand
 
 ### Won't Have (Now)
 - GUI / TUI interface
-- Firefox/Safari support (CDP-only for now)
+- Firefox/Safari support (CDP-only)
 - Built-in test runner
-
-<!-- TODO: Adjust MoSCoW priorities to match your roadmap -->
 
 ---
 
 ## Key User Journeys
 
-### Journey 1: Take a Screenshot
+### Journey 1: AI Agent Browser Automation
 
 ```
-1. User runs: chrome-cli screenshot https://example.com -o screenshot.png
-2. chrome-cli launches headless Chrome (or connects to existing)
-3. Navigates to URL, waits for page load
-4. Captures screenshot, saves to file
-5. Exits with code 0
+1. Agent runs: chrome-cli connect --launch --headless
+2. Agent runs: chrome-cli navigate https://example.com
+3. Agent runs: chrome-cli page snapshot
+4. Agent reads accessibility tree, identifies form fields by UID
+5. Agent runs: chrome-cli form fill s5 "value"
+6. Agent runs: chrome-cli page screenshot --file result.png
+7. Agent runs: chrome-cli connect disconnect
 ```
 
-### Journey 2: Script Browser Automation
+### Journey 2: Shell Script Automation
 
 ```
-1. User runs: chrome-cli navigate https://example.com
-2. User runs: chrome-cli eval "document.title"
-3. Output: "Example Domain"
-4. User pipes output into other CLI tools
+1. User connects: chrome-cli connect
+2. User navigates: chrome-cli navigate https://example.com
+3. User extracts: chrome-cli js exec "document.title" | jq -r .result
+4. User screenshots: chrome-cli page screenshot --file shot.png
+5. Exit code 0 confirms success
 ```
-
-<!-- TODO: Define your key user journeys — they become the basis for BDD acceptance criteria -->
-
----
-
-## Brand Voice
-
-| Attribute | Do | Don't |
-|-----------|-----|-------|
-| Concise | Short, actionable error messages | Verbose stack traces by default |
-| Helpful | Suggest fixes in error messages | Just print cryptic error codes |
-
----
-
-## Privacy Commitment
-
-| Data | Usage | Shared |
-|------|-------|--------|
-| Browsing data | Transient, only during command execution | Never — all local |
-| No telemetry | No usage data collected | N/A |
 
 ---
 
