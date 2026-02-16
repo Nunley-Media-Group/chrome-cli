@@ -463,12 +463,26 @@ fn save_binary_body_to_file(path: &Path, base64_content: &str) -> Result<(), App
 // Event collection and correlation
 // =============================================================================
 
-/// Collect raw network events from CDP subscriptions with a 100ms idle timeout.
+/// Default timeout for the reload+drain cycle in milliseconds.
+const DEFAULT_RELOAD_TIMEOUT_MS: u64 = 5000;
+
+/// Idle window after page load event to catch trailing async requests (ms).
+const POST_LOAD_IDLE_MS: u64 = 200;
+
+/// Collect network events by reloading the page and capturing the resulting traffic.
+///
+/// After enabling the Network and Page domains and subscribing to events, this
+/// triggers a `Page.reload` and collects events until the page finishes loading
+/// (signaled by `Page.loadEventFired`) plus a short idle window for trailing
+/// async requests. A total timeout prevents hanging on slow or broken pages.
 #[allow(clippy::too_many_lines)]
 async fn collect_and_correlate(
     managed: &mut ManagedSession,
     include_preserved: bool,
+    timeout_ms: Option<u64>,
 ) -> Result<(Vec<NetworkRequestBuilder>, u32), AppError> {
+    let total_timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_RELOAD_TIMEOUT_MS));
+
     // Enable required domains
     managed.ensure_domain("Network").await?;
     managed.ensure_domain("Page").await?;
@@ -519,13 +533,39 @@ async fn collect_and_correlate(
             custom_json: None,
         })?;
 
-    // Drain events with 100ms idle timeout
+    let mut load_event_rx = managed
+        .subscribe("Page.loadEventFired")
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to subscribe to Page.loadEventFired: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    // Trigger a page reload to replay network requests
+    managed
+        .send_command("Page.reload", Some(serde_json::json!({})))
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to reload page: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    // Collect events until page load completes + idle window, with total timeout
     let mut raw_events: Vec<RawNetworkEvent> = Vec::new();
     let mut current_nav_id: u32 = 0;
-    let drain_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(100);
+    let mut page_loaded = false;
+    let absolute_deadline = tokio::time::Instant::now() + total_timeout;
+    let mut idle_deadline: Option<tokio::time::Instant> = None;
 
     loop {
-        let remaining = drain_deadline.saturating_duration_since(tokio::time::Instant::now());
+        // Determine the effective deadline: absolute timeout, or post-load idle, whichever is sooner
+        let effective_deadline = match idle_deadline {
+            Some(idle) => idle.min(absolute_deadline),
+            None => absolute_deadline,
+        };
+        let remaining = effective_deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             break;
         }
@@ -574,6 +614,21 @@ async fn collect_and_correlate(
             event = nav_rx.recv() => {
                 match event {
                     Some(_) => current_nav_id += 1,
+                    None => break,
+                }
+            }
+            event = load_event_rx.recv() => {
+                match event {
+                    Some(_) => {
+                        if !page_loaded {
+                            page_loaded = true;
+                            // Start idle window to catch trailing async requests
+                            idle_deadline = Some(
+                                tokio::time::Instant::now()
+                                    + tokio::time::Duration::from_millis(POST_LOAD_IDLE_MS),
+                            );
+                        }
+                    }
                     None => break,
                 }
             }
@@ -743,7 +798,8 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let (builders, _nav_id) = collect_and_correlate(&mut managed, args.include_preserved).await?;
+    let (builders, _nav_id) =
+        collect_and_correlate(&mut managed, args.include_preserved, global.timeout).await?;
 
     // Convert to summaries and sort by assigned_id
     let mut requests: Vec<NetworkRequestSummary> =
@@ -788,7 +844,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let (builders, _nav_id) = collect_and_correlate(&mut managed, true).await?;
+    let (builders, _nav_id) = collect_and_correlate(&mut managed, true, global.timeout).await?;
 
     // Find builder by assigned numeric ID
     #[allow(clippy::cast_possible_truncation)]
