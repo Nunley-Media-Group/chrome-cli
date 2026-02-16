@@ -479,6 +479,7 @@ impl From<SnapshotStateError> for AppError {
         Self {
             message: e.to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 }

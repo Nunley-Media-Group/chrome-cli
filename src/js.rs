@@ -50,6 +50,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -259,6 +260,7 @@ async fn execute_exec(global: &GlobalOpts, args: &JsExecArgs) -> Result<(), AppE
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to console events: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let await_promise = !args.no_await;
@@ -323,8 +325,7 @@ async fn execute_exec(global: &GlobalOpts, args: &JsExecArgs) -> Result<(), AppE
         };
         let err_json = serde_json::to_string(&js_error)
             .unwrap_or_else(|_| format!(r#"{{"error":"{error_desc}","code":1}}"#));
-        eprintln!("{err_json}");
-        return Err(AppError::js_execution_failed(&error_desc));
+        return Err(AppError::js_execution_failed_with_json(&error_desc, err_json));
     }
 
     // Extract result value and type
@@ -389,11 +390,13 @@ async fn execute_expression(
                 AppError {
                     message: format!("JavaScript execution timed out: {e}"),
                     code: ExitCode::TimeoutError,
+                    custom_json: None,
                 }
             } else {
                 AppError {
                     message: format!("JavaScript execution failed: {e}"),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 }
             }
         })
@@ -411,10 +414,12 @@ async fn execute_with_uid(
         .map_err(|e| AppError {
             message: format!("Failed to read snapshot state: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?
         .ok_or_else(|| AppError {
             message: "No snapshot state found. Run 'chrome-cli page snapshot' first.".to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let backend_node_id = state
@@ -435,6 +440,7 @@ async fn execute_with_uid(
         .map_err(|e| AppError {
             message: format!("Failed to resolve UID '{uid}': {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let object_id = resolve_result["object"]["objectId"]
@@ -442,6 +448,7 @@ async fn execute_with_uid(
         .ok_or_else(|| AppError {
             message: format!("UID '{uid}' could not be resolved to a DOM object"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     // Call the function on the resolved element
@@ -462,11 +469,13 @@ async fn execute_with_uid(
                 AppError {
                     message: format!("JavaScript execution timed out: {e}"),
                     code: ExitCode::TimeoutError,
+                    custom_json: None,
                 }
             } else {
                 AppError {
                     message: format!("JavaScript execution failed: {e}"),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 }
             }
         })

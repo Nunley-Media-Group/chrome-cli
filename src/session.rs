@@ -55,6 +55,7 @@ impl From<SessionError> for crate::error::AppError {
         Self {
             message: e.to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 }

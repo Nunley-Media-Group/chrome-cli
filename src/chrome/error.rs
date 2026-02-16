@@ -87,6 +87,7 @@ impl From<ChromeError> for crate::error::AppError {
         Self {
             message: e.to_string(),
             code,
+            custom_json: None,
         }
     }
 }

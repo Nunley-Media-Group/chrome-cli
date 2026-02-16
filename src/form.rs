@@ -72,6 +72,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -427,12 +428,14 @@ async fn execute_fill_many(global: &GlobalOpts, args: &FormFillManyArgs) -> Resu
         return Err(AppError {
             message: "Either inline JSON or --file must be provided".to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         });
     };
 
     let entries: Vec<FillEntry> = serde_json::from_str(&json_str).map_err(|e| AppError {
         message: format!("Invalid JSON: expected array of {{uid, value}} objects: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
 
     let (_client, mut managed) = setup_session(global).await?;
@@ -655,6 +658,7 @@ fn read_json_file(path: &Path) -> Result<String, AppError> {
     std::fs::read_to_string(path).map_err(|e| AppError {
         message: format!("File not found: {}: {e}", path.display()),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })
 }
 

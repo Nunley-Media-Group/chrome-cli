@@ -1,0 +1,47 @@
+# File: tests/features/96-fix-js-exec-double-json-stderr.feature
+#
+# Generated from: .claude/specs/96-fix-js-exec-double-json-stderr/requirements.md
+# Issue: #96
+# Type: Defect regression
+
+@regression
+Feature: JS execution errors emit single JSON on stderr
+  The `js exec` command previously emitted two separate JSON error objects
+  on stderr when JavaScript execution failed. This was fixed by removing
+  the manual eprintln in js.rs and routing the rich JS error JSON through
+  the global AppError handler.
+
+  Background:
+    Given Chrome is running with CDP enabled
+    And a page is loaded at "https://example.com"
+
+  # --- Bug Is Fixed ---
+
+  @regression
+  Scenario: Thrown error produces exactly one JSON object on stderr
+    When I run "chrome-cli js exec 'throw new Error(\"test\")'"
+    Then stderr contains exactly 1 JSON object
+    And the stderr JSON has key "error" containing "Error: test"
+    And the stderr JSON has key "stack"
+    And the stderr JSON has key "code" with value 1
+    And stdout is empty
+    And the exit code is non-zero
+
+  @regression
+  Scenario: ReferenceError produces exactly one JSON object on stderr
+    When I run "chrome-cli js exec 'nonExistentVar'"
+    Then stderr contains exactly 1 JSON object
+    And the stderr JSON has key "error" containing "ReferenceError"
+    And the stderr JSON has key "code" with value 1
+    And stdout is empty
+    And the exit code is non-zero
+
+  # --- Related Behavior Still Works ---
+
+  @regression
+  Scenario: Successful JS execution still returns result on stdout
+    When I run "chrome-cli js exec 'document.title'"
+    Then stdout contains JSON with keys "result", "type"
+    And the "result" field is "Example Domain"
+    And stderr is empty
+    And the exit code is 0

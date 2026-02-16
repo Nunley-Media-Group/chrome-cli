@@ -81,6 +81,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -400,6 +401,7 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to console events: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     // Subscribe to navigation events if needed
@@ -411,6 +413,7 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
                 .map_err(|e| AppError {
                     message: format!("Failed to subscribe to navigation events: {e}"),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 })?,
         )
     } else {
@@ -482,6 +485,7 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
             return Err(AppError {
                 message: format!("Message ID {id} not found"),
                 code: ExitCode::GeneralError,
+                custom_json: None,
             });
         }
         let detail =
@@ -489,6 +493,7 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
                 AppError {
                     message: format!("Failed to parse message ID {id}"),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 }
             })?;
 
@@ -542,6 +547,7 @@ async fn execute_follow(global: &GlobalOpts, args: &ConsoleFollowArgs) -> Result
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to console events: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let type_filter = resolve_type_filter(args.r#type.as_deref(), args.errors_only);
@@ -593,6 +599,7 @@ async fn execute_follow(global: &GlobalOpts, args: &ConsoleFollowArgs) -> Result
                         return Err(AppError {
                             message: "CDP connection closed".to_string(),
                             code: ExitCode::ConnectionError,
+                            custom_json: None,
                         });
                     }
                 }
@@ -618,6 +625,7 @@ async fn execute_follow(global: &GlobalOpts, args: &ConsoleFollowArgs) -> Result
         Err(AppError {
             message: "Error-level console messages were seen".to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })
     } else {
         Ok(())

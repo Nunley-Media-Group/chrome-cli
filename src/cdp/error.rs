@@ -86,6 +86,7 @@ impl From<CdpError> for crate::error::AppError {
         Self {
             message: e.to_string(),
             code,
+            custom_json: None,
         }
     }
 }

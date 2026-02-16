@@ -200,6 +200,7 @@ fn execute_man(args: &ManArgs) -> Result<(), AppError> {
         Some(name) => find_subcommand(&cmd, name).ok_or_else(|| AppError {
             message: format!("unknown command: {name}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?,
     };
 
@@ -207,6 +208,7 @@ fn execute_man(args: &ManArgs) -> Result<(), AppError> {
     man.render(&mut std::io::stdout()).map_err(|e| AppError {
         message: format!("failed to render man page: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     Ok(())
 }
@@ -252,6 +254,7 @@ fn print_json(value: &impl Serialize) -> Result<(), AppError> {
     let json = serde_json::to_string(value).map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())

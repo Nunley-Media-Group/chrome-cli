@@ -439,6 +439,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -501,6 +502,7 @@ pub fn execute_examples(global: &GlobalOpts, args: &ExamplesArgs) -> Result<(), 
                         available.join(", ")
                     ),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 });
             }
         }

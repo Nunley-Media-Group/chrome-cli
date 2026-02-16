@@ -110,6 +110,7 @@ fn emulate_state_path() -> Result<PathBuf, AppError> {
         .map_err(|_| AppError {
             message: "could not determine home directory".to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
     Ok(home.join(".chrome-cli").join("emulate-state.json"))
 }
@@ -120,6 +121,7 @@ fn write_emulate_state_to(path: &Path, state: &EmulateState) -> Result<(), AppEr
         std::fs::create_dir_all(parent).map_err(|e| AppError {
             message: format!("emulate state dir error: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
         #[cfg(unix)]
         {
@@ -128,6 +130,7 @@ fn write_emulate_state_to(path: &Path, state: &EmulateState) -> Result<(), AppEr
                 |e| AppError {
                     message: format!("emulate state dir permissions error: {e}"),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 },
             )?;
         }
@@ -136,12 +139,14 @@ fn write_emulate_state_to(path: &Path, state: &EmulateState) -> Result<(), AppEr
     let json = serde_json::to_string_pretty(state).map_err(|e| AppError {
         message: format!("emulate state serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
 
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, &json).map_err(|e| AppError {
         message: format!("emulate state write error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
 
     #[cfg(unix)]
@@ -151,6 +156,7 @@ fn write_emulate_state_to(path: &Path, state: &EmulateState) -> Result<(), AppEr
             |e| AppError {
                 message: format!("emulate state file permissions error: {e}"),
                 code: ExitCode::GeneralError,
+                custom_json: None,
             },
         )?;
     }
@@ -158,6 +164,7 @@ fn write_emulate_state_to(path: &Path, state: &EmulateState) -> Result<(), AppEr
     std::fs::rename(&tmp_path, path).map_err(|e| AppError {
         message: format!("emulate state rename error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     Ok(())
 }
@@ -175,6 +182,7 @@ fn read_emulate_state_from(path: &Path) -> Result<Option<EmulateState>, AppError
             let state: EmulateState = serde_json::from_str(&contents).map_err(|e| AppError {
                 message: format!("invalid emulate state file: {e}"),
                 code: ExitCode::GeneralError,
+                custom_json: None,
             })?;
             Ok(Some(state))
         }
@@ -182,6 +190,7 @@ fn read_emulate_state_from(path: &Path) -> Result<Option<EmulateState>, AppError
         Err(e) => Err(AppError {
             message: format!("emulate state read error: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }),
     }
 }
@@ -200,6 +209,7 @@ fn delete_emulate_state_from(path: &Path) -> Result<(), AppError> {
         Err(e) => Err(AppError {
             message: format!("emulate state delete error: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }),
     }
 }
@@ -416,6 +426,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())

@@ -74,6 +74,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -280,6 +281,7 @@ async fn execute_snapshot(global: &GlobalOpts, args: &PageSnapshotArgs) -> Resul
         let mut json_value = serde_json::to_value(&build.root).map_err(|e| AppError {
             message: format!("serialization error: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
         if build.truncated {
             if let Some(obj) = json_value.as_object_mut() {
@@ -298,6 +300,7 @@ async fn execute_snapshot(global: &GlobalOpts, args: &PageSnapshotArgs) -> Resul
         serializer.map_err(|e| AppError {
             message: format!("serialization error: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?
     } else {
         // Text output (default and --plain)
@@ -404,6 +407,7 @@ async fn find_by_selector(
         .map_err(|e| AppError {
             message: format!("CSS selector query failed: {e}"),
             code: ExitCode::ProtocolError,
+            custom_json: None,
         })?;
 
     let node_ids = query_result["nodeIds"]
@@ -510,6 +514,7 @@ async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<(), Ap
         return Err(AppError {
             message: "either a text query or --selector is required".to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         });
     }
 
@@ -694,6 +699,7 @@ async fn resolve_uid_clip(managed: &ManagedSession, uid: &str) -> Result<ClipReg
         .ok_or_else(|| AppError {
             message: "No snapshot state found. Run 'chrome-cli page snapshot' first.".to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let backend_node_id = state

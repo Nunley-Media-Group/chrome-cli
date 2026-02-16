@@ -90,6 +90,7 @@ fn print_output(
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -182,6 +183,7 @@ async fn execute_record(global: &GlobalOpts, args: &PerfRecordArgs) -> Result<()
         .map_err(|e| AppError {
             message: format!("Failed to start trace: {e}"),
             code: ExitCode::ProtocolError,
+            custom_json: None,
         })?;
 
     // Handle --reload
@@ -243,6 +245,7 @@ async fn stop_and_collect(
                 AppError {
                     message: format!("Failed to stop trace: {e}"),
                     code: ExitCode::ProtocolError,
+                    custom_json: None,
                 }
             }
         })?;
@@ -257,6 +260,7 @@ async fn stop_and_collect(
     let metadata = fs::metadata(trace_path).map_err(|e| AppError {
         message: format!("Failed to read trace file metadata: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
 
     // Parse vitals
@@ -283,6 +287,7 @@ async fn stream_trace_to_file(
     let file = fs::File::create(trace_path).map_err(|e| AppError {
         message: format!("Failed to create trace file {}: {e}", trace_path.display()),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     let mut writer = BufWriter::new(file);
 
@@ -309,6 +314,7 @@ async fn stream_trace_to_file(
                                 let bytes = serde_json::to_vec(trace_event).map_err(|e| AppError {
                                     message: format!("Failed to serialize trace event: {e}"),
                                     code: ExitCode::GeneralError,
+                                    custom_json: None,
                                 })?;
                                 writer.write_all(&bytes).map_err(|e| write_error(&e))?;
                             }
@@ -331,6 +337,7 @@ async fn stream_trace_to_file(
                                 let bytes = serde_json::to_vec(trace_event).map_err(|e| AppError {
                                     message: format!("Failed to serialize trace event: {e}"),
                                     code: ExitCode::GeneralError,
+                                    custom_json: None,
                                 })?;
                                 writer.write_all(&bytes).map_err(|e| write_error(&e))?;
                             }
@@ -357,6 +364,7 @@ fn write_error(e: &std::io::Error) -> AppError {
     AppError {
         message: format!("Failed to write trace data: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     }
 }
 
@@ -753,6 +761,7 @@ async fn execute_vitals(global: &GlobalOpts, args: &PerfVitalsArgs) -> Result<()
         .map_err(|e| AppError {
             message: format!("Failed to start trace: {e}"),
             code: ExitCode::ProtocolError,
+            custom_json: None,
         })?;
 
     // Reload the page
@@ -796,6 +805,7 @@ async fn execute_vitals(global: &GlobalOpts, args: &PerfVitalsArgs) -> Result<()
         return Err(AppError {
             message: "no vitals metrics collected".to_string(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         });
     }
 
@@ -833,6 +843,7 @@ async fn wait_for_event(
                 None => Err(AppError {
                     message: format!("Event channel closed while waiting for {description}"),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 }),
             }
         }

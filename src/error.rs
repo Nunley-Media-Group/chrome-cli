@@ -30,6 +30,9 @@ impl fmt::Display for ExitCode {
 pub struct AppError {
     pub message: String,
     pub code: ExitCode,
+    /// Pre-serialized JSON to emit instead of the default `ErrorOutput`.
+    /// Used by the JS execution path to preserve its richer error schema.
+    pub custom_json: Option<String>,
 }
 
 impl fmt::Display for AppError {
@@ -46,6 +49,7 @@ impl AppError {
         Self {
             message: format!("{command}: not yet implemented"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -56,6 +60,7 @@ impl AppError {
                       Run 'chrome-cli connect' to establish a new connection."
                 .into(),
             code: ExitCode::ConnectionError,
+            custom_json: None,
         }
     }
 
@@ -66,6 +71,7 @@ impl AppError {
                       'chrome-cli connect --launch' to establish a connection."
                 .into(),
             code: ExitCode::ConnectionError,
+            custom_json: None,
         }
     }
 
@@ -76,6 +82,7 @@ impl AppError {
                 "Tab '{tab}' not found. Run 'chrome-cli tabs list' to see available tabs."
             ),
             code: ExitCode::TargetError,
+            custom_json: None,
         }
     }
 
@@ -84,6 +91,7 @@ impl AppError {
         Self {
             message: "No page targets found in Chrome. Open a tab first.".into(),
             code: ExitCode::TargetError,
+            custom_json: None,
         }
     }
 
@@ -92,6 +100,7 @@ impl AppError {
         Self {
             message: "Cannot close the last tab. Chrome requires at least one open tab.".into(),
             code: ExitCode::TargetError,
+            custom_json: None,
         }
     }
 
@@ -100,6 +109,7 @@ impl AppError {
         Self {
             message: format!("Navigation failed: {error_text}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -108,6 +118,7 @@ impl AppError {
         Self {
             message: format!("Navigation timed out after {timeout_ms}ms waiting for {strategy}"),
             code: ExitCode::TimeoutError,
+            custom_json: None,
         }
     }
 
@@ -116,6 +127,7 @@ impl AppError {
         Self {
             message: format!("Element not found for selector: {selector}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -124,6 +136,7 @@ impl AppError {
         Self {
             message: format!("Text extraction failed: {description}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -132,6 +145,7 @@ impl AppError {
         Self {
             message: format!("Accessibility tree capture failed: {description}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -140,6 +154,7 @@ impl AppError {
         Self {
             message: format!("Failed to write snapshot to file: {path}: {error}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -148,6 +163,7 @@ impl AppError {
         Self {
             message: format!("Screenshot capture failed: {description}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -156,6 +172,7 @@ impl AppError {
         Self {
             message: format!("UID '{uid}' not found. Run 'chrome-cli page snapshot' first."),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -166,6 +183,7 @@ impl AppError {
                 "Invalid clip format: expected X,Y,WIDTH,HEIGHT (e.g. 10,20,200,100): {input}"
             ),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -174,6 +192,7 @@ impl AppError {
         Self {
             message: "No active trace. Use 'chrome-cli perf record' to record a trace.".into(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -185,6 +204,7 @@ impl AppError {
                  RenderBlocking, LongTasks"
             ),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -193,6 +213,7 @@ impl AppError {
         Self {
             message: format!("Trace file not found: {path}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -201,6 +222,7 @@ impl AppError {
         Self {
             message: format!("Failed to parse trace file: {error}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -209,6 +231,7 @@ impl AppError {
         Self {
             message: format!("Trace timed out after {timeout_ms}ms"),
             code: ExitCode::TimeoutError,
+            custom_json: None,
         }
     }
 
@@ -217,6 +240,16 @@ impl AppError {
         Self {
             message: format!("JavaScript execution failed: {description}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn js_execution_failed_with_json(description: &str, json: String) -> Self {
+        Self {
+            message: format!("JavaScript execution failed: {description}"),
+            code: ExitCode::GeneralError,
+            custom_json: Some(json),
         }
     }
 
@@ -225,6 +258,7 @@ impl AppError {
         Self {
             message: format!("Script file not found: {path}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -233,6 +267,7 @@ impl AppError {
         Self {
             message: format!("Failed to read script file: {path}: {error}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -243,6 +278,7 @@ impl AppError {
                 "No JavaScript code provided. Specify code as argument, --file, or pipe via stdin."
                     .into(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -252,6 +288,7 @@ impl AppError {
             message: "No dialog is currently open. A dialog must be open before it can be handled."
                 .into(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -260,6 +297,7 @@ impl AppError {
         Self {
             message: format!("Dialog handling failed: {reason}"),
             code: ExitCode::ProtocolError,
+            custom_json: None,
         }
     }
 
@@ -270,6 +308,7 @@ impl AppError {
                       'chrome-cli connect --launch' to establish a connection."
                 .into(),
             code: ExitCode::ConnectionError,
+            custom_json: None,
         }
     }
 
@@ -280,6 +319,7 @@ impl AppError {
                       UIDs to interactive elements."
                 .into(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -290,6 +330,7 @@ impl AppError {
                 "Element '{target}' has zero-size bounding box and cannot be clicked."
             ),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -298,6 +339,7 @@ impl AppError {
         Self {
             message: format!("Invalid key: '{key}'"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -306,6 +348,7 @@ impl AppError {
         Self {
             message: format!("Duplicate modifier: '{modifier}'"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -314,6 +357,7 @@ impl AppError {
         Self {
             message: format!("Interaction failed ({action}): {reason}"),
             code: ExitCode::ProtocolError,
+            custom_json: None,
         }
     }
 
@@ -322,6 +366,7 @@ impl AppError {
         Self {
             message: format!("Emulation failed: {description}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -332,6 +377,7 @@ impl AppError {
                 "Invalid viewport format: expected WIDTHxHEIGHT (e.g. 1280x720): {input}"
             ),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -342,6 +388,7 @@ impl AppError {
                 "Invalid geolocation format: expected LAT,LONG (e.g. 37.7749,-122.4194): {input}"
             ),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -350,6 +397,7 @@ impl AppError {
         Self {
             message: format!("File not found: {path}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -358,6 +406,7 @@ impl AppError {
         Self {
             message: format!("File not readable: {path}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -366,6 +415,7 @@ impl AppError {
         Self {
             message: format!("Element is not a file input: {target}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -377,6 +427,7 @@ impl AppError {
                  Run 'chrome-cli page snapshot' to refresh."
             ),
             code: ExitCode::GeneralError,
+            custom_json: None,
         }
     }
 
@@ -395,7 +446,11 @@ impl AppError {
     }
 
     pub fn print_json_stderr(&self) {
-        eprintln!("{}", self.to_json());
+        if let Some(ref json) = self.custom_json {
+            eprintln!("{json}");
+        } else {
+            eprintln!("{}", self.to_json());
+        }
     }
 }
 
@@ -712,5 +767,20 @@ mod tests {
         assert!(err.message.contains("Element is not a file input"));
         assert!(err.message.contains("s2"));
         assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn js_execution_failed_with_json_carries_custom_json() {
+        let custom = r#"{"error":"Error: test","stack":"Error: test\n    at <anonymous>:1:7","code":1}"#;
+        let err = AppError::js_execution_failed_with_json("Error: test", custom.to_string());
+        assert!(err.message.contains("JavaScript execution failed"));
+        assert_eq!(err.custom_json.as_deref(), Some(custom));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn js_execution_failed_without_json_has_no_custom_json() {
+        let err = AppError::js_execution_failed("Error: test");
+        assert!(err.custom_json.is_none());
     }
 }

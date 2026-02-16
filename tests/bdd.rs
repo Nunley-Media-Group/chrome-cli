@@ -3431,6 +3431,16 @@ async fn main() {
         )
         .await;
 
+    // JS exec double-JSON-on-stderr fix (issue #96) — all scenarios require a running Chrome
+    // instance for JS execution. The feature file documents regression scenarios; the fix is
+    // validated by the unit tests in error.rs (custom_json routing) and js.rs.
+    JsWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/96-fix-js-exec-double-json-stderr.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
     // Dialog handling — only CLI-testable scenarios (argument validation) can run without Chrome.
     DialogWorld::cucumber()
         .filter_run_and_exit(

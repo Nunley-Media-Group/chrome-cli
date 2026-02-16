@@ -156,6 +156,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -437,6 +438,7 @@ fn save_body_to_file(path: &Path, content: &str) -> Result<(), AppError> {
     std::fs::write(path, content).map_err(|e| AppError {
         message: format!("Failed to write to {}: {e}", path.display()),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })
 }
 
@@ -448,10 +450,12 @@ fn save_binary_body_to_file(path: &Path, base64_content: &str) -> Result<(), App
         .map_err(|e| AppError {
             message: format!("Failed to decode base64 body: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
     std::fs::write(path, bytes).map_err(|e| AppError {
         message: format!("Failed to write to {}: {e}", path.display()),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })
 }
 
@@ -476,6 +480,7 @@ async fn collect_and_correlate(
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.requestWillBeSent: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let mut response_rx = managed
@@ -484,6 +489,7 @@ async fn collect_and_correlate(
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.responseReceived: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let mut finished_rx = managed
@@ -492,6 +498,7 @@ async fn collect_and_correlate(
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.loadingFinished: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let mut failed_rx = managed
@@ -500,6 +507,7 @@ async fn collect_and_correlate(
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.loadingFailed: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let mut nav_rx = managed
@@ -508,6 +516,7 @@ async fn collect_and_correlate(
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Page.frameNavigated: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     // Drain events with 100ms idle timeout
@@ -790,6 +799,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
         .ok_or_else(|| AppError {
             message: format!("Network request {target_id} not found"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     // Fetch request body for POST/PUT
@@ -939,6 +949,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.requestWillBeSent: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let mut response_rx = managed
@@ -947,6 +958,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.responseReceived: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let mut finished_rx = managed
@@ -955,6 +967,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.loadingFinished: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let mut failed_rx = managed
@@ -963,6 +976,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
         .map_err(|e| AppError {
             message: format!("Failed to subscribe to Network.loadingFailed: {e}"),
             code: ExitCode::GeneralError,
+            custom_json: None,
         })?;
 
     let type_filter = resolve_type_filter(args.r#type.as_deref());
@@ -1010,6 +1024,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
                         return Err(AppError {
                             message: "CDP connection closed".to_string(),
                             code: ExitCode::ConnectionError,
+                            custom_json: None,
                         });
                     }
                 }
@@ -1033,6 +1048,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
                         return Err(AppError {
                             message: "CDP connection closed".to_string(),
                             code: ExitCode::ConnectionError,
+                            custom_json: None,
                         });
                     }
                 }
@@ -1057,6 +1073,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
                         return Err(AppError {
                             message: "CDP connection closed".to_string(),
                             code: ExitCode::ConnectionError,
+                            custom_json: None,
                         });
                     }
                 }
@@ -1078,6 +1095,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
                         return Err(AppError {
                             message: "CDP connection closed".to_string(),
                             code: ExitCode::ConnectionError,
+                            custom_json: None,
                         });
                     }
                 }

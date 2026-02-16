@@ -48,6 +48,7 @@ fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Re
     let json = json.map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
     println!("{json}");
     Ok(())
@@ -108,6 +109,7 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
     let url = args.url.as_deref().ok_or_else(|| AppError {
         message: "URL is required. Usage: chrome-cli navigate <URL>".into(),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
 
     let timeout_ms = args.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS);
@@ -218,12 +220,14 @@ async fn execute_back(global: &GlobalOpts) -> Result<(), AppError> {
         return Err(AppError {
             message: "Cannot go back: already at the beginning of history.".into(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         });
     }
 
     let entries = history["entries"].as_array().ok_or_else(|| AppError {
         message: "Invalid navigation history response".into(),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
 
     let target_entry = &entries[current_index - 1];
@@ -275,6 +279,7 @@ async fn execute_forward(global: &GlobalOpts) -> Result<(), AppError> {
     let entries = history["entries"].as_array().ok_or_else(|| AppError {
         message: "Invalid navigation history response".into(),
         code: ExitCode::GeneralError,
+        custom_json: None,
     })?;
 
     let next_index = current_index + 1;
@@ -282,6 +287,7 @@ async fn execute_forward(global: &GlobalOpts) -> Result<(), AppError> {
         return Err(AppError {
             message: "Cannot go forward: already at the end of history.".into(),
             code: ExitCode::GeneralError,
+            custom_json: None,
         });
     }
 
@@ -355,6 +361,7 @@ async fn wait_for_event(
                 None => Err(AppError {
                     message: format!("Event channel closed while waiting for {strategy}"),
                     code: ExitCode::GeneralError,
+                    custom_json: None,
                 }),
             }
         }
