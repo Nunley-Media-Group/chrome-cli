@@ -1,12 +1,13 @@
 {
-  "currentStep": 6,
-  "lastCompletedStep": 5,
+  "currentStep": 8,
+  "lastCompletedStep": 7,
   "currentIssue": null,
   "currentBranch": "main",
   "featureName": null,
-  "lastTransitionAt": "2026-02-16T20:42:19.530Z",
+  "lastTransitionAt": "2026-02-16T20:44:05.889Z",
   "retries": {
-    "6": 1
+    "6": 2
   },
-  "runnerPid": 31501
+  "runnerPid": 31501,
+  "prNumber": 113
 }
