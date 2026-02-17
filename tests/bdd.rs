@@ -3717,4 +3717,14 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // Perf record duration fix (issue #118) — all scenarios require a running Chrome instance
+    // for trace recording. The feature file documents regression scenarios; the fix is
+    // validated by the timer placement in perf.rs (start_time moved to execute_record).
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/118-fix-perf-record-duration.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }

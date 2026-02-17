@@ -1,0 +1,42 @@
+# File: tests/features/118-fix-perf-record-duration.feature
+#
+# Generated from: .claude/specs/118-fix-perf-record-duration/requirements.md
+# Issue: #118
+# Type: Defect regression
+
+@regression
+Feature: perf record reports correct recording duration
+  The perf record command previously reported duration_ms measuring only the
+  trace stop/collection overhead (21-133ms) instead of the actual recording
+  duration. This was fixed by moving the timer start from stop_and_collect()
+  to execute_record(), capturing the full recording period.
+
+  # --- Bug Is Fixed ---
+
+  @regression @requires-chrome
+  Scenario: perf record duration reflects actual recording time
+    Given Chrome is connected and navigated to "https://www.google.com/"
+    When I run "chrome-cli perf record --duration 2000 --file /tmp/trace-118a.json"
+    Then the JSON output contains the key "duration_ms"
+    And the "duration_ms" value is approximately 2000 within 500ms tolerance
+    And the exit code should be 0
+
+  @regression @requires-chrome
+  Scenario: perf record duration includes reload time
+    Given Chrome is connected and navigated to "https://www.google.com/"
+    When I run "chrome-cli perf record --reload --duration 3000 --file /tmp/trace-118b.json"
+    Then the JSON output contains the key "duration_ms"
+    And the "duration_ms" value is at least 3000
+    And the exit code should be 0
+
+  # --- Related Behavior Still Works ---
+
+  @regression @requires-chrome
+  Scenario: perf record output structure is preserved
+    Given Chrome is connected and navigated to "https://www.google.com/"
+    When I run "chrome-cli perf record --duration 1000 --file /tmp/trace-118c.json"
+    Then the JSON output contains the key "file"
+    And the JSON output contains the key "duration_ms"
+    And the JSON output contains the key "size_bytes"
+    And the JSON output contains the key "vitals"
+    And the exit code should be 0
