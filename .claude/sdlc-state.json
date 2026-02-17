@@ -1,10 +1,10 @@
 {
-  "currentStep": 4,
-  "lastCompletedStep": 4,
+  "currentStep": 6,
+  "lastCompletedStep": 5,
   "currentIssue": 118,
   "currentBranch": "118-fix-perf-record-duration",
   "featureName": "99-fix-dialog-handle-no-dialog-open",
-  "lastTransitionAt": "2026-02-17T01:05:19.492Z",
+  "lastTransitionAt": "2026-02-17T01:09:33.301Z",
   "retries": {},
   "runnerPid": 20994,
   "prNumber": 123

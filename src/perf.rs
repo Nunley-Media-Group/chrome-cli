@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -173,7 +173,7 @@ async fn execute_record(global: &GlobalOpts, args: &PerfRecordArgs) -> Result<()
     }
 
     // Capture recording start time for accurate duration reporting
-    let start_time = std::time::Instant::now();
+    let start_time = Instant::now();
 
     // Start tracing
     let start_params = serde_json::json!({
@@ -229,7 +229,7 @@ async fn execute_record(global: &GlobalOpts, args: &PerfRecordArgs) -> Result<()
 async fn stop_and_collect(
     managed: &ManagedSession,
     trace_path: &Path,
-    start_time: std::time::Instant,
+    start_time: Instant,
 ) -> Result<PerfRecordResult, AppError> {
     // Subscribe to trace events
     let data_rx = managed.subscribe("Tracing.dataCollected").await?;
