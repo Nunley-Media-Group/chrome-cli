@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-02-16
+
+### Fixed
+
+- Network list showing size 0 for most requests by falling back to content-length header (#117)
+
 ## [0.1.3] - 2026-02-16
 
 ### Fixed
