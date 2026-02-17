@@ -3737,4 +3737,15 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // Background tab activation fix (issue #121) — all scenarios require a running Chrome
+    // instance for tab creation and activation verification. The feature file documents
+    // regression scenarios; the fix is validated by the increased polling budget (10 → 50
+    // iterations) in the activation verification loop in execute_create() in tabs.rs.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/121-fix-tabs-create-background.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }

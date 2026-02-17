@@ -200,7 +200,7 @@ async fn execute_create(
         // Chrome's HTTP endpoint may not immediately reflect the
         // Target.activateTarget command, so poll until the original tab
         // is back in the first-page-target position.
-        for _ in 0..10 {
+        for _ in 0..50 {
             let check = query_targets(&conn.host, conn.port).await?;
             let first_page = check.iter().find(|t| t.target_type == "page");
             if first_page.is_some_and(|t| t.id == *active_id) {
