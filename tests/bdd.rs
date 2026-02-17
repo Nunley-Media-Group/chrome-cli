@@ -3707,4 +3707,14 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // Network size zero fix (issue #117) — all scenarios require a running Chrome instance
+    // for network request capture. The feature file documents regression scenarios; the fix is
+    // validated by unit tests in network.rs (resolve_size helper with content-length fallback).
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/117-fix-network-list-size-zero.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }

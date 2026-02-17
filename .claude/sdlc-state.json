@@ -1,10 +1,10 @@
 {
-  "currentStep": 7,
-  "lastCompletedStep": 6,
-  "currentIssue": 116,
-  "currentBranch": "116-fix-network-list-timestamps",
+  "currentStep": 4,
+  "lastCompletedStep": 4,
+  "currentIssue": 117,
+  "currentBranch": "117-fix-network-list-size-zero",
   "featureName": "99-fix-dialog-handle-no-dialog-open",
-  "lastTransitionAt": "2026-02-17T00:35:46.824Z",
+  "lastTransitionAt": "2026-02-17T00:48:15.285Z",
   "retries": {},
   "runnerPid": 20994,
   "prNumber": 123

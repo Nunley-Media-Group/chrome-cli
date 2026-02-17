@@ -758,6 +758,33 @@ async fn collect_and_correlate(
     Ok((builders_vec, current_nav_id))
 }
 
+/// Resolve the effective size for a network request.
+///
+/// Returns `encoded_data_length` when it is `Some(n)` with `n > 0`. Otherwise,
+/// falls back to parsing the `content-length` response header (case-insensitive).
+fn resolve_size(
+    encoded_data_length: Option<u64>,
+    response_headers: &serde_json::Value,
+) -> Option<u64> {
+    if let Some(len) = encoded_data_length {
+        if len > 0 {
+            return Some(len);
+        }
+    }
+    // Fall back to content-length header (case-insensitive lookup)
+    if let Some(headers) = response_headers.as_object() {
+        for (key, value) in headers {
+            if key.eq_ignore_ascii_case("content-length") {
+                return value
+                    .as_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .filter(|&v| v > 0);
+            }
+        }
+    }
+    None
+}
+
 /// Convert a builder into a summary for list output.
 fn builder_to_summary(builder: &NetworkRequestBuilder) -> NetworkRequestSummary {
     let duration_ms = builder
@@ -770,7 +797,7 @@ fn builder_to_summary(builder: &NetworkRequestBuilder) -> NetworkRequestSummary 
         url: builder.url.clone(),
         status: builder.status,
         resource_type: builder.resource_type.clone(),
-        size: builder.encoded_data_length,
+        size: resolve_size(builder.encoded_data_length, &builder.response_headers),
         duration_ms,
         timestamp: timestamp_to_iso(builder.wall_time),
     }
@@ -977,7 +1004,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
         timing,
         redirect_chain: builder.redirect_chain.clone(),
         resource_type: builder.resource_type.clone(),
-        size: builder.encoded_data_length,
+        size: resolve_size(builder.encoded_data_length, &builder.response_headers),
         duration_ms,
         timestamp: timestamp_to_iso(builder.wall_time),
     };
@@ -1122,10 +1149,11 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
                         let request_id = ev.params["requestId"]
                             .as_str()
                             .unwrap_or("");
-                        let size = ev.params["encodedDataLength"].as_u64();
+                        let raw_size = ev.params["encodedDataLength"].as_u64();
                         let end_timestamp = ev.params["timestamp"].as_f64();
 
                         if let Some(req) = in_flight.remove(request_id) {
+                            let size = resolve_size(raw_size, &req.response_headers);
                             emit_stream_event(
                                 &req, size, end_timestamp, type_filter.as_deref(),
                                 url_filter, method_filter.as_deref(), args.verbose,
@@ -1845,6 +1873,94 @@ mod tests {
             timestamp: "2026-02-14T12:00:00.000Z".to_string(),
         };
         print_detail_plain(&detail);
+    }
+
+    // =========================================================================
+    // RedirectEntry serialization
+    // =========================================================================
+
+    // =========================================================================
+    // resolve_size
+    // =========================================================================
+
+    #[test]
+    fn resolve_size_uses_encoded_data_length_when_nonzero() {
+        let headers = serde_json::json!({"content-length": "5000"});
+        assert_eq!(resolve_size(Some(1234), &headers), Some(1234));
+    }
+
+    #[test]
+    fn resolve_size_falls_back_to_content_length_when_zero() {
+        let headers = serde_json::json!({"content-length": "5000"});
+        assert_eq!(resolve_size(Some(0), &headers), Some(5000));
+    }
+
+    #[test]
+    fn resolve_size_falls_back_to_content_length_when_none() {
+        let headers = serde_json::json!({"content-length": "3000"});
+        assert_eq!(resolve_size(None, &headers), Some(3000));
+    }
+
+    #[test]
+    fn resolve_size_case_insensitive_header() {
+        let headers = serde_json::json!({"Content-Length": "7777"});
+        assert_eq!(resolve_size(Some(0), &headers), Some(7777));
+    }
+
+    #[test]
+    fn resolve_size_returns_none_when_both_absent() {
+        let headers = serde_json::json!({});
+        assert_eq!(resolve_size(None, &headers), None);
+    }
+
+    #[test]
+    fn resolve_size_returns_none_for_malformed_content_length() {
+        let headers = serde_json::json!({"content-length": "not-a-number"});
+        assert_eq!(resolve_size(Some(0), &headers), None);
+    }
+
+    #[test]
+    fn resolve_size_returns_none_when_headers_null() {
+        assert_eq!(resolve_size(Some(0), &serde_json::Value::Null), None);
+    }
+
+    #[test]
+    fn resolve_size_skips_zero_content_length() {
+        let headers = serde_json::json!({"content-length": "0"});
+        assert_eq!(resolve_size(Some(0), &headers), None);
+    }
+
+    #[test]
+    fn resolve_size_builder_to_summary_integration() {
+        // Simulates the original bug: encodedDataLength is 0, but content-length is present
+        let builder = NetworkRequestBuilder {
+            cdp_request_id: "1".to_string(),
+            assigned_id: 0,
+            method: "GET".to_string(),
+            url: "https://example.com".to_string(),
+            resource_type: "document".to_string(),
+            timestamp: 62090.044,
+            wall_time: 1_707_912_000.123,
+            request_headers: serde_json::Value::Null,
+            status: Some(200),
+            status_text: "OK".to_string(),
+            response_headers: serde_json::json!({"content-length": "377301"}),
+            mime_type: None,
+            encoded_data_length: Some(0),
+            timing: None,
+            redirect_chain: Vec::new(),
+            completed: true,
+            failed: false,
+            error_text: None,
+            navigation_id: 0,
+            loading_finished_timestamp: Some(62090.544),
+        };
+        let summary = builder_to_summary(&builder);
+        assert_eq!(
+            summary.size,
+            Some(377_301),
+            "Size should fall back to content-length when encodedDataLength is 0"
+        );
     }
 
     // =========================================================================

@@ -1,0 +1,43 @@
+# File: tests/features/117-fix-network-list-size-zero.feature
+#
+# Generated from: .claude/specs/117-fix-network-list-size-zero/requirements.md
+# Issue: #117
+# Type: Defect regression
+
+@regression
+Feature: Network list size falls back to content-length
+  The `network list` and `network get` commands previously showed `size: 0`
+  for cached responses because the size was sourced exclusively from
+  `encodedDataLength` in the CDP `Network.loadingFinished` event.
+  This was fixed by falling back to the `content-length` response header
+  when `encodedDataLength` is 0 or absent.
+
+  Background:
+    Given Chrome is connected in headless mode
+    And a page has been navigated
+
+  # --- Bug Is Fixed ---
+
+  @regression @requires-chrome
+  Scenario: Size falls back to content-length when encodedDataLength is 0
+    Given a network request completed with encodedDataLength of 0
+    And the response headers include "content-length" with a non-zero value
+    When I run "network list"
+    Then the request's size field equals the content-length header value
+
+  # --- Related Behavior Still Works ---
+
+  @regression @requires-chrome
+  Scenario: Size uses encodedDataLength when non-zero
+    Given a network request completed with a non-zero encodedDataLength
+    When I run "network list"
+    Then the request's size field equals the encodedDataLength value
+
+  # --- Detail View ---
+
+  @regression @requires-chrome
+  Scenario: Detail view size falls back to content-length
+    Given a network request completed with encodedDataLength of 0
+    And the response headers include "content-length" with a non-zero value
+    When I run "network get" for that request
+    Then the detail view's size field equals the content-length header value
