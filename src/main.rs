@@ -472,8 +472,42 @@ async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
         timestamp: session_data.timestamp,
         reachable,
     };
-    print_json(&status)?;
+
+    if global.output.plain {
+        print!("{}", format_plain_status(&status));
+        return Ok(());
+    }
+
+    let json = if global.output.pretty {
+        serde_json::to_string_pretty(&status)
+    } else {
+        serde_json::to_string(&status)
+    };
+    let json = json.map_err(|e| AppError {
+        message: format!("serialization error: {e}"),
+        code: ExitCode::GeneralError,
+        custom_json: None,
+    })?;
+    println!("{json}");
     Ok(())
+}
+
+fn format_plain_status(status: &StatusInfo) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(out, "ws_url:    {}", status.ws_url);
+    let _ = writeln!(out, "port:      {}", status.port);
+    match status.pid {
+        Some(pid) => {
+            let _ = writeln!(out, "pid:       {pid}");
+        }
+        None => {
+            let _ = writeln!(out, "pid:       -");
+        }
+    }
+    let _ = writeln!(out, "timestamp: {}", status.timestamp);
+    let _ = writeln!(out, "reachable: {}", status.reachable);
+    out
 }
 
 fn execute_disconnect() -> Result<(), AppError> {

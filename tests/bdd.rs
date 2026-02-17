@@ -1482,6 +1482,59 @@ fn session_stderr_about_session(world: &mut SessionWorld) {
     );
 }
 
+// --- SessionWorld: output format assertion steps (issue #114) ---
+
+#[then("the output is valid JSON")]
+fn session_output_is_valid_json(world: &mut SessionWorld) {
+    let trimmed = world.stdout.trim();
+    assert!(
+        serde_json::from_str::<serde_json::Value>(trimmed).is_ok(),
+        "stdout is not valid JSON:\n{trimmed}"
+    );
+}
+
+#[then("the output contains newlines and indentation")]
+fn session_output_has_indentation(world: &mut SessionWorld) {
+    let trimmed = world.stdout.trim();
+    assert!(
+        trimmed.contains('\n'),
+        "Expected multi-line output but got single line:\n{trimmed}"
+    );
+    assert!(
+        trimmed.contains("  "),
+        "Expected indented output but found no indentation:\n{trimmed}"
+    );
+}
+
+#[then("the output is not valid JSON")]
+fn session_output_is_not_json(world: &mut SessionWorld) {
+    let trimmed = world.stdout.trim();
+    assert!(
+        serde_json::from_str::<serde_json::Value>(trimmed).is_err(),
+        "stdout should not be valid JSON but it parsed successfully:\n{trimmed}"
+    );
+}
+
+#[then("the output contains key-value pairs for connection details")]
+fn session_output_has_key_value_pairs(world: &mut SessionWorld) {
+    let stdout = &world.stdout;
+    for key in &["ws_url:", "port:", "pid:", "timestamp:", "reachable:"] {
+        assert!(
+            stdout.contains(key),
+            "Expected key-value pair with key '{key}' in output:\n{stdout}"
+        );
+    }
+}
+
+#[then("the output is a single line")]
+fn session_output_is_single_line(world: &mut SessionWorld) {
+    let trimmed = world.stdout.trim();
+    assert!(
+        !trimmed.contains('\n'),
+        "Expected single-line output but got multiple lines:\n{trimmed}"
+    );
+}
+
 // =============================================================================
 // JsWorld — JavaScript execution BDD tests (CLI-testable scenarios)
 // =============================================================================
@@ -3537,6 +3590,10 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // Connect status output flags fix (issue #114) — all scenarios are testable without Chrome
+    // (they use a stale session file and verify output formatting, not Chrome connectivity).
+    SessionWorld::run("tests/features/114-fix-connect-status-output-flags.feature").await;
 
     // Background tab creation fix (issue #95) — all scenarios require a running Chrome instance
     // for tab creation and activation verification. The feature file documents regression scenarios;

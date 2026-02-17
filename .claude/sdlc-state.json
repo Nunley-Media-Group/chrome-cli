@@ -1,13 +1,12 @@
 {
-  "currentStep": 8,
-  "lastCompletedStep": 7,
-  "currentIssue": null,
-  "currentBranch": "main",
-  "featureName": null,
-  "lastTransitionAt": "2026-02-16T20:44:05.889Z",
+  "currentStep": 6,
+  "lastCompletedStep": 6,
+  "currentIssue": 114,
+  "currentBranch": "114-fix-connect-status-output-flags",
+  "featureName": "99-fix-dialog-handle-no-dialog-open",
+  "lastTransitionAt": "2026-02-16T23:59:42.932Z",
   "retries": {
-    "6": 2
+    "7": 1
   },
-  "runnerPid": 31501,
-  "prNumber": 113
+  "runnerPid": 20994
 }
