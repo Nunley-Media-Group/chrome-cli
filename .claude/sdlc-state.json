@@ -1,10 +1,10 @@
 {
-  "currentStep": 4,
-  "lastCompletedStep": 4,
+  "currentStep": 6,
+  "lastCompletedStep": 5,
   "currentIssue": 119,
   "currentBranch": "119-fix-perf-vitals-null-cls-ttfb",
   "featureName": "99-fix-dialog-handle-no-dialog-open",
-  "lastTransitionAt": "2026-02-17T01:22:29.204Z",
+  "lastTransitionAt": "2026-02-17T01:27:52.086Z",
   "retries": {},
   "runnerPid": 20994,
   "prNumber": 127
