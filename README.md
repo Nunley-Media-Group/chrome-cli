@@ -272,12 +272,19 @@ common workflows, best practices, and error handling patterns.
 Drop the [CLAUDE.md template](examples/CLAUDE.md.example) into your project to
 give Claude Code browser automation capabilities out of the box.
 
+## Related Projects
+
+- **[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp)** — The official Chrome DevTools MCP server by Google, providing browser automation for AI coding agents via the Model Context Protocol. If you're looking for MCP-based browser control rather than a CLI tool, check it out.
+
 ## Contributing
+
+All contributions must follow the [NMG-SDLC](https://github.com/Nunley-Media-Group/nmg-plugins) workflow without deviation. NMG-SDLC is a BDD spec-driven development toolkit that enforces a structured delivery lifecycle: issue creation, specification writing, implementation, verification, and PR creation. Contributions that bypass the SDLC process will not be accepted.
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) 1.85.0 or later
+- [Rust](https://rustup.rs/) 1.85.0 or later (pinned via `rust-toolchain.toml`)
 - Chrome or Chromium (for integration testing)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with the [NMG-SDLC plugin](https://github.com/Nunley-Media-Group/nmg-plugins) installed
 
 ### Build and test
 
