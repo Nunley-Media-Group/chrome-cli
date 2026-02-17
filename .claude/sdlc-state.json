@@ -1,11 +1,11 @@
 {
   "currentStep": 7,
   "lastCompletedStep": 6,
-  "currentIssue": 118,
-  "currentBranch": "118-fix-perf-record-duration",
+  "currentIssue": 119,
+  "currentBranch": "119-fix-perf-vitals-null-cls-ttfb",
   "featureName": "99-fix-dialog-handle-no-dialog-open",
-  "lastTransitionAt": "2026-02-17T01:10:04.550Z",
+  "lastTransitionAt": "2026-02-17T01:29:49.194Z",
   "retries": {},
   "runnerPid": 20994,
-  "prNumber": 123
+  "prNumber": 127
 }

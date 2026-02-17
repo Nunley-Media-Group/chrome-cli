@@ -453,9 +453,10 @@ fn extract_lcp(events: &[TraceEvent]) -> Option<f64> {
 }
 
 /// Extract CLS by summing `LayoutShift` scores where `had_recent_input` is false.
+/// Returns `Some(0.0)` when no layout shifts occurred (zero shifts = perfect CLS).
+#[allow(clippy::unnecessary_wraps)] // Option<f64> matches extract_lcp/extract_ttfb API
 fn extract_cls(events: &[TraceEvent]) -> Option<f64> {
     let mut total_cls: f64 = 0.0;
-    let mut found = false;
 
     for event in events {
         if event.name == "LayoutShift" {
@@ -464,14 +465,13 @@ fn extract_cls(events: &[TraceEvent]) -> Option<f64> {
                 if !had_recent_input {
                     if let Some(score) = data["score"].as_f64() {
                         total_cls += score;
-                        found = true;
                     }
                 }
             }
         }
     }
 
-    if found { Some(total_cls) } else { None }
+    Some(total_cls)
 }
 
 /// Check if a URL looks like a sub-resource (JS, CSS, image, font).
@@ -545,8 +545,31 @@ fn extract_ttfb_fallback(events: &[TraceEvent]) -> Option<f64> {
 
     match (nav_start, resp_start) {
         (Some(nav), Some(resp)) => Some((resp - nav) / 1000.0), // µs → ms
-        _ => None,
+        _ => extract_ttfb_any_response(events, nav_start),
     }
+}
+
+/// Third-level TTFB fallback: use `navigationStart` paired with the first
+/// `ResourceReceiveResponse` for any resource as a conservative TTFB estimate.
+/// This covers cases where document-specific resource events and `responseStart`
+/// timing marks are both absent (e.g., cached pages, certain Chrome trace configs).
+fn extract_ttfb_any_response(events: &[TraceEvent], nav_start: Option<f64>) -> Option<f64> {
+    let nav = nav_start.or_else(|| {
+        events.iter().find_map(|e| {
+            (e.name == "navigationStart" && e.cat.contains("blink.user_timing")).then_some(e.ts)
+        })
+    })?;
+
+    let first_response_ts = events.iter().find_map(|e| {
+        if e.name == "ResourceReceiveResponse" {
+            Some(e.ts)
+        } else {
+            None
+        }
+    })?;
+
+    let ttfb = (first_response_ts - nav) / 1000.0; // µs → ms
+    if ttfb > 0.0 { Some(ttfb) } else { None }
 }
 
 // =============================================================================
@@ -1109,7 +1132,9 @@ mod tests {
             0.0,
             serde_json::json!({"data": {"score": 0.1, "had_recent_input": true}}),
         )];
-        assert!(extract_cls(&events).is_none());
+        // All shifts had recent input, so CLS is 0.0 (not None)
+        let cls = extract_cls(&events);
+        assert_eq!(cls, Some(0.0));
     }
 
     #[test]
@@ -1482,5 +1507,81 @@ mod tests {
         assert!(plain.contains("Trace saved: /tmp/my-trace.json"));
         assert!(plain.contains("5000ms"));
         assert!(plain.contains("100000 bytes"));
+    }
+
+    // =========================================================================
+    // Regression: CLS returns 0.0 for no layout shifts (issue #119)
+    // =========================================================================
+
+    #[test]
+    fn extract_cls_returns_zero_for_empty_events() {
+        let events: Vec<TraceEvent> = vec![];
+        let cls = extract_cls(&events);
+        assert_eq!(cls, Some(0.0));
+    }
+
+    #[test]
+    fn extract_cls_returns_zero_when_no_layout_shift_events() {
+        // Trace with events but no LayoutShift events at all
+        let events = vec![
+            make_trace_event(
+                "navigationStart",
+                "blink.user_timing",
+                1_000_000.0,
+                0.0,
+                serde_json::json!({}),
+            ),
+            make_trace_event(
+                "largestContentfulPaint::Candidate",
+                "loading",
+                2_200_000.0,
+                0.0,
+                serde_json::json!({"data": {"size": 5000}}),
+            ),
+        ];
+        let cls = extract_cls(&events);
+        assert_eq!(cls, Some(0.0));
+    }
+
+    // =========================================================================
+    // Regression: TTFB third-level fallback (issue #119)
+    // =========================================================================
+
+    #[test]
+    fn extract_ttfb_third_fallback_uses_any_response() {
+        // No document resource events, no responseStart, but has navigationStart
+        // and a ResourceReceiveResponse for a sub-resource
+        let events = vec![
+            make_trace_event(
+                "navigationStart",
+                "blink.user_timing",
+                1_000_000.0,
+                0.0,
+                serde_json::json!({}),
+            ),
+            make_trace_event(
+                "ResourceReceiveResponse",
+                "devtools.timeline",
+                1_200_000.0,
+                0.0,
+                serde_json::json!({"data": {"requestId": "sub-1"}}),
+            ),
+        ];
+        let ttfb = extract_ttfb(&events);
+        assert!(ttfb.is_some());
+        assert!((ttfb.unwrap() - 200.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn extract_ttfb_third_fallback_returns_none_without_nav_start() {
+        // No navigationStart, no document request — no fallback possible
+        let events = vec![make_trace_event(
+            "ResourceReceiveResponse",
+            "devtools.timeline",
+            1_200_000.0,
+            0.0,
+            serde_json::json!({"data": {"requestId": "sub-1"}}),
+        )];
+        assert!(extract_ttfb(&events).is_none());
     }
 }
