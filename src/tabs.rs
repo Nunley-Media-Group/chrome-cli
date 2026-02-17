@@ -254,12 +254,22 @@ async fn execute_close(global: &GlobalOpts, target_args: &[String]) -> Result<()
         closed_ids.push(target.id.clone());
     }
 
-    // Re-query remaining count
-    let remaining_targets = query_targets(&conn.host, conn.port).await?;
-    let remaining = remaining_targets
-        .iter()
-        .filter(|t| t.target_type == "page")
-        .count();
+    // Poll until Chrome's HTTP endpoint reflects the tab closures.
+    // The /json/list endpoint updates asynchronously after CDP commands,
+    // so we retry (matching the pattern in execute_create).
+    let expected_remaining = page_count - closing_page_count;
+    let mut remaining = expected_remaining;
+    for _ in 0..10 {
+        let remaining_targets = query_targets(&conn.host, conn.port).await?;
+        remaining = remaining_targets
+            .iter()
+            .filter(|t| t.target_type == "page")
+            .count();
+        if remaining == expected_remaining {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let output = CloseResult {
         closed: closed_ids,
