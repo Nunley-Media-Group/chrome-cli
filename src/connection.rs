@@ -60,14 +60,14 @@ pub async fn resolve_connection(
         });
     }
 
-    // 2. Explicit --port (user provided)
+    // 2. Explicit --port (user provided) — try only this port, no DevToolsActivePort fallback
     if let Some(explicit_port) = port {
-        match discover_chrome(host, explicit_port).await {
-            Ok((ws_url, p)) => {
+        match query_version(host, explicit_port).await {
+            Ok(version) => {
                 return Ok(ResolvedConnection {
-                    ws_url,
+                    ws_url: version.ws_debugger_url,
                     host: host.to_string(),
-                    port: p,
+                    port: explicit_port,
                 });
             }
             Err(_) => return Err(AppError::no_chrome_found()),

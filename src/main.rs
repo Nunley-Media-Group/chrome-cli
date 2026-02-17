@@ -369,24 +369,36 @@ async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), 
         return execute_launch(args, timeout).await;
     }
 
-    // Strategy 3: Check existing session first, then auto-discover, then auto-launch
-    if let Some(session_data) = session::read_session()? {
-        if connection::health_check(&global.host, session_data.port)
-            .await
-            .is_ok()
-        {
-            let info = ConnectionInfo {
-                ws_url: session_data.ws_url,
-                port: session_data.port,
-                pid: session_data.pid,
-            };
-            save_session(&info);
-            print_json(&info)?;
-            return Ok(());
+    // Strategy 3: Check existing session first, then auto-discover, then auto-launch.
+    // When --port is explicit, skip the session file and only try that port directly.
+    if global.port.is_none() {
+        if let Some(session_data) = session::read_session()? {
+            if connection::health_check(&global.host, session_data.port)
+                .await
+                .is_ok()
+            {
+                let info = ConnectionInfo {
+                    ws_url: session_data.ws_url,
+                    port: session_data.port,
+                    pid: session_data.pid,
+                };
+                save_session(&info);
+                print_json(&info)?;
+                return Ok(());
+            }
         }
     }
 
-    match discover_chrome(&global.host, global.port_or_default()).await {
+    let discover_result = if global.port.is_some() {
+        // Explicit --port: try only that port, no DevToolsActivePort fallback
+        query_version(&global.host, global.port_or_default())
+            .await
+            .map(|v| (v.ws_debugger_url, global.port_or_default()))
+    } else {
+        discover_chrome(&global.host, global.port_or_default()).await
+    };
+
+    match discover_result {
         Ok((ws_url, port)) => {
             let info = ConnectionInfo {
                 ws_url,
@@ -398,10 +410,15 @@ async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), 
             Ok(())
         }
         Err(discover_err) => {
-            // Try auto-launch if Chrome is available
-            match execute_launch(args, timeout).await {
-                Ok(()) => Ok(()),
-                Err(_) => Err(discover_err.into()),
+            if global.port.is_some() {
+                // Explicit --port: don't auto-launch on a different port
+                Err(discover_err.into())
+            } else {
+                // Try auto-launch if Chrome is available
+                match execute_launch(args, timeout).await {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(discover_err.into()),
+                }
             }
         }
     }

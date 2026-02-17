@@ -297,6 +297,16 @@ async fn execute_activate(
         .send_command("Target.activateTarget", Some(params))
         .await?;
 
+    // Poll until Chrome's HTTP endpoint reflects the activation.
+    for _ in 0..50 {
+        let check = query_targets(&conn.host, conn.port).await?;
+        let first_page = check.iter().find(|t| t.target_type == "page");
+        if first_page.is_some_and(|t| t.id == target.id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
     if quiet {
         return Ok(());
     }
