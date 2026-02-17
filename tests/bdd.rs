@@ -3727,4 +3727,14 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // Tabs close remaining count fix (issue #120) — all scenarios require a running Chrome
+    // instance for tab creation and closure. The feature file documents regression scenarios;
+    // the fix is validated by the polling retry loop in execute_close() in tabs.rs.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/120-fix-tabs-close-remaining-count.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }
