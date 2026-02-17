@@ -1,10 +1,10 @@
 {
-  "currentStep": 4,
-  "lastCompletedStep": 4,
+  "currentStep": 6,
+  "lastCompletedStep": 5,
   "currentIssue": 120,
   "currentBranch": "120-fix-tabs-close-remaining-count",
   "featureName": "99-fix-dialog-handle-no-dialog-open",
-  "lastTransitionAt": "2026-02-17T01:40:54.487Z",
+  "lastTransitionAt": "2026-02-17T01:46:00.516Z",
   "retries": {},
   "runnerPid": 20994,
   "prNumber": 127
