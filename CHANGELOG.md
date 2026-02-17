@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-02-16
+
+### Fixed
+
+- Page screenshot --uid failing with 'Could not find node with given id' (#115)
+
 ## [0.1.1] - 2026-02-16
 
 ### Fixed

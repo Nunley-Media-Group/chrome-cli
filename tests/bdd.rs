@@ -3687,4 +3687,14 @@ async fn main() {
 
     // Claude Code integration guide — all scenarios are file-parsing tests (no Chrome needed).
     ClaudeCodeGuideWorld::run("tests/features/claude-code-guide.feature").await;
+
+    // Page screenshot UID fix (issue #115) — all scenarios require a running Chrome instance
+    // for page snapshot and screenshot/JS execution. The feature file documents regression
+    // scenarios; the fix is validated by the `ensure_domain("DOM")` call in `resolve_uid_clip()`.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/115-fix-page-screenshot-uid-node-not-found.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }

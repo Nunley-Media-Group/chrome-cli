@@ -693,7 +693,9 @@ async fn resolve_selector_clip(
 }
 
 /// Resolve an element's bounding box as a clip region using an accessibility UID.
-async fn resolve_uid_clip(managed: &ManagedSession, uid: &str) -> Result<ClipRegion, AppError> {
+async fn resolve_uid_clip(managed: &mut ManagedSession, uid: &str) -> Result<ClipRegion, AppError> {
+    managed.ensure_domain("DOM").await?;
+
     let state = crate::snapshot::read_snapshot_state()
         .map_err(|e| AppError::screenshot_failed(&format!("Failed to read snapshot state: {e}")))?
         .ok_or_else(|| AppError {
@@ -866,8 +868,7 @@ async fn execute_screenshot(
         let dims = clip_dimensions(&clip);
         (Some(clip), false, dims)
     } else if let Some(ref uid) = args.uid {
-        managed.ensure_domain("DOM").await?;
-        let clip = resolve_uid_clip(&managed, uid).await?;
+        let clip = resolve_uid_clip(&mut managed, uid).await?;
         let dims = clip_dimensions(&clip);
         (Some(clip), false, dims)
     } else if args.full_page {
