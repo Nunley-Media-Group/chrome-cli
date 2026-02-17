@@ -127,7 +127,10 @@ struct NetworkRequestBuilder {
     method: String,
     url: String,
     resource_type: String,
+    /// Monotonic CDP timestamp (seconds since browser startup). Used for duration calculations.
     timestamp: f64,
+    /// Wall-clock epoch seconds from CDP `wallTime` field. Used for display timestamps.
+    wall_time: f64,
     request_headers: serde_json::Value,
     status: Option<u16>,
     status_text: String,
@@ -247,9 +250,9 @@ async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession
 /// Maximum inline body size (matching MCP server limit).
 const MAX_INLINE_BODY_SIZE: usize = 10_000;
 
-/// Convert a CDP timestamp (seconds since epoch, floating point) to ISO 8601 string.
+/// Convert epoch seconds (floating point) to an ISO 8601 string.
 ///
-/// CDP `Network.requestWillBeSent` provides timestamps as seconds since epoch (not milliseconds).
+/// Callers must supply wall-clock epoch seconds (not CDP monotonic timestamps).
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -257,7 +260,7 @@ const MAX_INLINE_BODY_SIZE: usize = 10_000;
     clippy::similar_names
 )]
 fn timestamp_to_iso(ts: f64) -> String {
-    // CDP Network timestamps are in seconds since epoch (unlike Runtime which uses ms)
+    // Expects epoch seconds (wall-clock time), NOT CDP monotonic timestamps
     let total_ms = (ts * 1000.0) as u64;
     let secs = total_ms / 1000;
     let ms_part = total_ms % 1000;
@@ -671,6 +674,8 @@ async fn collect_and_correlate(
                         .to_string();
                     existing.request_headers = event.params["request"]["headers"].clone();
                 } else {
+                    let monotonic_ts = event.params["timestamp"].as_f64().unwrap_or(0.0);
+                    let wall_time = event.params["wallTime"].as_f64().unwrap_or(0.0);
                     let builder = NetworkRequestBuilder {
                         cdp_request_id: request_id.clone(),
                         assigned_id: next_id,
@@ -686,7 +691,8 @@ async fn collect_and_correlate(
                             .as_str()
                             .unwrap_or("Other")
                             .to_lowercase(),
-                        timestamp: event.params["timestamp"].as_f64().unwrap_or(0.0),
+                        timestamp: monotonic_ts,
+                        wall_time,
                         request_headers: event.params["request"]["headers"].clone(),
                         status: None,
                         status_text: String::new(),
@@ -766,7 +772,7 @@ fn builder_to_summary(builder: &NetworkRequestBuilder) -> NetworkRequestSummary 
         resource_type: builder.resource_type.clone(),
         size: builder.encoded_data_length,
         duration_ms,
-        timestamp: timestamp_to_iso(builder.timestamp),
+        timestamp: timestamp_to_iso(builder.wall_time),
     }
 }
 
@@ -973,7 +979,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
         resource_type: builder.resource_type.clone(),
         size: builder.encoded_data_length,
         duration_ms,
-        timestamp: timestamp_to_iso(builder.timestamp),
+        timestamp: timestamp_to_iso(builder.wall_time),
     };
 
     if global.output.plain {
@@ -1071,6 +1077,7 @@ async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result
                                 .unwrap_or("other")
                                 .to_lowercase(),
                             timestamp: ev.params["timestamp"].as_f64().unwrap_or(0.0),
+                            wall_time: ev.params["wallTime"].as_f64().unwrap_or(0.0),
                             request_headers: ev.params["request"]["headers"].clone(),
                             response_headers: serde_json::Value::Null,
                             status: None,
@@ -1181,7 +1188,10 @@ struct InFlightRequest {
     method: String,
     url: String,
     resource_type: String,
+    /// Monotonic CDP timestamp (seconds since browser startup). Used for duration calculations.
     timestamp: f64,
+    /// Wall-clock epoch seconds from CDP `wallTime` field. Used for display timestamps.
+    wall_time: f64,
     request_headers: serde_json::Value,
     response_headers: serde_json::Value,
     status: Option<u16>,
@@ -1223,7 +1233,7 @@ fn emit_stream_event(
         resource_type: req.resource_type.clone(),
         size,
         duration_ms,
-        timestamp: timestamp_to_iso(req.timestamp),
+        timestamp: timestamp_to_iso(req.wall_time),
         request_headers: if verbose {
             Some(req.request_headers.clone())
         } else {
@@ -1645,6 +1655,47 @@ mod tests {
         assert_eq!(
             timestamp_to_iso(1_707_912_000.123),
             "2024-02-14T12:00:00.123Z"
+        );
+    }
+
+    #[test]
+    fn builder_to_summary_uses_wall_time_not_monotonic() {
+        // Monotonic timestamp ~62090s maps to 1970-01-01 if treated as epoch (the old bug).
+        // wallTime provides the real epoch seconds. Verify the summary uses wallTime.
+        let builder = NetworkRequestBuilder {
+            cdp_request_id: "1".to_string(),
+            assigned_id: 0,
+            method: "GET".to_string(),
+            url: "https://example.com".to_string(),
+            resource_type: "document".to_string(),
+            timestamp: 62090.044, // monotonic (seconds since browser start)
+            wall_time: 1_707_912_000.123, // epoch seconds (2024-02-14T12:00:00.123Z)
+            request_headers: serde_json::Value::Null,
+            status: Some(200),
+            status_text: "OK".to_string(),
+            response_headers: serde_json::Value::Null,
+            mime_type: None,
+            encoded_data_length: None,
+            timing: None,
+            redirect_chain: Vec::new(),
+            completed: true,
+            failed: false,
+            error_text: None,
+            navigation_id: 0,
+            loading_finished_timestamp: Some(62090.544),
+        };
+        let summary = builder_to_summary(&builder);
+        // Must show 2024, NOT 1970
+        assert!(
+            summary.timestamp.starts_with("2024-"),
+            "Expected wall-clock year 2024, got: {}",
+            summary.timestamp
+        );
+        assert_eq!(summary.timestamp, "2024-02-14T12:00:00.123Z");
+        // Duration should still be computed from monotonic timestamps
+        assert!(
+            (summary.duration_ms.unwrap() - 500.0).abs() < 1.0,
+            "Duration should be ~500ms from monotonic diff"
         );
     }
 
