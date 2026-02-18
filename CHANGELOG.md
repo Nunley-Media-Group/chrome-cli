@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-02-17
+
+### Fixed
+
+- Tabs create --background not preventing tab activation — replace positional `/json/list` heuristic with CDP `document.visibilityState` queries and HTTP `/json/activate` for reliable active-tab detection (#133)
+
 ## [1.0.3] - 2026-02-17
 
 ### Fixed
