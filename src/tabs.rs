@@ -7,6 +7,7 @@ use chrome_cli::cdp::{CdpClient, CdpConfig};
 use chrome_cli::chrome::{TargetInfo, activate_target, query_targets};
 use chrome_cli::connection::{resolve_connection, select_target};
 use chrome_cli::error::{AppError, ExitCode};
+use chrome_cli::session;
 
 use crate::cli::{GlobalOpts, TabsArgs, TabsCommand};
 
@@ -317,6 +318,15 @@ async fn execute_activate(
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Persist active tab ID in session for cross-invocation use
+    if let Ok(Some(mut session_data)) = session::read_session() {
+        session_data.active_tab_id = Some(target.id.clone());
+        session_data.timestamp = session::now_iso8601();
+        if let Err(e) = session::write_session(&session_data) {
+            eprintln!("warning: could not persist active tab: {e}");
+        }
     }
 
     if quiet {

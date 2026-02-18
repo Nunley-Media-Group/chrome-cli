@@ -153,6 +153,21 @@ pub async fn resolve_target(
     tab: Option<&str>,
 ) -> Result<TargetInfo, AppError> {
     let targets = query_targets(host, port).await?;
+
+    // When no --tab flag, check session for persisted active tab
+    if tab.is_none() {
+        if let Some(active_id) = session::read_session()
+            .ok()
+            .flatten()
+            .and_then(|s| s.active_tab_id)
+        {
+            if let Ok(target) = select_target(&targets, Some(&active_id)) {
+                return Ok(target.clone());
+            }
+            // Persisted target not found (tab closed) — fall through to default
+        }
+    }
+
     select_target(&targets, tab).cloned()
 }
 
