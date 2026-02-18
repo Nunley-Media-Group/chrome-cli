@@ -541,7 +541,8 @@ mod tests {
             "defaultValue": "Alice",
             "timestamp": 1234
         });
-        let encoded = urlencoding::encode(&value.to_string());
+        let string = value.to_string();
+        let encoded = urlencoding::encode(&string);
         let decoded = urlencoding::decode(&encoded).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&decoded).unwrap();
         assert_eq!(parsed["type"], "prompt");
