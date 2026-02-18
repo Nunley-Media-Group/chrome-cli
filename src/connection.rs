@@ -236,6 +236,49 @@ impl ManagedSession {
         &self.enabled_domains
     }
 
+    /// Install dialog interceptor scripts that override `window.alert`,
+    /// `window.confirm`, and `window.prompt` to store dialog metadata in a
+    /// cookie named `__chrome_cli_dialog` before calling the original function.
+    ///
+    /// This enables `dialog info` and `dialog handle` to retrieve dialog type,
+    /// message, and default value via `Network.getCookies` even when the dialog
+    /// was opened before the current CDP session was created.
+    ///
+    /// This method is best-effort: errors are silently ignored so that failure
+    /// to install interceptors never breaks the calling command.
+    pub async fn install_dialog_interceptors(&self) {
+        let script = r"(function(){
+if(window.__chrome_cli_intercepted)return;
+window.__chrome_cli_intercepted=true;
+var oA=window.alert,oC=window.confirm,oP=window.prompt;
+function s(t,m,d){try{document.cookie='__chrome_cli_dialog='+
+encodeURIComponent(JSON.stringify({type:t,message:String(m||''),
+defaultValue:String(d||''),timestamp:Date.now()}))+
+'; path=/; max-age=300';}catch(e){}}
+window.alert=function(m){s('alert',m);return oA.apply(this,arguments);};
+window.confirm=function(m){s('confirm',m);return oC.apply(this,arguments);};
+window.prompt=function(m,d){s('prompt',m,d);return oP.apply(this,arguments);};
+})();";
+
+        // Install on current page via Runtime.evaluate (best-effort)
+        let _ = self
+            .session
+            .send_command(
+                "Runtime.evaluate",
+                Some(serde_json::json!({ "expression": script })),
+            )
+            .await;
+
+        // Register for future navigations (best-effort)
+        let _ = self
+            .session
+            .send_command(
+                "Page.addScriptToEvaluateOnNewDocument",
+                Some(serde_json::json!({ "source": script })),
+            )
+            .await;
+    }
+
     /// Spawn a background task that automatically dismisses JavaScript dialogs.
     ///
     /// Subscribes to dialog events and sends `Page.enable` with a short

@@ -176,6 +176,41 @@ chrome-cli form fill <uid> <value>
 - If a test or command opens a headed Chrome instance, ensure cleanup happens even on failure
 - Before finishing any implementation or verification session, check for orphaned Chrome processes and kill them
 
+### Manual Smoke Test (Required for Verification)
+
+**Every feature and bug fix MUST include a manual smoke test against a real headless Chrome instance during `/verifying-specs`.** Automated BDD tests skip Chrome-dependent scenarios in CI, so the smoke test is the only end-to-end verification that the implementation works against a real browser.
+
+#### Procedure
+
+1. Build in debug mode: `cargo build`
+2. Launch headless Chrome: `./target/debug/chrome-cli connect --launch --headless`
+3. Exercise the feature/fix using the reproduction steps from `requirements.md` or the acceptance criteria
+4. Verify each AC produces the expected output against the real browser
+5. **Run the SauceDemo smoke test** (see below)
+6. Disconnect: `./target/debug/chrome-cli connect disconnect`
+7. Kill any orphaned Chrome processes: `pkill -f 'chrome.*--remote-debugging' || true`
+
+#### SauceDemo Smoke Test (Required)
+
+**Every `/verifying-specs` run MUST include a smoke test against https://www.saucedemo.com/.** This validates the debug build against a real-world web application with login forms, navigation, and dynamic content.
+
+Minimum steps:
+
+1. Navigate to the site: `./target/debug/chrome-cli navigate https://www.saucedemo.com/`
+2. Take a snapshot: `./target/debug/chrome-cli page snapshot`
+3. Exercise the feature/fix against the site where applicable (e.g., form fill on the login page, screenshot, element finding, dialog handling)
+4. Verify the command output is correct and the page responds as expected
+
+If the feature under test is not directly exercisable against SauceDemo (e.g., a pure config or shell-completion change), the SauceDemo test still runs the navigate + snapshot steps as a baseline integration check.
+
+#### Requirements
+
+- The smoke test MUST appear as a task in `tasks.md` (typically the final task before "Verify No Regressions")
+- During `/verifying-specs`, execute the smoke test task and record pass/fail results in the verification report
+- If the smoke test fails, treat it as a Critical finding — the implementation does not meet acceptance criteria
+- For defect fixes, the smoke test MUST reproduce the exact steps from the issue's reproduction section and confirm the bug no longer occurs
+- The SauceDemo smoke test results MUST be recorded in the verification report alongside the feature-specific smoke test results
+
 ### BDD Testing (Required for nmg-sdlc)
 
 **Every acceptance criterion MUST have a Gherkin test.**

@@ -3466,7 +3466,7 @@ const SCROLL_TESTABLE_SCENARIOS: &[&str] = &[
     "Invalid direction value",
 ];
 
-/// Run dialog-related BDD features (main dialog, issue #86, issue #99).
+/// Run dialog-related BDD features (main dialog, issue #86, issue #99, issue #134).
 async fn run_dialog_features() {
     // Dialog handling — only CLI-testable scenarios (argument validation) can run without Chrome.
     DialogWorld::cucumber()
@@ -3492,6 +3492,16 @@ async fn run_dialog_features() {
     DialogWorld::cucumber()
         .filter_run_and_exit(
             "tests/features/dialog-handle-no-dialog-open-fix.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require Chrome with open dialog
+        )
+        .await;
+
+    // Dialog info wrong type/empty message fix (issue #134) — all scenarios require a running
+    // Chrome instance with an open dialog, so none can run in CI without Chrome. The feature
+    // file documents regression scenarios for manual/integration testing.
+    DialogWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/134-fix-dialog-info-wrong-type-empty-message.feature",
             |_feature, _rule, _scenario| false, // All scenarios require Chrome with open dialog
         )
         .await;

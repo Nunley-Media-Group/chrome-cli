@@ -97,6 +97,7 @@ async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession
     let session = client.create_session(&target.id).await?;
     let mut managed = ManagedSession::new(session);
     apply_emulate_state(&mut managed).await?;
+    managed.install_dialog_interceptors().await;
 
     Ok((client, managed))
 }
