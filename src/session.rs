@@ -10,6 +10,8 @@ pub struct SessionData {
     pub port: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub active_tab_id: Option<String>,
     pub timestamp: String,
 }
 
@@ -271,6 +273,7 @@ mod tests {
             ws_url: "ws://127.0.0.1:9222/devtools/browser/abc".into(),
             port: 9222,
             pid: Some(1234),
+            active_tab_id: None,
             timestamp: "2026-02-11T12:00:00Z".into(),
         };
 
@@ -280,6 +283,7 @@ mod tests {
         assert_eq!(read.ws_url, data.ws_url);
         assert_eq!(read.port, data.port);
         assert_eq!(read.pid, data.pid);
+        assert_eq!(read.active_tab_id, data.active_tab_id);
         assert_eq!(read.timestamp, data.timestamp);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -295,6 +299,7 @@ mod tests {
             ws_url: "ws://127.0.0.1:9222/devtools/browser/xyz".into(),
             port: 9222,
             pid: None,
+            active_tab_id: None,
             timestamp: "2026-02-11T12:00:00Z".into(),
         };
 
@@ -377,6 +382,7 @@ mod tests {
             ws_url: "ws://127.0.0.1:9222/devtools/browser/aaa".into(),
             port: 9222,
             pid: Some(54321),
+            active_tab_id: None,
             timestamp: "2026-02-15T00:00:00Z".into(),
         };
         write_session_to(&path, &launch).unwrap();
@@ -403,6 +409,7 @@ mod tests {
             ws_url: "ws://127.0.0.1:9222/devtools/browser/bbb".into(),
             port: 9222,
             pid: Some(99999),
+            active_tab_id: None,
             timestamp: "2026-02-15T00:00:00Z".into(),
         };
         write_session_to(&path, &launch).unwrap();
@@ -441,6 +448,7 @@ mod tests {
             ws_url: "ws://127.0.0.1:9222/devtools/browser/ccc".into(),
             port: 9222,
             pid: Some(11111),
+            active_tab_id: None,
             timestamp: "2026-02-15T00:00:00Z".into(),
         };
         write_session_to(&path, &existing).unwrap();
@@ -448,6 +456,75 @@ mod tests {
         // Incoming ConnectionInfo has its own PID (e.g. new --launch)
         let pid = resolve_pid(&path, Some(22222), 9222);
         assert_eq!(pid, Some(22222), "Incoming PID should take priority");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_read_round_trip_with_active_tab_id() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-session-active-tab");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+
+        let data = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/tab".into(),
+            port: 9222,
+            pid: Some(1234),
+            active_tab_id: Some("ABCDEF123456".into()),
+            timestamp: "2026-02-17T12:00:00Z".into(),
+        };
+
+        write_session_to(&path, &data).unwrap();
+        let read = read_session_from(&path).unwrap().unwrap();
+
+        assert_eq!(read.active_tab_id, Some("ABCDEF123456".into()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn active_tab_id_skipped_when_none() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-session-no-active-tab");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+
+        let data = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/tab".into(),
+            port: 9222,
+            pid: None,
+            active_tab_id: None,
+            timestamp: "2026-02-17T12:00:00Z".into(),
+        };
+
+        write_session_to(&path, &data).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !contents.contains("active_tab_id"),
+            "active_tab_id should be skipped when None"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_session_without_active_tab_id_deserializes() {
+        let dir = std::env::temp_dir().join("chrome-cli-test-session-compat");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+
+        // Simulate an old session file that doesn't have active_tab_id
+        let old_json = r#"{
+            "ws_url": "ws://127.0.0.1:9222/devtools/browser/old",
+            "port": 9222,
+            "pid": 5678,
+            "timestamp": "2026-02-17T12:00:00Z"
+        }"#;
+        std::fs::write(&path, old_json).unwrap();
+
+        let read = read_session_from(&path).unwrap().unwrap();
+        assert_eq!(read.active_tab_id, None);
+        assert_eq!(read.pid, Some(5678));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

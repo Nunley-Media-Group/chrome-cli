@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-02-17
+
+### Fixed
+
+- Page commands targeting wrong tab after `tabs activate` — persist active tab ID in session file and prefer it in `resolve_target()` for cross-invocation state consistency (#137)
+
 ## [1.0.4] - 2026-02-17
 
 ### Fixed

@@ -3901,4 +3901,15 @@ async fn main() {
     // Page screenshot UID fix (issue #132) — source-level regression test verifies that
     // resolve_uid_clip calls DOM.getDocument before DOM.describeNode.
     PageSourceWorld::run("tests/features/132-fix-page-screenshot-uid-node-not-found.feature").await;
+
+    // Page commands wrong tab after activate fix (issue #137) — all scenarios require a
+    // running Chrome instance with multiple tabs. The feature file documents regression
+    // scenarios; the fix is validated by persisting active_tab_id in the session file
+    // and preferring it in resolve_target().
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/137-fix-page-commands-wrong-tab-after-activate.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }

@@ -316,19 +316,19 @@ fn warn_if_remote_host(host: &str) {
 /// prevents losing the PID stored by a prior `--launch` when reconnecting to the
 /// same Chrome instance.
 fn save_session(info: &ConnectionInfo) {
-    // Preserve PID from existing session when reconnecting to the same port.
-    let pid = info.pid.or_else(|| {
-        session::read_session()
-            .ok()
-            .flatten()
-            .filter(|existing| existing.port == info.port)
-            .and_then(|existing| existing.pid)
-    });
+    // Preserve PID and active_tab_id from existing session when reconnecting to the same port.
+    let existing = session::read_session()
+        .ok()
+        .flatten()
+        .filter(|existing| existing.port == info.port);
+    let pid = info.pid.or_else(|| existing.as_ref().and_then(|e| e.pid));
+    let active_tab_id = existing.and_then(|e| e.active_tab_id);
 
     let data = SessionData {
         ws_url: info.ws_url.clone(),
         port: info.port,
         pid,
+        active_tab_id,
         timestamp: session::now_iso8601(),
     };
     if let Err(e) = session::write_session(&data) {
