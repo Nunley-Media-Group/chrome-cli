@@ -3528,6 +3528,57 @@ fn selects_input_prototype(world: &mut FormSourceWorld) {
     );
 }
 
+// =============================================================================
+// PageSourceWorld — page.rs source-level regression tests (issue #132)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct PageSourceWorld {
+    source_content: String,
+    function_body: String,
+}
+
+#[given("chrome-cli is built")]
+fn page_source_chrome_cli_is_built(world: &mut PageSourceWorld) {
+    let path = project_root().join("src/page.rs");
+    world.source_content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to read src/page.rs: {e}"));
+}
+
+#[when("I check the resolve_uid_clip implementation")]
+fn check_resolve_uid_clip(world: &mut PageSourceWorld) {
+    let start = world
+        .source_content
+        .find("fn resolve_uid_clip(")
+        .expect("resolve_uid_clip function not found in source");
+    let rest = &world.source_content[start..];
+    // Find the next top-level function boundary (next `fn ` at the start of a line or
+    // `/// ` doc comment block). A simple heuristic: look for the next `\nfn ` or `\n/// `.
+    let end = rest[1..]
+        .find("\nasync fn ")
+        .or_else(|| rest[1..].find("\nfn "))
+        .or_else(|| rest[1..].find("\n/// "))
+        .map(|i| i + 1)
+        .unwrap_or(rest.len());
+    world.function_body = rest[..end].to_string();
+}
+
+#[then("it should pass backendNodeId directly to DOM.getBoxModel")]
+fn passes_backend_node_id_to_get_box_model(world: &mut PageSourceWorld) {
+    assert!(
+        world.function_body.contains("\"backendNodeId\""),
+        "resolve_uid_clip should pass backendNodeId to DOM.getBoxModel"
+    );
+    assert!(
+        world.function_body.contains("DOM.getBoxModel"),
+        "resolve_uid_clip should call DOM.getBoxModel"
+    );
+    assert!(
+        !world.function_body.contains("DOM.describeNode"),
+        "resolve_uid_clip should NOT call DOM.describeNode (backendNodeId is passed directly)"
+    );
+}
+
 /// Run dialog-related BDD features (main dialog, issue #86, issue #99, issue #134).
 async fn run_dialog_features() {
     // Dialog handling — only CLI-testable scenarios (argument validation) can run without Chrome.
@@ -3835,4 +3886,8 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // Page screenshot UID fix (issue #132) — source-level regression test verifies that
+    // resolve_uid_clip calls DOM.getDocument before DOM.describeNode.
+    PageSourceWorld::run("tests/features/132-fix-page-screenshot-uid-node-not-found.feature").await;
 }

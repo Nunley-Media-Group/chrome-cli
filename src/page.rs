@@ -695,8 +695,6 @@ async fn resolve_selector_clip(
 
 /// Resolve an element's bounding box as a clip region using an accessibility UID.
 async fn resolve_uid_clip(managed: &mut ManagedSession, uid: &str) -> Result<ClipRegion, AppError> {
-    managed.ensure_domain("DOM").await?;
-
     let state = crate::snapshot::read_snapshot_state()
         .map_err(|e| AppError::screenshot_failed(&format!("Failed to read snapshot state: {e}")))?
         .ok_or_else(|| AppError {
@@ -710,22 +708,13 @@ async fn resolve_uid_clip(managed: &mut ManagedSession, uid: &str) -> Result<Cli
         .get(uid)
         .ok_or_else(|| AppError::uid_not_found(uid))?;
 
-    let describe = managed
-        .send_command(
-            "DOM.describeNode",
-            Some(serde_json::json!({ "backendNodeId": backend_node_id })),
-        )
-        .await
-        .map_err(|e| AppError::screenshot_failed(&format!("Failed to resolve UID '{uid}': {e}")))?;
-
-    let node_id = describe["node"]["nodeId"].as_i64().ok_or_else(|| {
-        AppError::screenshot_failed(&format!("UID '{uid}' could not be resolved to a DOM node"))
-    })?;
-
+    // Pass backendNodeId directly to DOM.getBoxModel instead of resolving via
+    // describeNode first — the intermediate nodeId was not anchored in the document
+    // tree, which caused "Could not find node with given id" errors.
     let box_result = managed
         .send_command(
             "DOM.getBoxModel",
-            Some(serde_json::json!({ "nodeId": node_id })),
+            Some(serde_json::json!({ "backendNodeId": backend_node_id })),
         )
         .await
         .map_err(|e| {
