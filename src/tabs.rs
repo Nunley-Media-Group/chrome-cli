@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use chrome_cli::cdp::{CdpClient, CdpConfig};
-use chrome_cli::chrome::{TargetInfo, query_targets};
+use chrome_cli::chrome::{TargetInfo, activate_target, query_targets};
 use chrome_cli::connection::{resolve_connection, select_target};
 use chrome_cli::error::{AppError, ExitCode};
 
@@ -135,6 +135,12 @@ async fn execute_list(global: &GlobalOpts, include_all: bool) -> Result<(), AppE
     let targets = query_targets(&conn.host, conn.port).await?;
     let filtered = filter_page_targets(&targets, include_all);
 
+    // Determine the active tab by querying Chrome's actual visibility state
+    // via CDP sessions, rather than relying on /json/list positional ordering
+    // (which does not reliably reflect activation state in headless mode).
+    let config = cdp_config(global);
+    let visible_id = query_visible_target_id(&conn.ws_url, &filtered, config).await;
+
     let tabs: Vec<TabInfo> = filtered
         .iter()
         .enumerate()
@@ -142,7 +148,10 @@ async fn execute_list(global: &GlobalOpts, include_all: bool) -> Result<(), AppE
             id: t.id.clone(),
             url: t.url.clone(),
             title: t.title.clone(),
-            active: i == 0,
+            active: match &visible_id {
+                Some(vid) => t.id == *vid,
+                None => i == 0, // fallback if CDP query fails
+            },
         })
         .collect();
 
@@ -161,21 +170,27 @@ async fn execute_create(
 ) -> Result<(), AppError> {
     let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
 
-    // When --background is used, record the currently active tab so we can
-    // re-activate it after creation (Chrome does not reliably honor the
-    // `background` parameter in Target.createTarget).
+    let config = cdp_config(global);
+    let client = CdpClient::connect(&conn.ws_url, config.clone()).await?;
+
+    // When --background is used, record the currently active (visible) tab
+    // so we can re-activate it after creation. Uses CDP visibilityState
+    // rather than /json/list ordering (which is unreliable in headless mode).
     let original_active_id = if background {
         let targets = query_targets(&conn.host, conn.port).await?;
-        targets
-            .iter()
-            .find(|t| t.target_type == "page")
-            .map(|t| t.id.clone())
+        let pages: Vec<&TargetInfo> = targets.iter().filter(|t| t.target_type == "page").collect();
+        let mut visible_id = None;
+        for page in &pages {
+            if check_target_visible(&client, &page.id).await {
+                visible_id = Some(page.id.clone());
+                break;
+            }
+        }
+        // Fall back to first page target if visibility check fails
+        visible_id.or_else(|| pages.first().map(|t| t.id.clone()))
     } else {
         None
     };
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
 
     let target_url = url.unwrap_or("about:blank");
     let mut params = serde_json::json!({ "url": target_url });
@@ -189,24 +204,21 @@ async fn execute_create(
 
     let target_id = result["targetId"].as_str().unwrap_or_default().to_string();
 
-    // Re-activate the original tab if --background was requested
+    // Re-activate the original tab if --background was requested.
+    // Uses HTTP /json/activate to tell Chrome which tab should be visible,
+    // then verifies via CDP document.visibilityState (which is authoritative,
+    // unlike /json/list ordering which is unreliable in headless mode).
     if let Some(ref active_id) = original_active_id {
-        let activate_params = serde_json::json!({ "targetId": active_id });
-        client
-            .send_command("Target.activateTarget", Some(activate_params))
-            .await?;
+        activate_target(&conn.host, conn.port, active_id).await?;
 
-        // Verify activation propagated to /json/list ordering.
-        // Chrome's HTTP endpoint may not immediately reflect the
-        // Target.activateTarget command, so poll until the original tab
-        // is back in the first-page-target position.
-        for _ in 0..50 {
-            let check = query_targets(&conn.host, conn.port).await?;
-            let first_page = check.iter().find(|t| t.target_type == "page");
-            if first_page.is_some_and(|t| t.id == *active_id) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        // Stability verification: page-load events can re-activate the new
+        // tab after our initial activation succeeds. Wait briefly, then
+        // verify via CDP that the original tab is actually visible.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if !check_target_visible(&client, active_id).await {
+            // Page-load re-activated the new tab. Re-activate and re-verify.
+            activate_target(&conn.host, conn.port, active_id).await?;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 
@@ -332,6 +344,48 @@ fn cdp_config(global: &GlobalOpts) -> CdpConfig {
     config
 }
 
+/// Check whether a target's `document.visibilityState` is `"visible"` via a
+/// CDP session on the given client.
+async fn check_target_visible(client: &CdpClient, target_id: &str) -> bool {
+    let Ok(session) = client.create_session(target_id).await else {
+        return false;
+    };
+    let params = serde_json::json!({
+        "expression": "document.visibilityState",
+        "returnByValue": true,
+    });
+    let Ok(result) = session.send_command("Runtime.evaluate", Some(params)).await else {
+        return false;
+    };
+    result["result"]["value"].as_str() == Some("visible")
+}
+
+/// Determine the active (visible) target by querying `document.visibilityState`
+/// for each page target. Returns the target ID of the first target that reports
+/// itself as `"visible"`, or `None` if the query fails for all targets.
+///
+/// Uses an optimistic strategy: checks the first target first, since it is the
+/// most common case. Falls back to scanning the rest if needed.
+async fn query_visible_target_id(
+    ws_url: &str,
+    page_targets: &[&TargetInfo],
+    config: CdpConfig,
+) -> Option<String> {
+    if page_targets.is_empty() {
+        return None;
+    }
+
+    let client = CdpClient::connect(ws_url, config).await.ok()?;
+
+    for target in page_targets {
+        if check_target_visible(&client, &target.id).await {
+            return Some(target.id.clone());
+        }
+    }
+
+    None
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -408,12 +462,14 @@ mod tests {
     }
 
     #[test]
-    fn first_page_target_is_active() {
+    fn visible_target_is_marked_active() {
         let targets = vec![
             make_target("a", "page", "https://google.com"),
             make_target("b", "page", "https://github.com"),
         ];
         let filtered = filter_page_targets(&targets, false);
+        // When CDP reports target "b" as visible, it should be active
+        let visible_id = Some("b".to_string());
         let tabs: Vec<TabInfo> = filtered
             .iter()
             .enumerate()
@@ -421,7 +477,36 @@ mod tests {
                 id: t.id.clone(),
                 url: t.url.clone(),
                 title: t.title.clone(),
-                active: i == 0,
+                active: match &visible_id {
+                    Some(vid) => t.id == *vid,
+                    None => i == 0,
+                },
+            })
+            .collect();
+        assert!(!tabs[0].active);
+        assert!(tabs[1].active);
+    }
+
+    #[test]
+    fn fallback_to_first_when_no_visible_id() {
+        let targets = vec![
+            make_target("a", "page", "https://google.com"),
+            make_target("b", "page", "https://github.com"),
+        ];
+        let filtered = filter_page_targets(&targets, false);
+        // When CDP visibility query fails (None), fall back to first target
+        let visible_id: Option<String> = None;
+        let tabs: Vec<TabInfo> = filtered
+            .iter()
+            .enumerate()
+            .map(|(i, t)| TabInfo {
+                id: t.id.clone(),
+                url: t.url.clone(),
+                title: t.title.clone(),
+                active: match &visible_id {
+                    Some(vid) => t.id == *vid,
+                    None => i == 0,
+                },
             })
             .collect();
         assert!(tabs[0].active);

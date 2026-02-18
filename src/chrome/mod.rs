@@ -6,7 +6,7 @@ mod launcher;
 mod platform;
 
 pub use discovery::{
-    BrowserVersion, TargetInfo, discover_chrome, query_targets, query_version,
+    BrowserVersion, TargetInfo, activate_target, discover_chrome, query_targets, query_version,
     read_devtools_active_port, read_devtools_active_port_from,
 };
 pub use error::ChromeError;

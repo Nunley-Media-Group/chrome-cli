@@ -210,6 +210,7 @@ If the feature under test is not directly exercisable against SauceDemo (e.g., a
 - If the smoke test fails, treat it as a Critical finding — the implementation does not meet acceptance criteria
 - For defect fixes, the smoke test MUST reproduce the exact steps from the issue's reproduction section and confirm the bug no longer occurs
 - The SauceDemo smoke test results MUST be recorded in the verification report alongside the feature-specific smoke test results
+- **Spec sync after smoke-test fixes**: If the smoke test reveals new findings that require code changes beyond the original spec (e.g., a deeper root cause, an additional affected code path, or a different fix mechanism), the spec documents (`requirements.md`, `design.md`, `tasks.md`, `feature.gherkin`) MUST be updated to reflect the actual implementation before completing verification. The spec is the single source of truth — it must never diverge from what was shipped.
 
 ### BDD Testing (Required for nmg-sdlc)
 

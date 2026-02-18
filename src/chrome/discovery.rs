@@ -71,6 +71,21 @@ pub async fn query_targets(host: &str, port: u16) -> Result<Vec<TargetInfo>, Chr
     serde_json::from_str(&body).map_err(|e| ChromeError::ParseError(e.to_string()))
 }
 
+/// Activate a target via Chrome's `/json/activate/{id}` endpoint.
+///
+/// This uses the same HTTP server as `/json/list`, avoiding the cross-protocol
+/// synchronization gap that occurs when using CDP `Target.activateTarget`
+/// followed by an HTTP `/json/list` query.
+///
+/// # Errors
+///
+/// Returns `ChromeError::HttpError` on connection failure.
+pub async fn activate_target(host: &str, port: u16, target_id: &str) -> Result<(), ChromeError> {
+    let path = format!("/json/activate/{target_id}");
+    let _body = http_get(host, port, &path).await?;
+    Ok(())
+}
+
 /// Read the `DevToolsActivePort` file from the default user data directory.
 ///
 /// Returns `(port, ws_path)` on success.

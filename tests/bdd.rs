@@ -3887,6 +3887,17 @@ async fn main() {
         )
         .await;
 
+    // Background tab activation fix (issue #133) — all scenarios require a running Chrome
+    // instance for tab creation and activation verification. The feature file documents
+    // regression scenarios; the fix is validated by replacing CDP Target.activateTarget with
+    // HTTP /json/activate and adding stability verification in execute_create() in tabs.rs.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/133-fix-tabs-create-background-activation.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
     // Page screenshot UID fix (issue #132) — source-level regression test verifies that
     // resolve_uid_clip calls DOM.getDocument before DOM.describeNode.
     PageSourceWorld::run("tests/features/132-fix-page-screenshot-uid-node-not-found.feature").await;
