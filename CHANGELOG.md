@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-19
+
+### Changed
+
+- Replace page-reload strategy in `console read` with CDP replay buffer drain to capture runtime interaction messages across CLI invocations (#146)
+
 ## [1.0.5] - 2026-02-17
 
 ### Fixed

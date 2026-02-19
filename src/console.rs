@@ -62,12 +62,6 @@ struct StreamMessage {
     timestamp: String,
 }
 
-/// Raw collected event data before filtering.
-struct RawConsoleEvent {
-    params: serde_json::Value,
-    navigation_id: u32,
-}
-
 // =============================================================================
 // Output formatting
 // =============================================================================
@@ -382,25 +376,20 @@ pub async fn execute_console(global: &GlobalOpts, args: &ConsoleArgs) -> Result<
 // Read: list and detail modes
 // =============================================================================
 
-/// Default timeout for the reload+drain cycle in milliseconds.
-const DEFAULT_RELOAD_TIMEOUT_MS: u64 = 5000;
+/// Absolute max timeout for replay buffer drain in milliseconds.
+const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 5000;
 
-/// Idle window after page load event to catch trailing console messages from deferred scripts (ms).
-const POST_LOAD_IDLE_MS: u64 = 200;
+/// Idle timeout — no event within this window means drain is complete (ms).
+const IDLE_DRAIN_MS: u64 = 200;
 
-#[allow(clippy::too_many_lines)]
 async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
 
-    let total_timeout = Duration::from_millis(global.timeout.unwrap_or(DEFAULT_RELOAD_TIMEOUT_MS));
+    let total_timeout = Duration::from_millis(global.timeout.unwrap_or(DEFAULT_DRAIN_TIMEOUT_MS));
 
-    // Enable Runtime domain for console events
-    managed.ensure_domain("Runtime").await?;
-
-    // Enable Page domain for reload and navigation tracking
-    managed.ensure_domain("Page").await?;
-
-    // Subscribe to console events
+    // Subscribe to console events BEFORE enabling Runtime domain.
+    // CDP replays buffered Runtime.consoleAPICalled events when Runtime.enable
+    // is called; subscribing first ensures we capture the replay.
     let mut console_rx = managed
         .subscribe("Runtime.consoleAPICalled")
         .await
@@ -410,48 +399,16 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
             custom_json: None,
         })?;
 
-    // Subscribe to navigation events for tracking
-    let mut nav_rx = managed
-        .subscribe("Page.frameNavigated")
-        .await
-        .map_err(|e| AppError {
-            message: format!("Failed to subscribe to navigation events: {e}"),
-            code: ExitCode::GeneralError,
-            custom_json: None,
-        })?;
+    // Enable Runtime domain — triggers CDP replay buffer drain
+    managed.ensure_domain("Runtime").await?;
 
-    // Subscribe to page load event to know when reload completes
-    let mut load_event_rx = managed
-        .subscribe("Page.loadEventFired")
-        .await
-        .map_err(|e| AppError {
-            message: format!("Failed to subscribe to page load events: {e}"),
-            code: ExitCode::GeneralError,
-            custom_json: None,
-        })?;
-
-    // Trigger a page reload to replay page scripts and regenerate console events
-    managed
-        .send_command("Page.reload", Some(serde_json::json!({})))
-        .await
-        .map_err(|e| AppError {
-            message: format!("Failed to reload page: {e}"),
-            code: ExitCode::GeneralError,
-            custom_json: None,
-        })?;
-
-    // Collect events until page load completes + idle window, with total timeout
-    let mut raw_events = Vec::new();
-    let mut current_nav_id: u32 = 0;
-    let mut page_loaded = false;
+    // Drain replayed events until idle timeout or absolute deadline
+    let mut events: Vec<serde_json::Value> = Vec::new();
     let absolute_deadline = tokio::time::Instant::now() + total_timeout;
-    let mut idle_deadline: Option<tokio::time::Instant> = None;
+    let mut idle_deadline = tokio::time::Instant::now() + Duration::from_millis(IDLE_DRAIN_MS);
 
     loop {
-        let effective_deadline = match idle_deadline {
-            Some(idle) => idle.min(absolute_deadline),
-            None => absolute_deadline,
-        };
+        let effective_deadline = idle_deadline.min(absolute_deadline);
         let remaining = effective_deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             break;
@@ -461,30 +418,10 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
             event = console_rx.recv() => {
                 match event {
                     Some(ev) => {
-                        raw_events.push(RawConsoleEvent {
-                            params: ev.params,
-                            navigation_id: current_nav_id,
-                        });
-                    }
-                    None => break,
-                }
-            }
-            event = nav_rx.recv() => {
-                match event {
-                    Some(_) => current_nav_id += 1,
-                    None => break,
-                }
-            }
-            event = load_event_rx.recv() => {
-                match event {
-                    Some(_) => {
-                        if !page_loaded {
-                            page_loaded = true;
-                            idle_deadline = Some(
-                                tokio::time::Instant::now()
-                                    + tokio::time::Duration::from_millis(POST_LOAD_IDLE_MS),
-                            );
-                        }
+                        events.push(ev.params);
+                        // Reset idle timer on each received event
+                        idle_deadline = tokio::time::Instant::now()
+                            + Duration::from_millis(IDLE_DRAIN_MS);
                     }
                     None => break,
                 }
@@ -493,41 +430,22 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
         }
     }
 
-    // Navigation-aware filtering: keep events from the last 3 navigations
-    let events_to_process = if args.include_preserved {
-        // Include up to last 3 navigations
-        let min_nav_id = current_nav_id.saturating_sub(2);
-        raw_events
-            .into_iter()
-            .filter(|e| e.navigation_id >= min_nav_id)
-            .collect::<Vec<_>>()
-    } else {
-        // Only current navigation
-        raw_events
-            .into_iter()
-            .filter(|e| e.navigation_id == current_nav_id)
-            .collect::<Vec<_>>()
-    };
-
     // Handle detail mode (MSG_ID provided)
     if let Some(msg_id) = args.msg_id {
         #[allow(clippy::cast_possible_truncation)]
         let id = msg_id as usize;
-        if id >= events_to_process.len() {
+        if id >= events.len() {
             return Err(AppError {
                 message: format!("Message ID {id} not found"),
                 code: ExitCode::GeneralError,
                 custom_json: None,
             });
         }
-        let detail =
-            parse_console_event_detail(&events_to_process[id].params, id).ok_or_else(|| {
-                AppError {
-                    message: format!("Failed to parse message ID {id}"),
-                    code: ExitCode::GeneralError,
-                    custom_json: None,
-                }
-            })?;
+        let detail = parse_console_event_detail(&events[id], id).ok_or_else(|| AppError {
+            message: format!("Failed to parse message ID {id}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
 
         if global.output.plain {
             print_detail_plain(&detail);
@@ -537,10 +455,10 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
     }
 
     // List mode: parse all events into ConsoleMessages
-    let messages: Vec<ConsoleMessage> = events_to_process
+    let messages: Vec<ConsoleMessage> = events
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| parse_console_event(&e.params, i))
+        .filter_map(|(i, params)| parse_console_event(params, i))
         .collect();
 
     // Apply type filter
