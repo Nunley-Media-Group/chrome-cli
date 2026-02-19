@@ -52,19 +52,6 @@ Feature: CLI skeleton with clap derive macros and top-level help
     And stderr JSON should have key "code"
     And stderr should contain "cannot be used with"
 
-  # --- Subcommand Stubs ---
-
-  Scenario Outline: Subcommand stubs return not-yet-implemented error
-    Given chrome-cli is built
-    When I run "chrome-cli <subcommand>"
-    Then the exit code should be 1
-    And stderr should contain "error"
-    And stderr should contain "not yet implemented"
-
-    Examples:
-      | subcommand |
-      | dom        |
-
   # --- Subcommand Help ---
 
   Scenario: Subcommand help text is descriptive

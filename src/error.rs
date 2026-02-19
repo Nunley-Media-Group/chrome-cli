@@ -420,6 +420,33 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn node_not_found(id: &str) -> Self {
+        Self {
+            message: format!("Node not found: {id}"),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn attribute_not_found(name: &str, node_id: &str) -> Self {
+        Self {
+            message: format!("Attribute '{name}' not found on node {node_id}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn no_parent() -> Self {
+        Self {
+            message: "Element has no parent (document root)".into(),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
     pub fn stale_uid(uid: &str) -> Self {
         Self {
             message: format!(

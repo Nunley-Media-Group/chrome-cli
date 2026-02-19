@@ -1,0 +1,194 @@
+# File: tests/features/149-dom-command-group.feature
+#
+# Generated from: .claude/specs/149-dom-command-group/requirements.md
+# Issue: #149
+
+Feature: DOM command group
+  As a developer or AI agent automating Chrome via the CLI
+  I want a dom command group for querying, navigating, styling, and manipulating DOM elements
+  So that I can interact with page structure without raw JavaScript
+
+  Background:
+    Given Chrome is connected with a page loaded
+
+  # --- Element Selection ---
+
+  Scenario: Select elements by CSS selector
+    Given the page contains an "h1" element with text "Example Domain"
+    When I run "chrome-cli dom select \"h1\""
+    Then stdout is a JSON array with at least 1 element
+    And each element has "nodeId" as an integer
+    And each element has "tag" as a string
+    And each element has "attributes" as an object
+    And each element has "textContent" as a string
+    And the exit code is 0
+
+  Scenario: Select elements by XPath
+    Given the page contains an "h1" element with text "Example Domain"
+    When I run "chrome-cli dom select --xpath \"//h1\""
+    Then stdout is a JSON array with at least 1 element
+    And each element has "nodeId" as an integer
+    And each element has "tag" as a string
+    And the exit code is 0
+
+  Scenario: Select with no matches returns empty array
+    When I run "chrome-cli dom select \".nonexistent-class\""
+    Then stdout is "[]"
+    And the exit code is 0
+
+  # --- Attribute Operations ---
+
+  Scenario: Get element attribute
+    Given the page contains a link with href attribute
+    When I select the link element and note its nodeId
+    And I run "chrome-cli dom get-attribute <nodeId> href"
+    Then stdout is a JSON object with "attribute" equal to "href"
+    And stdout has a "value" field containing a URL
+    And the exit code is 0
+
+  Scenario: Get element text content
+    Given the page contains an "h1" element with text "Example Domain"
+    When I select the h1 element and note its nodeId
+    And I run "chrome-cli dom get-text <nodeId>"
+    Then stdout is a JSON object with "textContent" equal to "Example Domain"
+    And the exit code is 0
+
+  Scenario: Get element HTML
+    Given the page contains an "h1" element
+    When I select the h1 element and note its nodeId
+    And I run "chrome-cli dom get-html <nodeId>"
+    Then stdout is a JSON object with "outerHTML" containing "<h1>"
+    And the exit code is 0
+
+  Scenario: Set element attribute
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom set-attribute <nodeId> class \"new-class\""
+    Then stdout is a JSON object with "success" equal to true
+    And stdout has "attribute" equal to "class"
+    And stdout has "value" equal to "new-class"
+    When I run "chrome-cli dom get-attribute <nodeId> class"
+    Then stdout has "value" equal to "new-class"
+
+  Scenario: Set element text content
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom set-text <nodeId> \"new text\""
+    Then stdout is a JSON object with "success" equal to true
+    And stdout has "textContent" equal to "new text"
+    When I run "chrome-cli dom get-text <nodeId>"
+    Then stdout has "textContent" equal to "new text"
+
+  Scenario: Remove element
+    Given the page contains an "h1" element
+    When I select the h1 element and note its nodeId
+    And I run "chrome-cli dom remove <nodeId>"
+    Then stdout is a JSON object with "success" equal to true
+    And stdout has "removed" equal to true
+    When I run "chrome-cli dom select \"h1\""
+    Then stdout is "[]"
+
+  # --- Error Handling ---
+
+  Scenario: Invalid nodeId returns target error
+    When I run "chrome-cli dom get-attribute 999999 href"
+    Then stderr contains an error message
+    And the exit code is 3
+
+  Scenario: Attribute not found on element
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom get-attribute <nodeId> data-nonexistent"
+    Then stderr contains an error message about attribute not found
+    And the exit code is 1
+
+  # --- UID-Based Targeting ---
+
+  Scenario: UID-based targeting resolves to DOM node
+    Given I have run "chrome-cli page snapshot" to assign UIDs
+    When I run "chrome-cli dom get-text s1"
+    Then stdout is a JSON object with "textContent" as a string
+    And the exit code is 0
+
+  # --- Cross-Validation ---
+
+  Scenario: Cross-validate mutation via independent read
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom set-attribute <nodeId> data-test \"hello\""
+    Then stdout has "success" equal to true
+    When I run "chrome-cli dom get-attribute <nodeId> data-test"
+    Then stdout has "attribute" equal to "data-test"
+    And stdout has "value" equal to "hello"
+
+  # --- CSS Styles ---
+
+  Scenario: Get all computed CSS styles
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom get-style <nodeId>"
+    Then stdout is a JSON object with a "styles" object
+    And the "styles" object contains keys like "display" and "color"
+    And the exit code is 0
+
+  Scenario: Get specific CSS property
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom get-style <nodeId> display"
+    Then stdout is a JSON object with "property" equal to "display"
+    And stdout has a "value" field
+    And the exit code is 0
+
+  Scenario: Set inline CSS style
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom set-style <nodeId> \"color: red; font-weight: bold\""
+    Then stdout is a JSON object with "success" equal to true
+    And stdout has "style" containing "color: red"
+    When I run "chrome-cli dom get-style <nodeId> color"
+    Then stdout has "value" containing "red"
+
+  # --- DOM Navigation ---
+
+  Scenario: Get parent element
+    Given the page has a nested structure with parent and child elements
+    When I select a child element and note its nodeId
+    And I run "chrome-cli dom parent <nodeId>"
+    Then stdout is a JSON object with "nodeId", "tag", "attributes", and "textContent"
+    And the exit code is 0
+
+  Scenario: Get child elements
+    Given the page has a container with multiple child elements
+    When I select the container and note its nodeId
+    And I run "chrome-cli dom children <nodeId>"
+    Then stdout is a JSON array of child elements
+    And each element has "nodeId", "tag", "attributes", and "textContent"
+    And the exit code is 0
+
+  Scenario: Get sibling elements
+    Given the page has elements with siblings
+    When I select an element and note its nodeId
+    And I run "chrome-cli dom siblings <nodeId>"
+    Then stdout is a JSON array of sibling elements excluding the target
+    And the exit code is 0
+
+  Scenario: Parent of root element returns error
+    When I get the document root nodeId
+    And I run "chrome-cli dom parent <rootNodeId>"
+    Then stderr contains an error about no parent
+    And the exit code is 3
+
+  # --- DOM Tree Visualization ---
+
+  Scenario: DOM tree visualization
+    When I run "chrome-cli dom tree"
+    Then stdout contains indented text with tag names
+    And the output includes "html" at the root level
+    And the output includes "head" and "body" indented under "html"
+    And the exit code is 0
+
+  Scenario: DOM tree with depth limit
+    When I run "chrome-cli dom tree --depth 2"
+    Then stdout contains indented text with tag names
+    And subtrees deeper than 2 levels show "..."
+    And the exit code is 0
+
+  Scenario: DOM tree rooted at a specific element
+    When I select the body element and note its nodeId
+    And I run "chrome-cli dom tree --root <nodeId>"
+    Then stdout starts with the "body" tag
+    And the output does not include "head"
+    And the exit code is 0

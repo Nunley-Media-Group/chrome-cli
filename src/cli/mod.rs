@@ -230,16 +230,30 @@ EXAMPLES:
     /// DOM inspection and manipulation
     #[command(
         long_about = "Query and manipulate the DOM: select elements by CSS selector or XPath, \
-            get/set attributes, read innerHTML/outerHTML, and modify element properties. \
-            (Not yet implemented — use 'page snapshot' and 'js exec' as alternatives.)",
+            get/set attributes and text, read outerHTML, inspect computed styles, navigate the \
+            element tree, and remove elements. Target elements by node ID (from 'dom select'), \
+            snapshot UID (from 'page snapshot'), or CSS selector (prefixed with 'css:').",
         after_long_help = "\
 EXAMPLES:
-  # (DOM commands are not yet implemented)
-  # Use these alternatives:
-  chrome-cli page snapshot
-  chrome-cli js exec \"document.querySelector('#myId').textContent\""
+  # Select elements by CSS selector
+  chrome-cli dom select \"h1\"
+
+  # Select by XPath
+  chrome-cli dom select \"//a[@href]\" --xpath
+
+  # Get an element's attribute
+  chrome-cli dom get-attribute s3 href
+
+  # Read element text
+  chrome-cli dom get-text css:h1
+
+  # Set an attribute
+  chrome-cli dom set-attribute s5 class \"highlight\"
+
+  # View the DOM tree
+  chrome-cli dom tree --depth 3"
     )]
-    Dom,
+    Dom(DomArgs),
 
     /// JavaScript execution in page context
     #[command(
@@ -1859,6 +1873,305 @@ pub struct NetworkFollowArgs {
 pub struct PageResizeArgs {
     /// Viewport size as WIDTHxHEIGHT (e.g. 1280x720)
     pub size: String,
+}
+
+/// Arguments for the `dom` subcommand group.
+#[derive(Args)]
+pub struct DomArgs {
+    #[command(subcommand)]
+    pub command: DomCommand,
+}
+
+/// DOM inspection and manipulation subcommands.
+#[derive(Subcommand)]
+pub enum DomCommand {
+    /// Select elements by CSS selector or XPath
+    #[command(
+        long_about = "Query elements in the DOM by CSS selector (default) or XPath expression \
+            (with --xpath). Returns a JSON array of matching elements with their node IDs, \
+            tag names, attributes, and text content. Node IDs can be used with other dom \
+            subcommands.",
+        after_long_help = "\
+EXAMPLES:
+  # Select by CSS selector
+  chrome-cli dom select \"h1\"
+
+  # Select by XPath
+  chrome-cli dom select \"//a[@href]\" --xpath
+
+  # Select with a complex CSS selector
+  chrome-cli dom select \"div.content > p:first-child\""
+    )]
+    Select(DomSelectArgs),
+
+    /// Get a single attribute value from an element
+    #[command(
+        name = "get-attribute",
+        long_about = "Read a single attribute value from a DOM element. The element can be \
+            targeted by node ID (from 'dom select'), snapshot UID (from 'page snapshot'), \
+            or CSS selector (prefixed with 'css:'). Returns the attribute name and value.",
+        after_long_help = "\
+EXAMPLES:
+  # Get href by UID
+  chrome-cli dom get-attribute s3 href
+
+  # Get class by CSS selector
+  chrome-cli dom get-attribute css:h1 class"
+    )]
+    GetAttribute(DomGetAttributeArgs),
+
+    /// Get the text content of an element
+    #[command(
+        name = "get-text",
+        long_about = "Read the textContent of a DOM element. Returns the combined text of \
+            the element and all its descendants.",
+        after_long_help = "\
+EXAMPLES:
+  # Get text by UID
+  chrome-cli dom get-text s3
+
+  # Get text by CSS selector
+  chrome-cli dom get-text css:h1"
+    )]
+    GetText(DomNodeIdArgs),
+
+    /// Get the outer HTML of an element
+    #[command(
+        name = "get-html",
+        long_about = "Read the outerHTML of a DOM element, including the element itself and \
+            all its children as an HTML string.",
+        after_long_help = "\
+EXAMPLES:
+  # Get HTML by UID
+  chrome-cli dom get-html s3
+
+  # Get HTML by CSS selector
+  chrome-cli dom get-html css:div.content"
+    )]
+    GetHtml(DomNodeIdArgs),
+
+    /// Set an attribute on an element
+    #[command(
+        name = "set-attribute",
+        long_about = "Set or update an attribute on a DOM element. Creates the attribute if \
+            it doesn't exist, or updates its value if it does.",
+        after_long_help = "\
+EXAMPLES:
+  # Set class attribute
+  chrome-cli dom set-attribute s5 class \"highlight\"
+
+  # Set data attribute by CSS selector
+  chrome-cli dom set-attribute css:#main data-active true"
+    )]
+    SetAttribute(DomSetAttributeArgs),
+
+    /// Set the text content of an element
+    #[command(
+        name = "set-text",
+        long_about = "Replace the textContent of a DOM element, removing all child nodes \
+            and setting the element's content to the given text.",
+        after_long_help = "\
+EXAMPLES:
+  # Set text by UID
+  chrome-cli dom set-text s3 \"New heading\"
+
+  # Set text by CSS selector
+  chrome-cli dom set-text css:h1 \"Updated Title\""
+    )]
+    SetText(DomSetTextArgs),
+
+    /// Remove an element from the DOM
+    #[command(
+        long_about = "Remove a DOM element and all its children from the document. This is \
+            irreversible within the current page session.",
+        after_long_help = "\
+EXAMPLES:
+  # Remove by UID
+  chrome-cli dom remove s3
+
+  # Remove by CSS selector
+  chrome-cli dom remove css:div.ad-banner"
+    )]
+    Remove(DomNodeIdArgs),
+
+    /// Get computed CSS styles of an element
+    #[command(
+        name = "get-style",
+        long_about = "Read the computed CSS styles of a DOM element. Without a property name, \
+            returns all computed styles. With a property name, returns just that property's \
+            value.",
+        after_long_help = "\
+EXAMPLES:
+  # Get all computed styles
+  chrome-cli dom get-style s3
+
+  # Get a specific property
+  chrome-cli dom get-style s3 display
+
+  # Get style by CSS selector
+  chrome-cli dom get-style css:h1 color"
+    )]
+    GetStyle(DomGetStyleArgs),
+
+    /// Set the inline style of an element
+    #[command(
+        name = "set-style",
+        long_about = "Set the inline style attribute of a DOM element. The style string replaces \
+            the entire inline style. Use CSS property syntax.",
+        after_long_help = "\
+EXAMPLES:
+  # Set inline style
+  chrome-cli dom set-style s3 \"color: red; font-size: 24px\"
+
+  # Set style by CSS selector
+  chrome-cli dom set-style css:h1 \"display: none\""
+    )]
+    SetStyle(DomSetStyleArgs),
+
+    /// Get the parent element
+    #[command(
+        long_about = "Navigate to the parent element of a DOM node. Returns the parent's \
+            node ID, tag name, attributes, and text content.",
+        after_long_help = "\
+EXAMPLES:
+  # Get parent of a UID
+  chrome-cli dom parent s3
+
+  # Get parent by CSS selector
+  chrome-cli dom parent css:span.label"
+    )]
+    Parent(DomNodeIdArgs),
+
+    /// List direct child elements
+    #[command(
+        long_about = "List the direct child elements (element nodes only, nodeType 1) of a \
+            DOM node. Returns a JSON array of child elements.",
+        after_long_help = "\
+EXAMPLES:
+  # List children by UID
+  chrome-cli dom children s3
+
+  # List children by CSS selector
+  chrome-cli dom children css:div.container"
+    )]
+    Children(DomNodeIdArgs),
+
+    /// List sibling elements
+    #[command(
+        long_about = "List the sibling elements of a DOM node (other children of the same \
+            parent, excluding the target element itself).",
+        after_long_help = "\
+EXAMPLES:
+  # List siblings by UID
+  chrome-cli dom siblings s3
+
+  # List siblings by CSS selector
+  chrome-cli dom siblings css:li.active"
+    )]
+    Siblings(DomNodeIdArgs),
+
+    /// Pretty-print the DOM tree
+    #[command(
+        long_about = "Display the DOM tree as indented plain text. By default shows the full \
+            document tree. Use --depth to limit traversal depth and --root to start from a \
+            specific element.",
+        after_long_help = "\
+EXAMPLES:
+  # Show the full DOM tree
+  chrome-cli dom tree
+
+  # Limit depth to 3 levels
+  chrome-cli dom tree --depth 3
+
+  # Show tree from a specific element
+  chrome-cli dom tree --root css:div.content"
+    )]
+    Tree(DomTreeArgs),
+}
+
+/// Arguments for `dom select`.
+#[derive(Args)]
+pub struct DomSelectArgs {
+    /// CSS selector or XPath expression to query
+    pub selector: String,
+
+    /// Interpret the selector as an XPath expression instead of CSS
+    #[arg(long)]
+    pub xpath: bool,
+}
+
+/// Arguments for `dom get-attribute`.
+#[derive(Args)]
+pub struct DomGetAttributeArgs {
+    /// Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+    pub node_id: String,
+
+    /// Attribute name to read
+    pub attribute: String,
+}
+
+/// Arguments for `dom set-attribute`.
+#[derive(Args)]
+pub struct DomSetAttributeArgs {
+    /// Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+    pub node_id: String,
+
+    /// Attribute name to set
+    pub attribute: String,
+
+    /// Attribute value
+    pub value: String,
+}
+
+/// Arguments for `dom get-style`.
+#[derive(Args)]
+pub struct DomGetStyleArgs {
+    /// Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+    pub node_id: String,
+
+    /// CSS property name (omit for all computed styles)
+    pub property: Option<String>,
+}
+
+/// Arguments for `dom set-style`.
+#[derive(Args)]
+pub struct DomSetStyleArgs {
+    /// Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+    pub node_id: String,
+
+    /// CSS style text (e.g. "color: red; font-size: 24px")
+    pub style: String,
+}
+
+/// Arguments for `dom set-text`.
+#[derive(Args)]
+pub struct DomSetTextArgs {
+    /// Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+    pub node_id: String,
+
+    /// Text content to set
+    pub text: String,
+}
+
+/// Shared arguments for dom subcommands that take only a node ID.
+///
+/// Used by get-text, get-html, remove, parent, children, siblings.
+#[derive(Args)]
+pub struct DomNodeIdArgs {
+    /// Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+    pub node_id: String,
+}
+
+/// Arguments for `dom tree`.
+#[derive(Args)]
+pub struct DomTreeArgs {
+    /// Maximum tree depth to display
+    #[arg(long)]
+    pub depth: Option<u32>,
+
+    /// Start the tree from a specific element (node ID, UID, or CSS selector)
+    #[arg(long)]
+    pub root: Option<String>,
 }
 
 /// Arguments for the `emulate` subcommand group.

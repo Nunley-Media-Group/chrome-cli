@@ -154,23 +154,32 @@ fn all_examples() -> Vec<CommandGroupSummary> {
         },
         CommandGroupSummary {
             command: "dom".into(),
-            description: "DOM inspection and manipulation (not yet implemented)".into(),
+            description: "DOM inspection and manipulation".into(),
             examples: vec![
                 ExampleEntry {
-                    cmd: "chrome-cli page snapshot".into(),
-                    description: "Use page snapshot as an alternative to DOM queries".into(),
+                    cmd: "chrome-cli dom select \"h1\"".into(),
+                    description: "Select elements by CSS selector".into(),
                     flags: None,
                 },
                 ExampleEntry {
-                    cmd: "chrome-cli js exec \"document.querySelector('#myId').textContent\""
-                        .into(),
-                    description: "Use js exec to query DOM elements".into(),
+                    cmd: "chrome-cli dom select \"//a[@href]\" --xpath".into(),
+                    description: "Select elements by XPath expression".into(),
+                    flags: Some(vec!["--xpath".into()]),
+                },
+                ExampleEntry {
+                    cmd: "chrome-cli dom get-attribute s3 href".into(),
+                    description: "Get an element's attribute by UID".into(),
                     flags: None,
                 },
                 ExampleEntry {
-                    cmd: "chrome-cli js exec \"document.querySelectorAll('a').length\"".into(),
-                    description: "Count elements matching a selector".into(),
+                    cmd: "chrome-cli dom get-text css:h1".into(),
+                    description: "Get the text content of an element".into(),
                     flags: None,
+                },
+                ExampleEntry {
+                    cmd: "chrome-cli dom tree --depth 3".into(),
+                    description: "View the DOM tree with limited depth".into(),
+                    flags: Some(vec!["--depth".into()]),
                 },
             ],
         },

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-19
+
+### Added
+
+- DOM command group with 13 subcommands for element queries and manipulation: select (CSS/XPath), get-attribute, get-text, get-html, set-attribute, set-text, remove, get-style, set-style, parent, children, siblings, and tree (#149)
+
 ## [1.1.0] - 2026-02-19
 
 ### Changed

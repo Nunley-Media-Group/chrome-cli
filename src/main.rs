@@ -2,6 +2,7 @@ mod capabilities;
 mod cli;
 mod console;
 mod dialog;
+mod dom;
 mod emulate;
 mod examples;
 mod form;
@@ -88,7 +89,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Tabs(args) => tabs::execute_tabs(&global, args).await,
         Command::Navigate(args) => navigate::execute_navigate(&global, args).await,
         Command::Page(args) => page::execute_page(&global, args).await,
-        Command::Dom => Err(AppError::not_implemented("dom")),
+        Command::Dom(args) => dom::execute_dom(&global, args).await,
         Command::Js(args) => js::execute_js(&global, args).await,
         Command::Console(args) => console::execute_console(&global, args).await,
         Command::Network(args) => network::execute_network(&global, args).await,
