@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-02-19
+
+### Fixed
+
+- Navigate back/forward timeout on SPA same-document history navigations — listen for both `Page.frameNavigated` and `Page.navigatedWithinDocument` CDP events using `tokio::select!` (#144)
+
 ## [1.2.0] - 2026-02-19
 
 ### Added
