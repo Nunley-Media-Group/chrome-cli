@@ -3932,4 +3932,14 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // Navigate back/forward/reload global --timeout fix (issue #145) — all scenarios require
+    // a running Chrome instance. The feature file documents acceptance scenarios; the fix is
+    // validated by the code change in navigate.rs (three call sites).
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/145-fix-navigate-timeout.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }

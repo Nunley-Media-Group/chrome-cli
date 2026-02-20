@@ -248,7 +248,12 @@ async fn execute_back(global: &GlobalOpts) -> Result<(), AppError> {
         .await?;
 
     // Wait for navigation (cross-document or same-document)
-    wait_for_history_navigation(nav_rx, within_doc_rx, DEFAULT_NAVIGATE_TIMEOUT_MS).await?;
+    wait_for_history_navigation(
+        nav_rx,
+        within_doc_rx,
+        global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS),
+    )
+    .await?;
 
     let (page_url, page_title) = get_page_info(&managed).await?;
 
@@ -310,7 +315,12 @@ async fn execute_forward(global: &GlobalOpts) -> Result<(), AppError> {
         .await?;
 
     // Wait for navigation (cross-document or same-document)
-    wait_for_history_navigation(nav_rx, within_doc_rx, DEFAULT_NAVIGATE_TIMEOUT_MS).await?;
+    wait_for_history_navigation(
+        nav_rx,
+        within_doc_rx,
+        global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS),
+    )
+    .await?;
 
     let (page_url, page_title) = get_page_info(&managed).await?;
 
@@ -339,7 +349,12 @@ async fn execute_reload(global: &GlobalOpts, args: &NavigateReloadArgs) -> Resul
     let params = serde_json::json!({ "ignoreCache": args.ignore_cache });
     managed.send_command("Page.reload", Some(params)).await?;
 
-    wait_for_event(load_rx, DEFAULT_NAVIGATE_TIMEOUT_MS, "load").await?;
+    wait_for_event(
+        load_rx,
+        global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS),
+        "load",
+    )
+    .await?;
 
     let (page_url, page_title) = get_page_info(&managed).await?;
 
