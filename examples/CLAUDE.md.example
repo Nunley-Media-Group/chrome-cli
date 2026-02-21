@@ -1,6 +1,6 @@
 # Browser Automation
 
-This project uses [agentchrome](https://github.com/Nunley-Media-Group/AgentChrome) for browser automation. agentchrome is a native CLI tool that controls Chrome via the DevTools Protocol.
+This project uses [AgentChrome](https://github.com/Nunley-Media-Group/AgentChrome) for browser automation. AgentChrome is a native CLI tool that controls Chrome via the DevTools Protocol.
 
 ## Quick Start
 

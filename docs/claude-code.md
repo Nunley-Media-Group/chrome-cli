@@ -1,11 +1,11 @@
 # Claude Code Integration Guide
 
-Use agentchrome to give Claude Code browser automation capabilities — navigate pages,
+Use AgentChrome to give Claude Code browser automation capabilities — navigate pages,
 inspect content, fill forms, take screenshots, and debug web apps, all from the CLI.
 
 ## Prerequisites
 
-- **agentchrome** installed and on your `PATH` ([Installation](../README.md#installation))
+- **AgentChrome** installed and on your `PATH` ([Installation](../README.md#installation))
 - **Chrome or Chromium** installed (any channel: stable, beta, canary, dev)
 
 Verify your setup:
@@ -23,24 +23,24 @@ agentchrome examples navigate
 
 ## Discovery & Setup
 
-Claude Code discovers agentchrome through three mechanisms:
+Claude Code discovers AgentChrome through three mechanisms:
 
-1. **PATH lookup** — Claude Code runs shell commands, so agentchrome must be on `PATH`.
+1. **PATH lookup** — Claude Code runs shell commands, so `agentchrome` must be on `PATH`.
 2. **`--help` text** — Every command and subcommand supports `--help` for usage details.
 3. **`capabilities` command** — `agentchrome capabilities` outputs a complete JSON manifest of all commands, flags, arguments, and exit codes. This is the fastest way for an AI agent to learn the full CLI surface.
 4. **`examples` command** — `agentchrome examples <command>` shows practical usage examples for each command group.
 
 ### Setup checklist
 
-1. Install agentchrome (`cargo install agentchrome` or download a release binary)
+1. Install AgentChrome (`cargo install agentchrome` or download a release binary)
 2. Verify: `agentchrome --help`
 3. Launch Chrome: `agentchrome connect --launch --headless`
 4. Test the connection: `agentchrome page text`
-5. Add agentchrome to your project's `CLAUDE.md` (see [CLAUDE.md Template](#claudemd-template) below)
+5. Add AgentChrome to your project's `CLAUDE.md` (see [CLAUDE.md Template](#claudemd-template) below)
 
 ## CLAUDE.md Template
 
-Drop the file [`examples/CLAUDE.md.example`](../examples/CLAUDE.md.example) into your project root as `CLAUDE.md` (or append its contents to an existing one). This teaches Claude Code how to use agentchrome for browser automation in your project.
+Drop the file [`examples/CLAUDE.md.example`](../examples/CLAUDE.md.example) into your project root as `CLAUDE.md` (or append its contents to an existing one). This teaches Claude Code how to use AgentChrome for browser automation in your project.
 
 Customize the template:
 - Replace `http://localhost:3000` with your dev server URL
@@ -187,7 +187,7 @@ agentchrome page snapshot
 
 ### Exit Codes
 
-agentchrome uses structured exit codes so agents can programmatically detect error types:
+AgentChrome uses structured exit codes so agents can programmatically detect error types:
 
 | Exit Code | Name | Description | Recovery Strategy |
 |-----------|------|-------------|-------------------|
@@ -245,7 +245,7 @@ Errors are written to stderr. In JSON output mode (`--json`), error details are 
 
 ## Example Conversation
 
-Below is a realistic multi-turn example of Claude Code using agentchrome to debug a web application that has a broken login form.
+Below is a realistic multi-turn example of Claude Code using AgentChrome to debug a web application that has a broken login form.
 
 ---
 

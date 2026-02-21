@@ -1,33 +1,91 @@
-# agentchrome
+# AgentChrome
 
-**A CLI tool for browser automation via the Chrome DevTools Protocol.**
+**Give your AI agent browser superpowers.**
 
 ![CI](https://github.com/Nunley-Media-Group/AgentChrome/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)
 <!-- ![Crates.io](https://img.shields.io/crates/v/agentchrome) TODO: uncomment when published -->
 
-A fast, standalone command-line tool for automating Chrome and Chromium browsers. No Node.js, no Python — just a single native binary that speaks the Chrome DevTools Protocol (CDP) directly over WebSocket.
+AgentChrome is a native CLI tool that lets AI coding agents — especially [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — control Chrome through the DevTools Protocol. Every command outputs structured JSON, uses accessibility-tree UIDs for element targeting, and returns typed exit codes for programmatic error handling. No Node.js, no Python, no MCP server — just a fast Rust binary your agent calls from the shell.
 
-## Features
+## Give Claude Code Browser Powers in 2 Minutes
+
+**1. Install AgentChrome** (see [Installation](#installation) for more options)
+
+```sh
+cargo install agentchrome
+```
+
+**2. Drop the CLAUDE.md template into your project**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Nunley-Media-Group/AgentChrome/main/examples/CLAUDE.md.example > CLAUDE.md
+```
+
+**3. Ask Claude Code to use the browser**
+
+> "Check if the login form at localhost:3000 works correctly"
+
+Behind the scenes, Claude Code will run commands like:
+
+```sh
+agentchrome connect --launch --headless
+agentchrome navigate http://localhost:3000/login --wait-until networkidle
+agentchrome page snapshot
+agentchrome form fill-many '[{"uid": "s2", "value": "test@example.com"}, {"uid": "s3", "value": "password123"}]'
+agentchrome interact click s4 --include-snapshot
+agentchrome console read --errors-only
+```
+
+See the full [Claude Code Integration Guide](docs/claude-code.md) for workflows, efficiency tips, and error handling patterns.
+
+## Why AgentChrome?
+
+### Built for AI Agents
+
+- **JSON output by default** — every command returns structured, parseable output
+- **Accessibility tree snapshots with UIDs** — `page snapshot` assigns stable UIDs (e.g., `s1`, `s5`) to interactive elements for reliable targeting
+- **Structured exit codes** — 0 (success), 1 (general error), 2 (connection error), 3 (target error), 4 (timeout), 5 (protocol error) for programmatic error handling
+- **Self-documenting CLI** — `agentchrome capabilities` outputs a machine-readable JSON manifest of every command, flag, and argument
+- **`--include-snapshot` on interactions** — get the updated accessibility tree in the same response as a click or form fill, cutting round-trips in half
+
+<details>
+<summary><strong>Full Browser Control</strong></summary>
 
 - **Tab management** — list, create, close, and activate browser tabs
-- **URL navigation** — navigate to URLs, go back/forward, reload, and manage history
-- **Page inspection** — capture accessibility trees, extract text, find elements
-- **Screenshots** — full-page and viewport screenshots to file or stdout
-- **JavaScript execution** — run scripts in the page context, return results as JSON
-- **Form filling** — fill inputs, select options, and submit forms by accessibility UID
-- **Network monitoring** — follow requests in real time, intercept and block URLs
+- **URL navigation** — navigate to URLs, go back/forward, reload with wait strategies
+- **Page inspection** — accessibility trees, text extraction, element search
+- **Screenshots** — full-page, viewport, element, or region captures
+- **JavaScript execution** — run scripts in page context, return results as JSON
+- **User interactions** — click, hover, drag, type, press keys, scroll
+- **Form filling** — fill inputs, select options, upload files, batch fill with `fill-many`
+- **Network monitoring** — list, inspect, and follow requests in real time
 - **Console capture** — read and follow console messages with type filtering
-- **Performance tracing** — start/stop Chrome trace recordings, collect metrics
-- **Device emulation** — emulate mobile devices, throttle network/CPU, set geolocation
+- **Device emulation** — mobile devices, network/CPU throttling, geolocation, color scheme
+- **Performance tracing** — record traces, analyze insights, measure Core Web Vitals
 - **Dialog handling** — accept, dismiss, or respond to alert/confirm/prompt dialogs
-- **Shell integration** — completion scripts for Bash, Zsh, Fish, PowerShell, and Elvish
-- **Man pages** — built-in man page viewer via `agentchrome man`
 
-### How does agentchrome compare?
+</details>
 
-| | agentchrome | Puppeteer / Playwright | Chrome DevTools MCP |
+## How It Works
+
+```mermaid
+graph LR
+    subgraph AgentChrome
+        A[CLI Layer<br/>clap] --> B[Command<br/>Dispatch] --> C[CDP Client<br/>WebSocket]
+    end
+    C -->|JSON-RPC| D[Chrome Browser<br/>DevTools Protocol]
+```
+
+AgentChrome communicates with Chrome using the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) (CDP) over WebSocket. Run `agentchrome connect --launch --headless` to start a session — subsequent commands reuse the connection automatically. Native Rust binary, <50ms startup, <10MB on disk.
+
+## Comparison
+
+How AgentChrome stacks up for giving AI agents browser access:
+
+| | AgentChrome | Puppeteer / Playwright | Chrome DevTools MCP |
 |---|---|---|---|
+| **AI agent integration** | CLI — works with any agent that runs shell commands | Requires JavaScript wrapper | MCP protocol (specific client required) |
 | **Runtime** | No Node.js — native Rust binary | Node.js | Node.js |
 | **Install** | Single binary, `cargo install` | `npm install` | `npx` |
 | **Interface** | CLI / shell scripts | JavaScript API | MCP protocol |
@@ -36,6 +94,12 @@ A fast, standalone command-line tool for automating Chrome and Chromium browsers
 | **Shell pipelines** | First-class (`| jq`, `| grep`) | Requires wrapper scripts | Not designed for CLI |
 
 ## Installation
+
+### Cargo install
+
+```sh
+cargo install agentchrome
+```
 
 ### Pre-built binaries
 
@@ -64,20 +128,17 @@ curl -fsSL https://github.com/Nunley-Media-Group/AgentChrome/releases/latest/dow
 
 </details>
 
-### Cargo install
-
-```sh
-cargo install agentchrome
-```
-
-### Build from source
+<details>
+<summary>Build from source</summary>
 
 ```sh
 git clone https://github.com/Nunley-Media-Group/AgentChrome.git
-cd agentchrome
+cd AgentChrome
 cargo build --release
 # Binary is at target/release/agentchrome
 ```
+
+</details>
 
 ### Supported platforms
 
@@ -89,9 +150,11 @@ cargo build --release
 | Linux (ARM64) | `aarch64-unknown-linux-gnu` | `.tar.gz` |
 | Windows (x86_64) | `x86_64-pc-windows-msvc` | `.zip` |
 
-## Quick Start
+## CLI Quick Start
 
-**1. Install agentchrome** (see [Installation](#installation) above)
+For shell scripting and manual use:
+
+**1. Install AgentChrome** (see [Installation](#installation) above)
 
 **2. Start Chrome with remote debugging enabled:**
 
@@ -102,7 +165,7 @@ cargo build --release
 # Linux
 google-chrome --remote-debugging-port=9222
 
-# Or launch headless Chrome directly via agentchrome:
+# Or launch headless Chrome directly via AgentChrome:
 agentchrome connect --launch --headless
 ```
 
@@ -124,95 +187,6 @@ agentchrome navigate https://example.com
 agentchrome page snapshot
 ```
 
-## Usage Examples
-
-<details>
-<summary><strong>Taking a screenshot</strong></summary>
-
-```sh
-# Viewport screenshot
-agentchrome page screenshot --file screenshot.png
-
-# Full-page screenshot
-agentchrome page screenshot --full-page --file full-page.png
-```
-
-</details>
-
-<details>
-<summary><strong>Extracting page text</strong></summary>
-
-```sh
-# Get the visible text content of the page
-agentchrome page text
-```
-
-</details>
-
-<details>
-<summary><strong>Executing JavaScript</strong></summary>
-
-```sh
-# Run a JavaScript expression and get the result
-agentchrome js exec "document.title"
-
-# Run JavaScript from a file
-agentchrome js exec --file script.js
-```
-
-</details>
-
-<details>
-<summary><strong>Filling forms</strong></summary>
-
-```sh
-# First, capture the accessibility tree to find UIDs
-agentchrome page snapshot
-
-# Fill a single field by accessibility UID
-agentchrome form fill s5 "hello@example.com"
-
-# Fill multiple fields at once
-agentchrome form fill-many s5="hello@example.com" s8="MyPassword123"
-
-# Submit a form
-agentchrome form submit s10
-```
-
-</details>
-
-<details>
-<summary><strong>Monitoring network requests</strong></summary>
-
-```sh
-# Follow network requests in real time
-agentchrome network follow --timeout 5000
-
-# Block specific URLs
-agentchrome network block "*.ads.example.com"
-```
-
-</details>
-
-<details>
-<summary><strong>Performance tracing</strong></summary>
-
-```sh
-# Record a trace for 5 seconds
-agentchrome perf record --duration 5000
-
-# Record until Ctrl+C, with page reload
-agentchrome perf record --reload
-
-# Save to a specific file
-agentchrome perf record --duration 5000 --file trace.json
-
-# Get Core Web Vitals
-agentchrome perf vitals
-```
-
-</details>
-
 ## Command Reference
 
 | Command | Description |
@@ -232,49 +206,77 @@ agentchrome perf vitals
 | `dialog` | Browser dialog handling (alert, confirm, prompt, beforeunload) |
 | `config` | Configuration file management (show, init, path) |
 | `completions` | Generate shell completion scripts |
-| `man` | Display man pages for agentchrome commands |
+| `man` | Display man pages for AgentChrome commands |
 
-Run `agentchrome <command> --help` for detailed usage of any command, or `agentchrome man <command>` to view its man page.
+Run `agentchrome <command> --help` for detailed usage, `agentchrome examples <command>` for practical examples, or `agentchrome capabilities` for the full machine-readable command manifest.
 
-## Architecture
+## Usage Examples
 
-```
-┌──────────────────────────────────────────────────────┐
-│                    agentchrome                         │
-│                                                      │
-│  ┌────────────┐   ┌─────────────┐   ┌────────────┐  │
-│  │  CLI Layer  │──▶│  Command    │──▶│ CDP Client │  │
-│  │  (clap)     │   │  Dispatch   │   │ (WebSocket)│  │
-│  └────────────┘   └─────────────┘   └─────┬──────┘  │
-│                                            │         │
-└────────────────────────────────────────────┼─────────┘
-                                             │ JSON-RPC
-                                             ▼
-                                    ┌─────────────────┐
-                                    │  Chrome Browser  │
-                                    │  (DevTools       │
-                                    │   Protocol)      │
-                                    └─────────────────┘
+<details>
+<summary><strong>Page inspection</strong></summary>
+
+```sh
+# Get the accessibility tree with element UIDs
+agentchrome page snapshot
+
+# Extract visible text content
+agentchrome page text
+
+# Find elements by text or role
+agentchrome page find "Submit" --role button
 ```
 
-**How it works:** agentchrome communicates with Chrome using the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) (CDP) over a WebSocket connection. Commands are sent as JSON-RPC messages; responses and events flow back on the same connection.
+</details>
 
-**Session management:** When you run `agentchrome connect`, a session file is created with the WebSocket URL. Subsequent commands reuse this connection automatically. The session persists until you run `agentchrome connect disconnect` or Chrome exits.
+<details>
+<summary><strong>Form filling</strong></summary>
 
-**Performance:** agentchrome is a native Rust binary with sub-50ms startup time. There is no interpreter, no runtime, and no JIT warmup — it goes straight from your shell to Chrome.
+```sh
+# Snapshot to discover form field UIDs
+agentchrome page snapshot
 
-## Claude Code Integration
+# Fill multiple fields at once (returns updated snapshot)
+agentchrome form fill-many --include-snapshot \
+  '[{"uid": "s5", "value": "hello@example.com"}, {"uid": "s8", "value": "MyPassword123"}]'
 
-agentchrome is designed for AI agent consumption. See the full
-[Claude Code Integration Guide](docs/claude-code.md) for discovery mechanisms,
-common workflows, best practices, and error handling patterns.
+# Or fill fields individually
+agentchrome form fill s5 "hello@example.com"
 
-Drop the [CLAUDE.md template](examples/CLAUDE.md.example) into your project to
-give Claude Code browser automation capabilities out of the box.
+# Click the submit button
+agentchrome interact click s10
+```
+
+</details>
+
+<details>
+<summary><strong>Screenshots</strong></summary>
+
+```sh
+# Viewport screenshot
+agentchrome page screenshot --file screenshot.png
+
+# Full-page screenshot
+agentchrome page screenshot --full-page --file full-page.png
+```
+
+</details>
+
+<details>
+<summary><strong>JavaScript execution</strong></summary>
+
+```sh
+# Run a JavaScript expression and get the result
+agentchrome js exec "document.title"
+
+# Run JavaScript from a file
+agentchrome js exec --file script.js
+```
+
+</details>
 
 ## Related Projects
 
-- **[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp)** — The official Chrome DevTools MCP server by Google, providing browser automation for AI coding agents via the Model Context Protocol. If you're looking for MCP-based browser control rather than a CLI tool, check it out.
+- **[Chrome DevTools MCP](https://github.com/anthropics/anthropic-quickstarts/tree/main/browser-automation-mcp)** — MCP server for browser automation via the Model Context Protocol. If you need MCP-based browser control rather than a CLI tool, check it out.
 
 ## Contributing
 
@@ -290,7 +292,7 @@ All contributions must follow the [NMG-SDLC](https://github.com/Nunley-Media-Gro
 
 ```sh
 git clone https://github.com/Nunley-Media-Group/AgentChrome.git
-cd agentchrome
+cd AgentChrome
 
 # Build
 cargo build
