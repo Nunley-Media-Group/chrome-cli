@@ -456,6 +456,24 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn element_target_not_found(target: &str) -> Self {
+        Self {
+            message: format!("Element '{target}' not found in DOM"),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn css_selector_not_found(selector: &str) -> Self {
+        Self {
+            message: format!("No element matches selector '{selector}'"),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
     pub fn stale_uid(uid: &str) -> Self {
         Self {
             message: format!(

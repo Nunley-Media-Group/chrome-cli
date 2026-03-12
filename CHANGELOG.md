@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-03-11
+
+### Added
+
+- Add `page element` subcommand for targeted element state queries by UID or CSS selector (#165)
+
 ## [1.5.0] - 2026-02-27
 
 ### Added

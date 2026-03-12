@@ -1,11 +1,11 @@
 {
-  "currentStep": 6,
-  "lastCompletedStep": 5,
-  "currentIssue": 147,
-  "currentBranch": "147-add-form-submit-subcommand",
-  "featureName": "feature-wait-until-flag-interact-click-click-at-spa-aware-waiting",
-  "lastTransitionAt": "2026-02-27T06:28:43.525Z",
+  "currentStep": 0,
+  "lastCompletedStep": 0,
+  "currentIssue": null,
+  "currentBranch": null,
+  "featureName": null,
+  "lastTransitionAt": null,
   "retries": {},
-  "runnerPid": 20994,
-  "prNumber": 129
+  "runnerPid": null,
+  "prNumber": null
 }

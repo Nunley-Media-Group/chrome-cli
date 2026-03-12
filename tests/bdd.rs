@@ -3456,6 +3456,14 @@ const FORM_SUBMIT_TESTABLE_SCENARIOS: &[&str] = &[
     "Form help lists submit subcommand",
 ];
 
+/// Page element BDD scenarios that can be tested without a running Chrome instance.
+/// These are pure CLI argument validation and help text scenarios.
+const PAGE_ELEMENT_TESTABLE_SCENARIOS: &[&str] = &[
+    "Element help displays usage",
+    "Element without required target argument",
+    "Page help lists element subcommand",
+];
+
 /// Emulate BDD scenarios that can be tested without a running Chrome instance.
 /// These are pure CLI argument validation and help text scenarios.
 const EMULATE_TESTABLE_SCENARIOS: &[&str] = &[
@@ -3565,9 +3573,9 @@ struct PageSourceWorld {
 
 #[given("agentchrome is built")]
 fn page_source_agentchrome_is_built(world: &mut PageSourceWorld) {
-    let path = project_root().join("src/page.rs");
+    let path = project_root().join("src/page/screenshot.rs");
     world.source_content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("Failed to read src/page.rs: {e}"));
+        .unwrap_or_else(|e| panic!("Failed to read src/page/screenshot.rs: {e}"));
 }
 
 #[when("I check the resolve_uid_clip implementation")]
@@ -3987,6 +3995,18 @@ async fn main() {
             "tests/features/wait-until-click.feature",
             |_feature, _rule, scenario| {
                 WAIT_UNTIL_CLICK_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Page element command (issue #165) — only CLI argument validation and help text scenarios
+    // can be tested without Chrome. Scenarios requiring actual element queries need a running
+    // Chrome instance with snapshot state.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/page-element.feature",
+            |_feature, _rule, scenario| {
+                PAGE_ELEMENT_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

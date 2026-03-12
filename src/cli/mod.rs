@@ -848,6 +848,24 @@ EXAMPLES:
   agentchrome page resize 375x667"
     )]
     Resize(PageResizeArgs),
+
+    /// Query a single element's properties by UID or CSS selector
+    #[command(
+        long_about = "Query a single element's state by accessibility UID (from 'page snapshot') \
+            or CSS selector. Returns role, name, tag name, bounding box, accessibility properties, \
+            and viewport visibility as JSON.",
+        after_long_help = "\
+EXAMPLES:
+  # Query by UID
+  agentchrome page element s10
+
+  # Query by CSS selector
+  agentchrome page element \"css:#checkout\"
+
+  # Plain text output
+  agentchrome page element s10 --plain"
+    )]
+    Element(PageElementArgs),
 }
 
 /// Image format for screenshots.
@@ -1917,6 +1935,13 @@ pub struct NetworkFollowArgs {
 pub struct PageResizeArgs {
     /// Viewport size as WIDTHxHEIGHT (e.g. 1280x720)
     pub size: String,
+}
+
+/// Arguments for `page element`.
+#[derive(Args)]
+pub struct PageElementArgs {
+    /// Element target: UID (s1, s2, ...) or CSS selector (css:#id, css:.class)
+    pub target: String,
 }
 
 /// Arguments for the `dom` subcommand group.

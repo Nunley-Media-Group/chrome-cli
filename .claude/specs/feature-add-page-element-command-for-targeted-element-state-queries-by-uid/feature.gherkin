@@ -1,0 +1,82 @@
+# File: tests/features/page-element.feature
+#
+# Generated from: .claude/specs/feature-add-page-element-command-for-targeted-element-state-queries-by-uid/requirements.md
+# Issue: #165
+
+Feature: Page element command
+  As an AI agent making decisions based on element state
+  I want to quickly query a specific element's properties by its accessibility UID
+  So that I can check element visibility, enabled state, or bounding box without taking a full page snapshot
+
+  # --- Happy Path ---
+
+  Scenario: Query element properties by UID
+    Given a connected Chrome session with a fresh accessibility snapshot containing interactive elements
+    When I run the page element command with a valid UID target
+    Then the output is valid JSON containing "role" as a string
+    And the output contains "name" as a string
+    And the output contains "tagName" as a string
+    And the output contains "boundingBox" with numeric "x", "y", "width", and "height" fields
+    And the output contains "properties" with boolean "enabled" and "focused" fields
+    And the output contains "inViewport" as a boolean
+    And the exit code is 0
+
+  # --- Viewport Visibility ---
+
+  Scenario: Query reports viewport visibility for off-screen element
+    Given a connected Chrome session with a snapshot containing an element scrolled off-screen
+    When I run the page element command with the off-screen element's UID
+    Then the output contains "inViewport" set to false
+    And the "boundingBox" reflects the element's actual page position
+    And the exit code is 0
+
+  # --- Error: Element Gone from DOM ---
+
+  Scenario: Query element that no longer exists in DOM
+    Given a connected Chrome session where the page has changed since the last snapshot
+    When I run the page element command with a UID whose DOM element no longer exists
+    Then stderr contains a JSON error about element not found
+    And the exit code is 3
+
+  # --- CSS Selector ---
+
+  Scenario: Query element by CSS selector
+    Given a connected Chrome session on a page with identifiable elements
+    When I run the page element command with a CSS selector target
+    Then the output is valid JSON containing "role", "name", "tagName", "boundingBox", "properties", and "inViewport"
+    And the exit code is 0
+
+  # --- Error: No Snapshot State ---
+
+  Scenario: Query when no snapshot state exists
+    Given a connected Chrome session where no snapshot has been taken
+    When I run the page element command with a UID target
+    Then stderr contains a JSON error about missing snapshot state
+    And the exit code is 1
+
+  # --- Null Properties ---
+
+  Scenario: Non-applicable properties appear as null
+    Given a connected Chrome session with a snapshot containing a link element
+    When I run the page element command with the link element's UID
+    Then the output "properties.checked" is null
+    And the output "properties.expanded" is null
+    And the output "properties.enabled" is a boolean value
+
+  # --- Error: CSS Selector Not Found ---
+
+  Scenario: CSS selector element not found
+    Given a connected Chrome session on a page
+    When I run the page element command with a CSS selector that matches no elements
+    Then stderr contains a JSON error about no matching element
+    And the exit code is 3
+
+  # --- Plain Text Output ---
+
+  Scenario: Plain text output mode
+    Given a connected Chrome session with a fresh accessibility snapshot containing interactive elements
+    When I run the page element command with a valid UID target and the plain flag
+    Then the output is human-readable text containing the element's role and name
+    And the output contains bounding box coordinates
+    And the output contains property values
+    And the exit code is 0
