@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-03-11
+
+### Added
+
+- Add `cookie` command group with `list`, `set`, `delete`, and `clear` subcommands for full cookie management via CDP (#164)
+
 ## [1.6.0] - 2026-03-11
 
 ### Added

@@ -413,6 +413,37 @@ EXAMPLES:
     )]
     Perf(PerfArgs),
 
+    /// Browser cookie management (list, set, delete, clear)
+    #[command(
+        long_about = "Manage browser cookies via the Chrome DevTools Protocol. List cookies \
+            for the current page or all cookies, set new cookies with optional flags, delete \
+            specific cookies by name, or clear all cookies. Provides full access to HttpOnly \
+            and Secure cookies that are not accessible via document.cookie.",
+        after_long_help = "\
+EXAMPLES:
+  # List cookies for the current page
+  agentchrome cookie list
+
+  # List all cookies (not scoped to current URL)
+  agentchrome cookie list --all
+
+  # List cookies filtered by domain
+  agentchrome cookie list --domain example.com
+
+  # Set a cookie
+  agentchrome cookie set session_id abc123 --domain example.com
+
+  # Set a secure, HttpOnly cookie with expiry
+  agentchrome cookie set token xyz --domain example.com --secure --http-only --same-site Strict --expires 1735689600
+
+  # Delete a specific cookie
+  agentchrome cookie delete session_id --domain example.com
+
+  # Clear all cookies
+  agentchrome cookie clear"
+    )]
+    Cookie(CookieArgs),
+
     /// Browser dialog handling (alert, confirm, prompt, beforeunload)
     #[command(
         long_about = "Detect and handle browser JavaScript dialogs (alert, confirm, prompt, \
@@ -1118,6 +1149,134 @@ pub struct JsExecArgs {
     /// Truncate result output exceeding this size in bytes
     #[arg(long)]
     pub max_size: Option<usize>,
+}
+
+/// Arguments for the `cookie` subcommand group.
+#[derive(Args)]
+pub struct CookieArgs {
+    #[command(subcommand)]
+    pub command: CookieCommand,
+}
+
+/// Cookie subcommands.
+#[derive(Subcommand)]
+pub enum CookieCommand {
+    /// List cookies for the current page or all cookies
+    #[command(
+        long_about = "List cookies associated with the current page. By default, returns cookies \
+            scoped to the current page's URLs. Use --all to list all browser cookies regardless \
+            of URL. Use --domain to filter by a specific domain.",
+        after_long_help = "\
+EXAMPLES:
+  # List cookies for the current page
+  agentchrome cookie list
+
+  # List all cookies
+  agentchrome cookie list --all
+
+  # Filter by domain
+  agentchrome cookie list --domain example.com"
+    )]
+    List(CookieListArgs),
+
+    /// Set a browser cookie
+    #[command(
+        long_about = "Set a browser cookie with the given name and value. The --domain flag is \
+            strongly recommended to scope the cookie correctly. Additional flags control path, \
+            security attributes, SameSite policy, and expiry time.",
+        after_long_help = "\
+EXAMPLES:
+  # Set a basic cookie
+  agentchrome cookie set session_id abc123 --domain example.com
+
+  # Set a secure, HttpOnly cookie
+  agentchrome cookie set token xyz --domain example.com --secure --http-only
+
+  # Set a cookie with SameSite and expiry
+  agentchrome cookie set prefs dark --domain example.com --same-site Lax --expires 1735689600"
+    )]
+    Set(CookieSetArgs),
+
+    /// Delete a specific cookie by name
+    #[command(
+        long_about = "Delete a cookie by name. Use --domain to scope the deletion to a specific \
+            domain when multiple cookies share the same name across different domains.",
+        after_long_help = "\
+EXAMPLES:
+  # Delete a cookie by name
+  agentchrome cookie delete session_id
+
+  # Delete a cookie scoped to a specific domain
+  agentchrome cookie delete session_id --domain example.com"
+    )]
+    Delete(CookieDeleteArgs),
+
+    /// Clear all cookies
+    #[command(
+        long_about = "Remove all browser cookies. Returns the number of cookies that were cleared.",
+        after_long_help = "\
+EXAMPLES:
+  # Clear all cookies
+  agentchrome cookie clear"
+    )]
+    Clear,
+}
+
+/// Arguments for `cookie list`.
+#[derive(Args)]
+pub struct CookieListArgs {
+    /// Filter cookies by domain
+    #[arg(long)]
+    pub domain: Option<String>,
+
+    /// List all cookies (not scoped to current URL)
+    #[arg(long)]
+    pub all: bool,
+}
+
+/// Arguments for `cookie set`.
+#[derive(Args)]
+pub struct CookieSetArgs {
+    /// Cookie name
+    pub name: String,
+
+    /// Cookie value
+    pub value: String,
+
+    /// Cookie domain (strongly recommended)
+    #[arg(long)]
+    pub domain: Option<String>,
+
+    /// Cookie path
+    #[arg(long, default_value = "/")]
+    pub path: String,
+
+    /// Set cookie as Secure (HTTPS only)
+    #[arg(long)]
+    pub secure: bool,
+
+    /// Set cookie as HttpOnly (not accessible via JavaScript)
+    #[arg(long)]
+    pub http_only: bool,
+
+    /// SameSite attribute: Strict, Lax, or None
+    #[arg(long, value_name = "POLICY")]
+    pub same_site: Option<String>,
+
+    /// Expiry as Unix timestamp (seconds since epoch)
+    #[arg(long)]
+    pub expires: Option<f64>,
+}
+
+/// Arguments for `cookie delete`.
+#[derive(Args)]
+pub struct CookieDeleteArgs {
+    /// Cookie name to delete
+    pub name: String,
+
+    /// Scope deletion to a specific domain
+    #[arg(long)]
+    pub domain: Option<String>,
 }
 
 /// Arguments for the `dialog` subcommand group.

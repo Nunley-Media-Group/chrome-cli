@@ -1700,6 +1700,71 @@ fn dialog_stderr_contains(world: &mut DialogWorld, expected: String) {
 }
 
 // =============================================================================
+// CookieWorld — Cookie management BDD tests (CLI-testable scenarios)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct CookieWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+#[given("agentchrome is built")]
+fn cookie_agentchrome_built(world: &mut CookieWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[when(expr = "I run {string}")]
+fn cookie_run_command(world: &mut CookieWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given agentchrome is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "agentchrome") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[then("the exit code should be non-zero")]
+fn cookie_exit_code_nonzero(world: &mut CookieWorld) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_ne!(
+        actual, 0,
+        "Expected non-zero exit code, got 0\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stderr should contain {string}")]
+fn cookie_stderr_contains(world: &mut CookieWorld, expected: String) {
+    assert!(
+        world
+            .stderr
+            .to_lowercase()
+            .contains(&expected.to_lowercase()),
+        "stderr does not contain '{expected}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+// =============================================================================
 // KeyboardWorld — Keyboard input BDD tests (CLI-testable scenarios)
 // =============================================================================
 
@@ -3417,6 +3482,13 @@ const DISCONNECT_KILL_TESTABLE_SCENARIOS: &[&str] =
 /// JS execution BDD scenarios that can be tested without a running Chrome instance.
 const JS_TESTABLE_SCENARIOS: &[&str] = &["File not found error"];
 
+/// Cookie BDD scenarios that can be tested without a running Chrome instance.
+const COOKIE_TESTABLE_SCENARIOS: &[&str] = &[
+    "Cookie set requires name and value arguments",
+    "Cookie delete requires name argument",
+    "Cookie subcommand is required",
+];
+
 /// Dialog BDD scenarios that can be tested without a running Chrome instance.
 const DIALOG_TESTABLE_SCENARIOS: &[&str] = &[
     "Dialog handle requires an action argument",
@@ -3704,6 +3776,14 @@ async fn main() {
     CliWorld::run("tests/features/98-fix-clap-validation-json-stderr.feature").await;
 
     run_dialog_features().await;
+
+    // Cookie management — only CLI-testable scenarios (argument validation) can run without Chrome.
+    CookieWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/cookie-management.feature",
+            |_feature, _rule, scenario| COOKIE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
+        )
+        .await;
 
     // Connect PID preservation fix (issue #87) — all scenarios require a running Chrome instance
     // for auto-discover. The feature file documents regression scenarios; the fix is validated

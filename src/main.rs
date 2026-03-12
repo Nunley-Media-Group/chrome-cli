@@ -1,6 +1,7 @@
 mod capabilities;
 mod cli;
 mod console;
+mod cookie;
 mod dialog;
 mod dom;
 mod emulate;
@@ -97,6 +98,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Form(args) => form::execute_form(&global, args).await,
         Command::Emulate(args) => emulate::execute_emulate(&global, args).await,
         Command::Perf(args) => perf::execute_perf(&global, args).await,
+        Command::Cookie(args) => cookie::execute_cookie(&global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
         Command::Examples(args) => examples::execute_examples(&global, args),
         Command::Capabilities(args) => capabilities::execute_capabilities(&global, args),
