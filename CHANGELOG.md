@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-03-12
+
+### Added
+
+- Add large-response detection with structured guidance object, `--search` filtering, and `--full-response` override for `page snapshot`, `page text`, `js exec`, `network list`, and `network get` (#168)
+
 ## [1.9.0] - 2026-03-12
 
 ### Added
