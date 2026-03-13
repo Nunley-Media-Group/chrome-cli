@@ -4,7 +4,7 @@ use agentchrome::error::AppError;
 
 use crate::cli::{GlobalOpts, PageTextArgs};
 
-use super::{get_page_info, print_output, setup_session};
+use super::{get_page_info, setup_session};
 
 // =============================================================================
 // Output types
@@ -24,6 +24,15 @@ struct PageTextResult {
 /// Escape a CSS selector for embedding in a JavaScript double-quoted string.
 fn escape_selector(selector: &str) -> String {
     selector.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Filter text to only paragraphs (double-newline separated) matching the query.
+fn filter_text_paragraphs(text: &str, query: &str) -> String {
+    let query_lower = query.to_lowercase();
+    text.split("\n\n")
+        .filter(|paragraph| paragraph.to_lowercase().contains(&query_lower))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 // =============================================================================
@@ -83,6 +92,13 @@ pub async fn execute_text(global: &GlobalOpts, args: &PageTextArgs) -> Result<()
     // Get page info
     let (url, title) = get_page_info(&managed).await?;
 
+    // Apply --search filter if present
+    let text = if let Some(ref query) = args.search {
+        filter_text_paragraphs(&text, query)
+    } else {
+        text
+    };
+
     // Output
     if global.output.plain {
         print!("{text}");
@@ -90,7 +106,17 @@ pub async fn execute_text(global: &GlobalOpts, args: &PageTextArgs) -> Result<()
     }
 
     let output = PageTextResult { text, url, title };
-    print_output(&output, &global.output)
+
+    if args.search.is_some() {
+        return crate::output::emit_searched(&output, &global.output);
+    }
+
+    crate::output::emit(&output, &global.output, "page text", |r| {
+        serde_json::json!({
+            "character_count": r.text.len(),
+            "line_count": r.text.lines().count(),
+        })
+    })
 }
 
 // =============================================================================
@@ -142,5 +168,29 @@ mod tests {
     #[test]
     fn escape_selector_with_backslash() {
         assert_eq!(escape_selector(r"div\.class"), r"div\\.class");
+    }
+
+    #[test]
+    fn filter_text_paragraphs_basic() {
+        let text = "First paragraph about errors.\n\nSecond paragraph about warnings.\n\nThird paragraph about errors again.";
+        let filtered = filter_text_paragraphs(text, "error");
+        assert!(filtered.contains("First paragraph about errors."));
+        assert!(filtered.contains("Third paragraph about errors again."));
+        assert!(!filtered.contains("warnings"));
+    }
+
+    #[test]
+    fn filter_text_paragraphs_case_insensitive() {
+        let text = "ERROR occurred here.\n\nNothing to see.";
+        let filtered = filter_text_paragraphs(text, "error");
+        assert!(filtered.contains("ERROR occurred here."));
+        assert!(!filtered.contains("Nothing to see"));
+    }
+
+    #[test]
+    fn filter_text_paragraphs_no_match() {
+        let text = "Hello world.\n\nGoodbye world.";
+        let filtered = filter_text_paragraphs(text, "missing");
+        assert!(filtered.is_empty());
     }
 }

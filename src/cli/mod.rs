@@ -120,19 +120,34 @@ impl GlobalOpts {
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Args)]
-#[group(multiple = false)]
 pub struct OutputFormat {
     /// Output as compact JSON (mutually exclusive with --pretty, --plain)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with_all = ["pretty", "plain"])]
     pub json: bool,
 
     /// Output as pretty-printed JSON (mutually exclusive with --json, --plain)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with_all = ["json", "plain"])]
     pub pretty: bool,
 
     /// Output as human-readable plain text (mutually exclusive with --json, --pretty)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with_all = ["json", "pretty"])]
     pub plain: bool,
+
+    /// Return complete output even when it exceeds the large-response threshold
+    #[arg(long, global = true)]
+    pub full_response: bool,
+
+    /// Byte threshold for large-response detection (default: 16384)
+    #[arg(long, global = true, value_parser = parse_nonzero_usize)]
+    pub large_response_threshold: Option<usize>,
+}
+
+fn parse_nonzero_usize(s: &str) -> Result<usize, String> {
+    let val: usize = s.parse().map_err(|e| format!("{e}"))?;
+    if val == 0 {
+        return Err("threshold must be greater than 0".to_string());
+    }
+    Ok(val)
 }
 
 #[derive(Subcommand)]
@@ -1001,6 +1016,10 @@ pub struct PageTextArgs {
     /// CSS selector to extract text from a specific element
     #[arg(long)]
     pub selector: Option<String>,
+
+    /// Filter text output to paragraphs matching this query (case-insensitive)
+    #[arg(long)]
+    pub search: Option<String>,
 }
 
 /// Arguments for `page snapshot`.
@@ -1013,6 +1032,10 @@ pub struct PageSnapshotArgs {
     /// Save snapshot to file instead of stdout
     #[arg(long)]
     pub file: Option<PathBuf>,
+
+    /// Filter tree to nodes matching this query by name or role (case-insensitive)
+    #[arg(long)]
+    pub search: Option<String>,
 }
 
 /// Arguments for `page find`.
@@ -1201,6 +1224,10 @@ pub struct JsExecArgs {
     /// Truncate result output exceeding this size in bytes
     #[arg(long)]
     pub max_size: Option<usize>,
+
+    /// Filter result to matching keys/values (case-insensitive)
+    #[arg(long)]
+    pub search: Option<String>,
 }
 
 /// Arguments for the `cookie` subcommand group.
@@ -2194,6 +2221,10 @@ pub struct NetworkListArgs {
     /// Include requests from previous navigations
     #[arg(long)]
     pub include_preserved: bool,
+
+    /// Filter requests by URL or method matching this query (case-insensitive)
+    #[arg(long)]
+    pub search: Option<String>,
 }
 
 /// Arguments for `network get`.
@@ -2209,6 +2240,10 @@ pub struct NetworkGetArgs {
     /// Save response body to a file
     #[arg(long)]
     pub save_response: Option<PathBuf>,
+
+    /// Filter response body and headers by this query (case-insensitive)
+    #[arg(long)]
+    pub search: Option<String>,
 }
 
 /// Arguments for `network follow`.

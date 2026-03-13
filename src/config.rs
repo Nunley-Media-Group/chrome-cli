@@ -23,6 +23,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# agentchrome configuration file
 # Output defaults
 # [output]
 # format = "json"           # json, pretty, plain
+# large_response_threshold = 16384  # bytes; 0 = disabled
 
 # Default tab behavior
 # [tabs]
@@ -65,6 +66,7 @@ pub struct LaunchConfig {
 #[serde(default)]
 pub struct OutputConfig {
     pub format: Option<String>,
+    pub large_response_threshold: Option<usize>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -106,6 +108,7 @@ pub struct ResolvedLaunch {
 #[derive(Debug, Serialize)]
 pub struct ResolvedOutput {
     pub format: String,
+    pub large_response_threshold: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -335,6 +338,7 @@ struct StrictLaunchConfig {
 #[serde(deny_unknown_fields)]
 struct StrictOutputConfig {
     format: Option<String>,
+    large_response_threshold: Option<usize>,
 }
 
 #[derive(Default, Deserialize)]
@@ -360,6 +364,7 @@ impl From<StrictConfigFile> for ConfigFile {
             },
             output: OutputConfig {
                 format: s.output.format,
+                large_response_threshold: s.output.large_response_threshold,
             },
             tabs: TabsConfig {
                 auto_activate: s.tabs.auto_activate,
@@ -377,6 +382,8 @@ impl From<StrictConfigFile> for ConfigFile {
 const DEFAULT_PORT: u16 = 9222;
 /// Default timeout for commands in milliseconds.
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+/// Default large-response threshold in bytes. Must equal `output::DEFAULT_THRESHOLD`.
+pub const DEFAULT_LARGE_RESPONSE_THRESHOLD: usize = 16_384;
 
 /// Resolve a config file into a fully-populated `ResolvedConfig` with all defaults.
 #[must_use]
@@ -411,6 +418,10 @@ pub fn resolve_config(file: &ConfigFile, config_path: Option<PathBuf>) -> Resolv
                 .format
                 .clone()
                 .unwrap_or_else(|| "json".to_string()),
+            large_response_threshold: file
+                .output
+                .large_response_threshold
+                .unwrap_or(DEFAULT_LARGE_RESPONSE_THRESHOLD),
         },
         tabs: ResolvedTabs {
             auto_activate: file.tabs.auto_activate.unwrap_or(true),
@@ -572,6 +583,10 @@ unknown_key = "hello"
         assert!(!resolved.launch.headless);
         assert!(resolved.launch.extra_args.is_empty());
         assert_eq!(resolved.output.format, "json");
+        assert_eq!(
+            resolved.output.large_response_threshold,
+            DEFAULT_LARGE_RESPONSE_THRESHOLD
+        );
         assert!(resolved.tabs.auto_activate);
         assert!(resolved.tabs.filter_internal);
         assert!(resolved.config_path.is_none());
@@ -593,6 +608,7 @@ unknown_key = "hello"
             },
             output: OutputConfig {
                 format: Some("pretty".into()),
+                large_response_threshold: Some(8192),
             },
             tabs: TabsConfig {
                 auto_activate: Some(false),
@@ -612,6 +628,7 @@ unknown_key = "hello"
         assert!(resolved.launch.headless);
         assert_eq!(resolved.launch.extra_args, vec!["--no-sandbox"]);
         assert_eq!(resolved.output.format, "pretty");
+        assert_eq!(resolved.output.large_response_threshold, 8192);
         assert!(!resolved.tabs.auto_activate);
         assert!(!resolved.tabs.filter_internal);
         assert_eq!(resolved.config_path, Some(path));

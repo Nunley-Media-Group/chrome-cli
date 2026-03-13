@@ -429,6 +429,78 @@ fn format_text_node(node: &SnapshotNode, depth: usize, verbose: bool, output: &m
 }
 
 // =============================================================================
+// Tree filtering (for --search)
+// =============================================================================
+
+/// Filter the tree to only nodes whose name or role matches the query (case-insensitive).
+/// Ancestor nodes are preserved for tree context.
+pub fn filter_tree(root: &SnapshotNode, query: &str) -> Option<SnapshotNode> {
+    let query_lower = query.to_lowercase();
+    filter_node(root, &query_lower)
+}
+
+fn filter_node(node: &SnapshotNode, query: &str) -> Option<SnapshotNode> {
+    let self_matches =
+        node.name.to_lowercase().contains(query) || node.role.to_lowercase().contains(query);
+
+    let filtered_children: Vec<SnapshotNode> = node
+        .children
+        .iter()
+        .filter_map(|child| filter_node(child, query))
+        .collect();
+
+    if self_matches || !filtered_children.is_empty() {
+        Some(SnapshotNode {
+            role: node.role.clone(),
+            name: node.name.clone(),
+            uid: node.uid.clone(),
+            properties: node.properties.clone(),
+            backend_dom_node_id: node.backend_dom_node_id,
+            children: filtered_children,
+        })
+    } else {
+        None
+    }
+}
+
+// =============================================================================
+// Summary helpers (for large-response guidance)
+// =============================================================================
+
+/// Count total nodes in a snapshot tree (as a `serde_json::Value`).
+pub fn count_nodes(value: &serde_json::Value) -> u64 {
+    let mut count = 1u64;
+    if let Some(children) = value["children"].as_array() {
+        for child in children {
+            count += count_nodes(child);
+        }
+    }
+    count
+}
+
+/// Extract the most common roles from a snapshot tree (as a `serde_json::Value`).
+pub fn top_roles(value: &serde_json::Value, limit: usize) -> Vec<String> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    collect_roles(value, &mut counts);
+    let mut sorted: Vec<(String, usize)> = counts.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.into_iter().take(limit).map(|(r, _)| r).collect()
+}
+
+fn collect_roles(value: &serde_json::Value, counts: &mut HashMap<String, usize>) {
+    if let Some(role) = value["role"].as_str() {
+        if !role.is_empty() {
+            *counts.entry(role.to_string()).or_insert(0) += 1;
+        }
+    }
+    if let Some(children) = value["children"].as_array() {
+        for child in children {
+            collect_roles(child, counts);
+        }
+    }
+}
+
+// =============================================================================
 // Snapshot state persistence
 // =============================================================================
 
@@ -1396,5 +1468,88 @@ mod tests {
         assert_eq!(result.root.children.len(), 2);
         assert_eq!(result.root.children[0].role, "button");
         assert_eq!(result.root.children[1].role, "link");
+    }
+
+    // =========================================================================
+    // filter_tree tests
+    // =========================================================================
+
+    #[test]
+    fn filter_tree_matches_by_name() {
+        let nodes = search_test_nodes();
+        let build = build_tree(&nodes, false);
+        let filtered = filter_tree(&build.root, "Login");
+        assert!(filtered.is_some());
+        let root = filtered.unwrap();
+        // Root should be preserved (ancestor), with Login button as child
+        assert_eq!(root.role, "document");
+        assert_eq!(root.children.len(), 1);
+        assert_eq!(root.children[0].name, "Login");
+    }
+
+    #[test]
+    fn filter_tree_matches_by_role() {
+        let nodes = search_test_nodes();
+        let build = build_tree(&nodes, false);
+        let filtered = filter_tree(&build.root, "heading");
+        assert!(filtered.is_some());
+        let root = filtered.unwrap();
+        // Should have the heading child preserved
+        assert!(root.children.iter().any(|c| c.role == "heading"));
+    }
+
+    #[test]
+    fn filter_tree_case_insensitive() {
+        let nodes = search_test_nodes();
+        let build = build_tree(&nodes, false);
+        let filtered = filter_tree(&build.root, "login");
+        assert!(filtered.is_some());
+    }
+
+    #[test]
+    fn filter_tree_no_match_returns_none() {
+        let nodes = sample_cdp_nodes();
+        let build = build_tree(&nodes, false);
+        let filtered = filter_tree(&build.root, "nonexistent_xyz_123");
+        assert!(filtered.is_none());
+    }
+
+    #[test]
+    fn filter_tree_preserves_ancestors() {
+        let nodes = sample_cdp_nodes();
+        let build = build_tree(&nodes, false);
+        // "This domain is for use in..." is nested under paragraph
+        let filtered = filter_tree(&build.root, "This domain");
+        assert!(filtered.is_some());
+        let root = filtered.unwrap();
+        // Root (document) → paragraph → text
+        assert_eq!(root.role, "document");
+        assert_eq!(root.children.len(), 1);
+        assert_eq!(root.children[0].role, "paragraph");
+    }
+
+    // =========================================================================
+    // count_nodes / top_roles tests
+    // =========================================================================
+
+    #[test]
+    fn count_nodes_simple() {
+        let nodes = sample_cdp_nodes();
+        let build = build_tree(&nodes, false);
+        let value = serde_json::to_value(&build.root).unwrap();
+        let count = count_nodes(&value);
+        // document + heading + paragraph + text + link = 5
+        assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn top_roles_returns_sorted_by_frequency() {
+        let nodes = search_test_nodes();
+        let build = build_tree(&nodes, false);
+        let value = serde_json::to_value(&build.root).unwrap();
+        let roles = top_roles(&value, 3);
+        // button appears twice, others once
+        assert_eq!(roles[0], "button");
+        assert!(roles.len() <= 3);
     }
 }

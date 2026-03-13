@@ -4557,4 +4557,15 @@ async fn main() {
             },
         )
         .await;
+
+    // Large response detection (issue #168) — all scenarios require a running Chrome instance
+    // with real pages producing large outputs. The feature file documents acceptance scenarios;
+    // the implementation is validated by unit tests in output.rs and snapshot.rs (filter_tree,
+    // count_nodes, top_roles), and by the manual smoke test during /verifying-specs.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/large-response-detection.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
 }

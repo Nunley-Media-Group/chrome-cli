@@ -38,25 +38,6 @@ struct JsExecError {
 }
 
 // =============================================================================
-// Output formatting
-// =============================================================================
-
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
-// =============================================================================
 // Config helper
 // =============================================================================
 
@@ -240,6 +221,55 @@ fn extract_console_entries(events: &[serde_json::Value]) -> Vec<ConsoleEntry> {
 }
 
 // =============================================================================
+// Search filter
+// =============================================================================
+
+/// Filter a JSON value to only matching content (case-insensitive).
+///
+/// - Objects: retain key-value pairs where key or serialized value matches
+/// - Arrays: retain elements where serialized element matches
+/// - Strings: return string if it matches, else empty string
+/// - Other types: return as-is
+fn filter_json_value(value: serde_json::Value, query: &str) -> serde_json::Value {
+    let query_lower = query.to_lowercase();
+    match value {
+        serde_json::Value::Object(map) => {
+            let filtered: serde_json::Map<String, serde_json::Value> = map
+                .into_iter()
+                .filter(|(k, v)| {
+                    k.to_lowercase().contains(&query_lower)
+                        || serde_json::to_string(v)
+                            .unwrap_or_default()
+                            .to_lowercase()
+                            .contains(&query_lower)
+                })
+                .collect();
+            serde_json::Value::Object(filtered)
+        }
+        serde_json::Value::Array(arr) => {
+            let filtered: Vec<serde_json::Value> = arr
+                .into_iter()
+                .filter(|v| {
+                    serde_json::to_string(v)
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .contains(&query_lower)
+                })
+                .collect();
+            serde_json::Value::Array(filtered)
+        }
+        serde_json::Value::String(ref s) => {
+            if s.to_lowercase().contains(&query_lower) {
+                value
+            } else {
+                serde_json::Value::String(String::new())
+            }
+        }
+        other => other,
+    }
+}
+
+// =============================================================================
 // Execution
 // =============================================================================
 
@@ -340,6 +370,13 @@ async fn execute_exec(global: &GlobalOpts, args: &JsExecArgs) -> Result<(), AppE
     // Apply truncation
     let (value, was_truncated) = apply_truncation(value, args.max_size);
 
+    // Apply --search filter if present
+    let (value, searched) = if let Some(ref query) = args.search {
+        (filter_json_value(value, query), true)
+    } else {
+        (value, false)
+    };
+
     // Build console entries
     let console_entries = extract_console_entries(&console_events);
 
@@ -368,7 +405,19 @@ async fn execute_exec(global: &GlobalOpts, args: &JsExecArgs) -> Result<(), AppE
         return Ok(());
     }
 
-    print_output(&output, &global.output)
+    if searched {
+        return crate::output::emit_searched(&output, &global.output);
+    }
+
+    crate::output::emit(&output, &global.output, "js exec", |r| {
+        let size = serde_json::to_string(&r.result)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        serde_json::json!({
+            "result_type": r.r#type,
+            "size_bytes": size,
+        })
+    })
 }
 
 /// Execute a JavaScript expression via Runtime.evaluate.
@@ -833,6 +882,7 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            search: None,
         };
         let code = resolve_code(&args).unwrap();
         assert_eq!(code, "document.title");
@@ -847,6 +897,7 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            search: None,
         };
         let err = resolve_code(&args).unwrap_err();
         assert!(err.message.contains("No JavaScript code provided"));
@@ -861,6 +912,7 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            search: None,
         };
         let err = resolve_code(&args).unwrap_err();
         assert!(err.message.contains("Script file not found"));
@@ -880,10 +932,61 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            search: None,
         };
         let code = resolve_code(&args).unwrap();
         assert_eq!(code, "document.title");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // =========================================================================
+    // filter_json_value tests
+    // =========================================================================
+
+    #[test]
+    fn filter_json_value_object() {
+        let obj = serde_json::json!({"email": "test@example.com", "name": "Alice", "age": 30});
+        let filtered = filter_json_value(obj, "email");
+        assert!(filtered.get("email").is_some());
+        assert!(filtered.get("name").is_none());
+        assert!(filtered.get("age").is_none());
+    }
+
+    #[test]
+    fn filter_json_value_object_by_value() {
+        let obj = serde_json::json!({"field": "contains email here"});
+        let filtered = filter_json_value(obj, "email");
+        assert!(filtered.get("field").is_some());
+    }
+
+    #[test]
+    fn filter_json_value_array() {
+        let arr = serde_json::json!(["email@test.com", "phone", "address"]);
+        let filtered = filter_json_value(arr, "email");
+        let arr = filtered.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0], "email@test.com");
+    }
+
+    #[test]
+    fn filter_json_value_string_match() {
+        let val = serde_json::Value::String("contains EMAIL here".to_string());
+        let filtered = filter_json_value(val, "email");
+        assert!(filtered.as_str().unwrap().contains("EMAIL"));
+    }
+
+    #[test]
+    fn filter_json_value_string_no_match() {
+        let val = serde_json::Value::String("no match".to_string());
+        let filtered = filter_json_value(val, "email");
+        assert_eq!(filtered.as_str().unwrap(), "");
+    }
+
+    #[test]
+    fn filter_json_value_number_passthrough() {
+        let val = serde_json::json!(42);
+        let filtered = filter_json_value(val.clone(), "anything");
+        assert_eq!(filtered, val);
     }
 }

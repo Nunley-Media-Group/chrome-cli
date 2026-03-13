@@ -150,21 +150,6 @@ struct NetworkRequestBuilder {
 // Output formatting
 // =============================================================================
 
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
 fn print_list_plain(requests: &[NetworkRequestSummary]) {
     for req in requests {
         let status_str = req
@@ -369,6 +354,37 @@ fn filter_by_method(
         .into_iter()
         .filter(|r| r.method.to_uppercase() == upper)
         .collect()
+}
+
+/// Filter requests by search query matching URL or method (case-insensitive).
+fn filter_by_search(
+    requests: Vec<NetworkRequestSummary>,
+    query: &str,
+) -> Vec<NetworkRequestSummary> {
+    let query_lower = query.to_lowercase();
+    requests
+        .into_iter()
+        .filter(|r| {
+            r.url.to_lowercase().contains(&query_lower)
+                || r.method.to_lowercase().contains(&query_lower)
+        })
+        .collect()
+}
+
+/// Extract the domain from a URL string.
+fn extract_domain(url: &str) -> Option<String> {
+    // Simple domain extraction: skip scheme, take host
+    let without_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let host = without_scheme.split('/').next()?;
+    let host = host.split(':').next()?;
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
 }
 
 /// Apply pagination (limit + page offset).
@@ -854,6 +870,12 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
         requests = filter_by_method(requests, method);
     }
 
+    // Apply --search filter if present
+    let searched = args.search.is_some();
+    if let Some(ref query) = args.search {
+        requests = filter_by_search(requests, query);
+    }
+
     // Paginate
     requests = paginate(requests, args.limit, args.page);
 
@@ -862,7 +884,21 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
         print_list_plain(&requests);
         return Ok(());
     }
-    print_output(&requests, &global.output)
+
+    if searched {
+        return crate::output::emit_searched(&requests, &global.output);
+    }
+
+    crate::output::emit(&requests, &global.output, "network list", |reqs| {
+        use std::collections::HashSet;
+        let methods: HashSet<&str> = reqs.iter().map(|r| r.method.as_str()).collect();
+        let domains: HashSet<String> = reqs.iter().filter_map(|r| extract_domain(&r.url)).collect();
+        serde_json::json!({
+            "request_count": reqs.len(),
+            "methods": methods.into_iter().collect::<Vec<_>>(),
+            "domains": domains.into_iter().take(10).collect::<Vec<_>>(),
+        })
+    })
 }
 
 // =============================================================================
@@ -984,7 +1020,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
     let mime_for_binary_check = builder.mime_type.as_deref().unwrap_or("");
     let binary = is_binary || is_binary_mime(mime_for_binary_check);
 
-    let detail = NetworkRequestDetail {
+    let mut detail = NetworkRequestDetail {
         id: builder.assigned_id,
         request: RequestInfo {
             method: builder.method.clone(),
@@ -1009,11 +1045,52 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
         timestamp: timestamp_to_iso(builder.wall_time),
     };
 
+    // Apply --search filter if present
+    let searched = args.search.is_some();
+    if let Some(ref query) = args.search {
+        let query_lower = query.to_lowercase();
+
+        // Filter response body: keep only if it contains the query
+        if let Some(ref body) = detail.response.body {
+            if !body.to_lowercase().contains(&query_lower) {
+                detail.response.body = None;
+            }
+        }
+
+        // Filter response headers: keep only matching name/value pairs
+        if let Some(headers_obj) = detail.response.headers.as_object() {
+            let filtered: serde_json::Map<String, serde_json::Value> = headers_obj
+                .iter()
+                .filter(|(k, v)| {
+                    k.to_lowercase().contains(&query_lower)
+                        || v.as_str()
+                            .unwrap_or_default()
+                            .to_lowercase()
+                            .contains(&query_lower)
+                })
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            detail.response.headers = serde_json::Value::Object(filtered);
+        }
+    }
+
     if global.output.plain {
         print_detail_plain(&detail);
         return Ok(());
     }
-    print_output(&detail, &global.output)
+
+    if searched {
+        return crate::output::emit_searched(&detail, &global.output);
+    }
+
+    crate::output::emit(&detail, &global.output, "network get", |d| {
+        serde_json::json!({
+            "url": d.request.url,
+            "status": d.response.status,
+            "content_type": d.response.mime_type,
+            "body_size_bytes": d.response.body.as_ref().map(String::len),
+        })
+    })
 }
 
 // =============================================================================
@@ -1976,5 +2053,84 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(&entry).unwrap();
         assert_eq!(json["url"], "http://example.com");
         assert_eq!(json["status"], 301);
+    }
+
+    // =========================================================================
+    // filter_by_search
+    // =========================================================================
+
+    #[test]
+    fn filter_by_search_url_match() {
+        let requests = vec![
+            make_request(
+                0,
+                "GET",
+                "https://api.example.com/v2/users",
+                Some(200),
+                "xhr",
+            ),
+            make_request(
+                1,
+                "GET",
+                "https://cdn.example.com/image.png",
+                Some(200),
+                "image",
+            ),
+        ];
+        let filtered = filter_by_search(requests, "api");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, 0);
+    }
+
+    #[test]
+    fn filter_by_search_method_match() {
+        let requests = vec![
+            make_request(0, "GET", "https://a.com", Some(200), "xhr"),
+            make_request(1, "POST", "https://b.com", Some(200), "xhr"),
+        ];
+        let filtered = filter_by_search(requests, "post");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].method, "POST");
+    }
+
+    #[test]
+    fn filter_by_search_case_insensitive() {
+        let requests = vec![make_request(
+            0,
+            "GET",
+            "https://API.example.com",
+            Some(200),
+            "xhr",
+        )];
+        let filtered = filter_by_search(requests, "api");
+        assert_eq!(filtered.len(), 1);
+    }
+
+    // =========================================================================
+    // extract_domain
+    // =========================================================================
+
+    #[test]
+    fn extract_domain_https() {
+        assert_eq!(
+            extract_domain("https://api.example.com/path"),
+            Some("api.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_domain_http() {
+        assert_eq!(
+            extract_domain("http://example.com:8080/path"),
+            Some("example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_domain_no_scheme() {
+        assert_eq!(
+            extract_domain("example.com/path"),
+            Some("example.com".to_string())
+        );
     }
 }

@@ -43,36 +43,25 @@ pub async fn execute_snapshot(
         eprintln!("warning: could not save snapshot state: {e}");
     }
 
-    // Format output
-    let formatted = if global.output.json || global.output.pretty {
-        // JSON output — add truncation info to root if applicable
-        let mut json_value = serde_json::to_value(&build.root).map_err(|e| AppError {
-            message: format!("serialization error: {e}"),
-            code: ExitCode::GeneralError,
-            custom_json: None,
-        })?;
-        if build.truncated {
-            if let Some(obj) = json_value.as_object_mut() {
-                obj.insert("truncated".to_string(), serde_json::Value::Bool(true));
-                obj.insert(
-                    "total_nodes".to_string(),
-                    serde_json::Value::Number(build.total_nodes.into()),
-                );
+    // Apply --search filter if present
+    let effective_root = if let Some(ref query) = args.search {
+        crate::snapshot::filter_tree(&build.root, query).unwrap_or_else(|| {
+            crate::snapshot::SnapshotNode {
+                role: build.root.role.clone(),
+                name: build.root.name.clone(),
+                uid: build.root.uid.clone(),
+                properties: build.root.properties.clone(),
+                backend_dom_node_id: build.root.backend_dom_node_id,
+                children: vec![],
             }
-        }
-        let serializer = if global.output.pretty {
-            serde_json::to_string_pretty(&json_value)
-        } else {
-            serde_json::to_string(&json_value)
-        };
-        serializer.map_err(|e| AppError {
-            message: format!("serialization error: {e}"),
-            code: ExitCode::GeneralError,
-            custom_json: None,
-        })?
+        })
     } else {
-        // Text output (default and --plain)
-        let mut text = crate::snapshot::format_text(&build.root, args.verbose);
+        build.root
+    };
+
+    // Plain/text output path
+    if !global.output.json && !global.output.pretty {
+        let mut text = crate::snapshot::format_text(&effective_root, args.verbose);
         if build.truncated {
             text.push_str(&format!(
                 "[... truncated: {} nodes, showing first {}]\n",
@@ -80,17 +69,63 @@ pub async fn execute_snapshot(
                 crate::snapshot::MAX_NODES
             ));
         }
-        text
-    };
 
-    // Write to file or stdout
+        if let Some(ref file_path) = args.file {
+            std::fs::write(file_path, &text).map_err(|e| {
+                AppError::file_write_failed(&file_path.display().to_string(), &e.to_string())
+            })?;
+        } else {
+            print!("{text}");
+        }
+        return Ok(());
+    }
+
+    // JSON output — add truncation info to root if applicable
+    let mut json_value = serde_json::to_value(&effective_root).map_err(|e| AppError {
+        message: format!("serialization error: {e}"),
+        code: ExitCode::GeneralError,
+        custom_json: None,
+    })?;
+    if build.truncated {
+        if let Some(obj) = json_value.as_object_mut() {
+            obj.insert("truncated".to_string(), serde_json::Value::Bool(true));
+            obj.insert(
+                "total_nodes".to_string(),
+                serde_json::Value::Number(build.total_nodes.into()),
+            );
+        }
+    }
+
+    // Write to file if --file is given (bypass the gate)
     if let Some(ref file_path) = args.file {
+        let serializer = if global.output.pretty {
+            serde_json::to_string_pretty(&json_value)
+        } else {
+            serde_json::to_string(&json_value)
+        };
+        let formatted = serializer.map_err(|e| AppError {
+            message: format!("serialization error: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
         std::fs::write(file_path, &formatted).map_err(|e| {
             AppError::file_write_failed(&file_path.display().to_string(), &e.to_string())
         })?;
-    } else {
-        print!("{formatted}");
+        return Ok(());
     }
 
-    Ok(())
+    // If --search was used, bypass the large-response gate
+    if args.search.is_some() {
+        return crate::output::emit_searched(&json_value, &global.output);
+    }
+
+    // Normal path: emit through the large-response gate
+    crate::output::emit(&json_value, &global.output, "page snapshot", |v| {
+        let total_nodes = crate::snapshot::count_nodes(v);
+        let roles = crate::snapshot::top_roles(v, 5);
+        serde_json::json!({
+            "total_nodes": total_nodes,
+            "top_roles": roles,
+        })
+    })
 }

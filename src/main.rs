@@ -11,6 +11,7 @@ mod interact;
 mod js;
 mod navigate;
 mod network;
+mod output;
 mod page;
 mod perf;
 mod skill;
@@ -141,6 +142,11 @@ fn build_resolved_config(
                 .format
                 .clone()
                 .unwrap_or_else(|| "json".to_string()),
+            large_response_threshold: global
+                .output
+                .large_response_threshold
+                .or(config_file.output.large_response_threshold)
+                .unwrap_or(output::DEFAULT_THRESHOLD),
         },
         tabs: config::ResolvedTabs {
             auto_activate: config_file.tabs.auto_activate.unwrap_or(true),
@@ -181,6 +187,11 @@ fn apply_config_defaults(cli_global: &GlobalOpts, config: &config::ConfigFile) -
             json: cli_global.output.json,
             pretty: cli_global.output.pretty,
             plain: cli_global.output.plain,
+            full_response: cli_global.output.full_response,
+            large_response_threshold: cli_global
+                .output
+                .large_response_threshold
+                .or(config.output.large_response_threshold),
         },
     }
 }
