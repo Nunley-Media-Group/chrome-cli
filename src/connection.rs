@@ -142,7 +142,9 @@ pub fn select_target<'a>(
     }
 }
 
-/// Resolve the target tab from the `--tab` option by querying Chrome for targets.
+/// Resolve the target tab from the `--tab` or `--page-id` option by querying Chrome for targets.
+///
+/// Resolution priority: `page_id` > `tab` > session active tab > first page target.
 ///
 /// # Errors
 ///
@@ -151,8 +153,14 @@ pub async fn resolve_target(
     host: &str,
     port: u16,
     tab: Option<&str>,
+    page_id: Option<&str>,
 ) -> Result<TargetInfo, AppError> {
     let targets = query_targets(host, port).await?;
+
+    // Highest priority: explicit --page-id bypasses session state entirely
+    if let Some(pid) = page_id {
+        return select_target(&targets, Some(pid)).cloned();
+    }
 
     // When no --tab flag, check session for persisted active tab
     if tab.is_none() {

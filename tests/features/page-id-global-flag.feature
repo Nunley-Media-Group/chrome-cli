@@ -1,0 +1,83 @@
+# File: tests/features/page-id-global-flag.feature
+#
+# Generated from: .claude/specs/feature-add-page-id-global-flag-for-stateless-page-routing-in-parallel-agent-workflows/requirements.md
+# Issue: #170
+
+Feature: Page ID global flag for stateless page routing
+  As an AI agent orchestrator running multiple parallel browser automation agents
+  I want to specify an explicit page target ID per command via a --page-id flag
+  So that parallel agents can each operate on their own page without conflicting
+
+  # --- Happy Path ---
+
+  @requires-chrome
+  Scenario: AC1 - Explicit page routing bypasses session state
+    Given a headless Chrome instance with two tabs
+    And tab 0 is navigated to "https://example.com"
+    And tab 1 is navigated to "https://httpbin.org"
+    And I activate tab 0
+    When I run page text with --page-id targeting tab 1
+    Then the page text output URL contains "httpbin.org"
+
+  # --- Fallback Preserved ---
+
+  @requires-chrome
+  Scenario: AC2 - Fallback chain preserved when --page-id is absent
+    Given a headless Chrome instance with two tabs
+    And tab 0 is navigated to "https://example.com"
+    And tab 1 is navigated to "https://httpbin.org"
+    And I activate tab 1
+    When I run page text without --page-id or --tab
+    Then the page text output URL contains "httpbin.org"
+
+  # --- Error Handling ---
+
+  @requires-chrome
+  Scenario: AC3 - Unknown page ID returns a target error
+    Given a headless Chrome instance with at least one tab
+    When I run page text with --page-id "NONEXISTENT_TARGET_ID"
+    Then stderr should contain "not found"
+    And stderr should contain "tabs list"
+    And the exit code should be 3
+
+  # --- Parallel Isolation ---
+
+  @requires-chrome
+  Scenario: AC4 - Parallel agents operate without session interference
+    Given a headless Chrome instance with two tabs
+    And tab 0 is navigated to "https://example.com"
+    And tab 1 is navigated to "https://httpbin.org"
+    When I run page text with --page-id targeting tab 0 and page text with --page-id targeting tab 1 concurrently
+    Then the first result contains "example.com"
+    And the second result contains "httpbin.org"
+
+  # --- Mutual Exclusivity ---
+
+  Scenario: AC5 - --page-id and --tab are mutually exclusive
+    Given agentchrome is built
+    When I run "agentchrome --page-id ABC123 --tab 0 page text"
+    Then stderr should contain "cannot be used with"
+    And stderr should be valid JSON
+    And the exit code should be 1
+
+  # --- Statelessness ---
+
+  @requires-chrome
+  Scenario: AC6 - --page-id does not write to session state
+    Given a headless Chrome instance with two tabs
+    And tab 0 is navigated to "https://example.com"
+    And tab 1 is navigated to "https://httpbin.org"
+    And I activate tab 0
+    When I run page text with --page-id targeting tab 1
+    And I run page text without --page-id or --tab
+    Then the second invocation targets tab 0 via the persisted session state
+
+  # --- Cross-Command Coverage ---
+
+  @requires-chrome
+  Scenario: AC7 - --page-id works with navigate command
+    Given a headless Chrome instance with two tabs
+    And tab 1 is navigated to "https://example.com"
+    When I run navigate with --page-id targeting tab 1 to "https://httpbin.org"
+    Then the navigation succeeds on tab 1
+    And tab 0 is unaffected

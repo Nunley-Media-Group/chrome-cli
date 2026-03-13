@@ -181,6 +181,7 @@ fn apply_config_defaults(cli_global: &GlobalOpts, config: &config::ConfigFile) -
         ws_url: cli_global.ws_url.clone(),
         timeout: cli_global.timeout.or(config.connection.timeout_ms),
         tab: cli_global.tab.clone(),
+        page_id: cli_global.page_id.clone(),
         auto_dismiss_dialogs: cli_global.auto_dismiss_dialogs,
         config: cli_global.config.clone(),
         output: cli::OutputFormat {

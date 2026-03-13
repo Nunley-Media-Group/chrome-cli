@@ -95,6 +95,10 @@ pub struct GlobalOpts {
     #[arg(long, global = true)]
     pub tab: Option<String>,
 
+    /// Explicit page target ID (bypasses session state; conflicts with --tab)
+    #[arg(long, global = true, conflicts_with = "tab")]
+    pub page_id: Option<String>,
+
     /// Automatically dismiss any dialogs that appear during command execution
     #[arg(long, global = true)]
     pub auto_dismiss_dialogs: bool,

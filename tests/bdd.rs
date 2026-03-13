@@ -3544,6 +3544,10 @@ const PAGE_WAIT_TESTABLE_SCENARIOS: &[&str] = &[
     "Page help lists wait subcommand",
 ];
 
+/// Page ID global flag scenarios that can be tested without a running Chrome instance.
+/// Only the mutual exclusivity test (AC5) is CLI-only; all others require Chrome.
+const PAGE_ID_TESTABLE_SCENARIOS: &[&str] = &["AC5 - --page-id and --tab are mutually exclusive"];
+
 /// Emulate BDD scenarios that can be tested without a running Chrome instance.
 /// These are pure CLI argument validation and help text scenarios.
 const EMULATE_TESTABLE_SCENARIOS: &[&str] = &[
@@ -4705,6 +4709,17 @@ async fn main() {
         .filter_run_and_exit(
             "tests/features/large-response-detection.feature",
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
+    // Page ID global flag (issue #170) — only AC5 (mutual exclusivity) can be tested without
+    // Chrome. All other scenarios require a running Chrome instance with multiple tabs.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/page-id-global-flag.feature",
+            |_feature, _rule, scenario| {
+                PAGE_ID_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
         )
         .await;
 }

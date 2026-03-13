@@ -90,7 +90,13 @@ pub async fn execute_navigate(global: &GlobalOpts, args: &NavigateArgs) -> Resul
 
 async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
     let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(&conn.host, conn.port, global.tab.as_deref()).await?;
+    let target = resolve_target(
+        &conn.host,
+        conn.port,
+        global.tab.as_deref(),
+        global.page_id.as_deref(),
+    )
+    .await?;
 
     let config = cdp_config(global);
     let client = CdpClient::connect(&conn.ws_url, config).await?;
