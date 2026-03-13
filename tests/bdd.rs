@@ -3536,6 +3536,14 @@ const PAGE_ELEMENT_TESTABLE_SCENARIOS: &[&str] = &[
     "Page help lists element subcommand",
 ];
 
+/// Page wait BDD scenarios that can be tested without a running Chrome instance.
+/// These are pure CLI argument validation and help text scenarios.
+const PAGE_WAIT_TESTABLE_SCENARIOS: &[&str] = &[
+    "Wait help displays usage",
+    "Wait with no condition shows help",
+    "Page help lists wait subcommand",
+];
+
 /// Emulate BDD scenarios that can be tested without a running Chrome instance.
 /// These are pure CLI argument validation and help text scenarios.
 const EMULATE_TESTABLE_SCENARIOS: &[&str] = &[
@@ -4087,6 +4095,18 @@ async fn main() {
             "tests/features/page-element.feature",
             |_feature, _rule, scenario| {
                 PAGE_ELEMENT_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Page wait command (issue #163) — only CLI argument validation and help text scenarios
+    // can be tested without Chrome. Scenarios requiring actual page state changes need a running
+    // Chrome instance.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/page-wait.feature",
+            |_feature, _rule, scenario| {
+                PAGE_WAIT_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;
