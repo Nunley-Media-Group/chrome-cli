@@ -3,6 +3,7 @@ mod find;
 mod screenshot;
 mod snapshot;
 mod text;
+mod wait;
 
 use std::time::Duration;
 
@@ -146,6 +147,7 @@ pub async fn execute_page(global: &GlobalOpts, args: &PageArgs) -> Result<(), Ap
         PageCommand::Screenshot(ss_args) => screenshot::execute_screenshot(global, ss_args).await,
         PageCommand::Resize(resize_args) => execute_page_resize(global, resize_args).await,
         PageCommand::Element(elem_args) => element::execute_element(global, elem_args).await,
+        PageCommand::Wait(wait_args) => wait::execute_wait(global, wait_args).await,
     }
 }
 

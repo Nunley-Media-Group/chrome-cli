@@ -897,6 +897,32 @@ EXAMPLES:
   agentchrome page element s10 --plain"
     )]
     Element(PageElementArgs),
+
+    /// Wait until a condition is met on the current page
+    #[command(
+        arg_required_else_help = true,
+        long_about = "Wait until a specified condition is met on the current page. Supports \
+            waiting for a URL to match a glob pattern, text to appear, a CSS selector to match, \
+            or network activity to settle. Exactly one condition must be specified. The command \
+            blocks until the condition is satisfied or the timeout is reached.",
+        after_long_help = "\
+EXAMPLES:
+  # Wait for URL to match a glob pattern
+  agentchrome page wait --url \"*/dashboard*\"
+
+  # Wait for text to appear
+  agentchrome page wait --text \"Products\"
+
+  # Wait for a CSS selector to match
+  agentchrome page wait --selector \"#results-table\"
+
+  # Wait for network to settle
+  agentchrome page wait --network-idle
+
+  # Custom timeout and poll interval
+  agentchrome page wait --text \"loaded\" --timeout 5000 --interval 200"
+    )]
+    Wait(PageWaitArgs),
 }
 
 /// Image format for screenshots.
@@ -2101,6 +2127,30 @@ pub struct PageResizeArgs {
 pub struct PageElementArgs {
     /// Element target: UID (s1, s2, ...) or CSS selector (css:#id, css:.class)
     pub target: String,
+}
+
+/// Arguments for `page wait`.
+#[derive(Args)]
+pub struct PageWaitArgs {
+    /// Wait for the page URL to match a glob pattern
+    #[arg(long, group = "condition")]
+    pub url: Option<String>,
+
+    /// Wait for text to appear in the page content
+    #[arg(long, group = "condition")]
+    pub text: Option<String>,
+
+    /// Wait for a CSS selector to match an element in the DOM
+    #[arg(long, group = "condition")]
+    pub selector: Option<String>,
+
+    /// Wait for network activity to settle (no requests for 500ms)
+    #[arg(long, group = "condition")]
+    pub network_idle: bool,
+
+    /// Poll interval in milliseconds (for --url, --text, --selector)
+    #[arg(long, default_value = "100")]
+    pub interval: u64,
 }
 
 /// Arguments for the `dom` subcommand group.

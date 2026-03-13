@@ -486,6 +486,15 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn wait_timeout(timeout_ms: u64, condition: &str) -> Self {
+        Self {
+            message: format!("Wait timed out after {timeout_ms}ms: {condition}"),
+            code: ExitCode::TimeoutError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
     pub fn to_json(&self) -> String {
         let output = ErrorOutput {
             error: &self.message,
@@ -846,5 +855,14 @@ mod tests {
     fn js_execution_failed_without_json_has_no_custom_json() {
         let err = AppError::js_execution_failed("Error: test");
         assert!(err.custom_json.is_none());
+    }
+
+    #[test]
+    fn wait_timeout_error() {
+        let err = AppError::wait_timeout(3000, "text \"Products\" not found");
+        assert!(err.message.contains("Wait timed out"));
+        assert!(err.message.contains("3000ms"));
+        assert!(err.message.contains("Products"));
+        assert!(matches!(err.code, ExitCode::TimeoutError));
     }
 }
