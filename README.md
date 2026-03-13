@@ -16,11 +16,22 @@ AgentChrome is a native CLI tool for browser automation via the Chrome DevTools 
 cargo install agentchrome
 ```
 
-**2. Drop the CLAUDE.md template into your project**
+**2. Install the agentchrome skill**
+
+```sh
+agentchrome skill install
+```
+
+This auto-detects Claude Code and installs a skill file that tells the AI agent what agentchrome is and how to discover its capabilities. After upgrading agentchrome, run `agentchrome skill update` to refresh the skill with the current version.
+
+<details>
+<summary>Alternative: manual CLAUDE.md template</summary>
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Nunley-Media-Group/AgentChrome/main/examples/CLAUDE.md.example > CLAUDE.md
 ```
+
+</details>
 
 **3. Ask Claude Code to use the browser**
 
@@ -200,6 +211,7 @@ agentchrome page snapshot
 | `emulate` | Device and network emulation |
 | `perf` | Performance tracing and metrics |
 | `dialog` | Browser dialog handling (alert, confirm, prompt, beforeunload) |
+| `skill` | Agentic tool skill installation and management |
 | `config` | Configuration file management (show, init, path) |
 | `completions` | Generate shell completion scripts |
 | `man` | Display man pages for AgentChrome commands |

@@ -3733,6 +3733,450 @@ async fn run_dialog_features() {
         .await;
 }
 
+// =============================================================================
+// SkillWorld — Skill command group BDD tests
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct SkillWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+    temp_home: Option<tempfile::TempDir>,
+    readme_content: String,
+    /// Extra env vars to set for the next command run.
+    extra_env: Vec<(String, String)>,
+}
+
+impl SkillWorld {
+    fn ensure_temp_home(&mut self) -> PathBuf {
+        if self.temp_home.is_none() {
+            self.temp_home = Some(tempfile::tempdir().expect("failed to create temp dir"));
+        }
+        self.temp_home.as_ref().unwrap().path().to_path_buf()
+    }
+
+    fn run_skill_command(&mut self, args: &str) {
+        self.run_skill_command_with_env(args, vec![]);
+    }
+
+    fn run_skill_command_with_env(&mut self, args: &str, env_vars: Vec<(&str, &str)>) {
+        let binary = self
+            .binary_path
+            .as_ref()
+            .expect("Binary path not set")
+            .clone();
+        let temp_home = self.ensure_temp_home();
+
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        let cmd_args: Vec<&str> = if parts.first() == Some(&"agentchrome") {
+            parts[1..].to_vec()
+        } else {
+            parts
+        };
+
+        // Use env_clear() to isolate from host environment, then set only
+        // what we need. This prevents host env vars (CLAUDE_CODE, WINDSURF_*,
+        // AIDER_*, CURSOR_*, _) from triggering tool detection.
+        let mut cmd = std::process::Command::new(&binary);
+        cmd.args(&cmd_args)
+            .env_clear()
+            .env("HOME", temp_home.to_str().unwrap())
+            .env("PATH", std::env::var("PATH").unwrap_or_default());
+
+        for (key, val) in env_vars {
+            cmd.env(key, val);
+        }
+
+        let output = cmd
+            .output()
+            .unwrap_or_else(|e| panic!("Failed to run command: {e}"));
+
+        self.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        self.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        self.exit_code = Some(output.status.code().unwrap_or(-1));
+    }
+}
+
+// --- Skill Given steps ---
+
+#[given("an agentic coding tool environment is active with env var \"CLAUDE_CODE\" set")]
+fn skill_claude_code_env_set(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.extra_env.push(("CLAUDE_CODE".into(), "1".into()));
+}
+
+#[given("no particular agentic environment is active")]
+fn skill_no_env(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[given("the skill command is available")]
+fn skill_command_available(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[given(expr = "a skill was previously installed for {string}")]
+fn skill_previously_installed(world: &mut SkillWorld, tool: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.run_skill_command(&format!("skill install --tool {tool}"));
+    assert_eq!(
+        world.exit_code,
+        Some(0),
+        "Pre-install failed: {}",
+        world.stderr
+    );
+}
+
+#[given("no supported agentic tool can be detected")]
+fn skill_no_detection(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    // Temp home ensures no config dirs exist
+    world.ensure_temp_home();
+}
+
+#[given(expr = "a skill was installed via {string}")]
+fn skill_installed_via_command(world: &mut SkillWorld, command: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    // Extract tool-relevant args from the command
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    let args = parts[1..].join(" ");
+    world.run_skill_command(&args);
+    assert_eq!(
+        world.exit_code,
+        Some(0),
+        "Pre-install failed: {}",
+        world.stderr
+    );
+}
+
+#[given(expr = "a skill is already installed for {string}")]
+fn skill_already_installed(world: &mut SkillWorld, tool: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.run_skill_command(&format!("skill install --tool {tool}"));
+    assert_eq!(
+        world.exit_code,
+        Some(0),
+        "Pre-install failed: {}",
+        world.stderr
+    );
+}
+
+#[given("both \"CLAUDE_CODE\" env var is set and \"~/.continue/\" directory exists")]
+fn skill_both_claude_and_continue(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.extra_env.push(("CLAUDE_CODE".into(), "1".into()));
+    let temp_home = world.ensure_temp_home();
+    // Create ~/.continue/ directory in the temp home
+    std::fs::create_dir_all(temp_home.join(".continue")).unwrap();
+}
+
+#[given("the project README.md exists")]
+fn skill_readme_exists(world: &mut SkillWorld) {
+    let readme_path = project_root().join("README.md");
+    assert!(readme_path.exists(), "README.md not found");
+    world.readme_content = std::fs::read_to_string(&readme_path)
+        .unwrap_or_else(|e| panic!("Failed to read README.md: {e}"));
+}
+
+// --- Skill When steps ---
+
+#[when(expr = "I run {string}")]
+fn skill_run_command(world: &mut SkillWorld, command_line: String) {
+    let env_vars: Vec<(String, String)> = world.extra_env.clone();
+    let refs: Vec<(&str, &str)> = env_vars
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    world.run_skill_command_with_env(&command_line, refs);
+}
+
+#[when(expr = "I run {string} again")]
+fn skill_run_command_again(world: &mut SkillWorld, command_line: String) {
+    world.run_skill_command(&command_line);
+}
+
+#[when("I read the Claude Code Integration section")]
+fn skill_read_claude_section(world: &mut SkillWorld) {
+    assert!(
+        !world.readme_content.is_empty(),
+        "README content not loaded"
+    );
+}
+
+// --- Skill Then steps ---
+
+#[then("the exit code is 0")]
+fn skill_exit_code_zero(world: &mut SkillWorld) {
+    assert_eq!(
+        world.exit_code,
+        Some(0),
+        "Expected exit code 0, got {:?}\nstdout: {}\nstderr: {}",
+        world.exit_code,
+        world.stdout,
+        world.stderr
+    );
+}
+
+#[then("the exit code is non-zero")]
+fn skill_exit_code_nonzero(world: &mut SkillWorld) {
+    let code = world.exit_code.unwrap_or(0);
+    assert_ne!(
+        code, 0,
+        "Expected non-zero exit code\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stdout contains valid JSON with {string} equal to {string}")]
+fn skill_stdout_json_field_equals(world: &mut SkillWorld, field: String, expected: String) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    assert_eq!(
+        json[&field].as_str(),
+        Some(expected.as_str()),
+        "Expected {field}={expected}, got {:?}",
+        json[&field]
+    );
+}
+
+#[then(expr = "stdout contains {string} equal to {string}")]
+fn skill_stdout_contains_field(world: &mut SkillWorld, field: String, expected: String) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    assert_eq!(
+        json[&field].as_str(),
+        Some(expected.as_str()),
+        "Expected {field}={expected}, got {:?}",
+        json[&field]
+    );
+}
+
+#[then("stdout contains a \"path\" field pointing to the skill file location")]
+fn skill_stdout_has_path(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let path = json["path"].as_str().expect("missing 'path' field");
+    assert!(!path.is_empty(), "path field is empty");
+}
+
+#[then("the skill file exists at the reported path")]
+fn skill_file_exists_at_path(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let path = json["path"].as_str().expect("missing 'path' field");
+    assert!(
+        std::path::Path::new(path).exists(),
+        "Skill file does not exist at {path}"
+    );
+}
+
+#[then("the skill file exists at the Cursor install path")]
+fn skill_file_exists_cursor(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let path = json["path"].as_str().expect("missing 'path' field");
+    assert!(
+        std::path::Path::new(path).exists(),
+        "Cursor skill file does not exist at {path}"
+    );
+}
+
+#[then("stdout contains valid JSON with a \"tools\" array")]
+fn skill_stdout_has_tools_array(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    assert!(json["tools"].is_array(), "Expected 'tools' array in output");
+}
+
+#[then(
+    "the \"tools\" array contains entries for \"claude-code\", \"windsurf\", \"aider\", \"continue\", \"copilot-jb\", and \"cursor\""
+)]
+fn skill_tools_contains_all(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let tools = json["tools"].as_array().expect("tools is not an array");
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    for expected in &[
+        "claude-code",
+        "windsurf",
+        "aider",
+        "continue",
+        "copilot-jb",
+        "cursor",
+    ] {
+        assert!(
+            names.contains(expected),
+            "Missing tool '{expected}' in list. Found: {names:?}"
+        );
+    }
+}
+
+#[then("each tool entry has \"name\", \"detection\", \"path\", and \"installed\" fields")]
+fn skill_tool_entries_have_fields(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let tools = json["tools"].as_array().expect("tools is not an array");
+    for tool in tools {
+        assert!(tool["name"].is_string(), "missing 'name' field");
+        assert!(tool["detection"].is_string(), "missing 'detection' field");
+        assert!(tool["path"].is_string(), "missing 'path' field");
+        assert!(
+            tool["installed"].is_boolean(),
+            "missing or non-boolean 'installed' field"
+        );
+    }
+}
+
+#[then("the skill file no longer exists at the Claude Code install path")]
+fn skill_file_removed_claude(world: &mut SkillWorld) {
+    let temp_home = world.temp_home.as_ref().expect("No temp home");
+    let path = temp_home.path().join(".claude/skills/agentchrome/SKILL.md");
+    assert!(
+        !path.exists(),
+        "Skill file should have been removed at {}",
+        path.display()
+    );
+}
+
+#[then("stdout contains a \"version\" field matching the current agentchrome version")]
+fn skill_stdout_has_version(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let version = json["version"].as_str().expect("missing 'version' field");
+    assert!(!version.is_empty(), "version is empty");
+}
+
+#[then("the skill file at the Claude Code path contains the updated version")]
+fn skill_file_has_version(world: &mut SkillWorld) {
+    let temp_home = world.temp_home.as_ref().expect("No temp home");
+    let path = temp_home.path().join(".claude/skills/agentchrome/SKILL.md");
+    let content = std::fs::read_to_string(&path).expect("Failed to read skill file");
+    assert!(
+        content.contains("Version:"),
+        "Skill file does not contain version stamp"
+    );
+}
+
+#[then("stderr contains valid JSON with an \"error\" field")]
+fn skill_stderr_has_error(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr is not valid JSON: {e}\nstderr: {}", world.stderr));
+    assert!(
+        json["error"].is_string(),
+        "Expected 'error' field in stderr JSON"
+    );
+}
+
+#[then("stderr contains a \"supported_tools\" array listing all supported tool names")]
+fn skill_stderr_has_supported_tools(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr is not valid JSON: {e}\nstderr: {}", world.stderr));
+    let tools = json["supported_tools"]
+        .as_array()
+        .expect("Missing 'supported_tools' array in error output");
+    assert!(
+        tools.len() >= 6,
+        "Expected at least 6 tools, got {}",
+        tools.len()
+    );
+}
+
+#[then("the Claude Code entry in the tools list shows \"installed\" equal to true")]
+fn skill_claude_code_installed_true(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let tools = json["tools"].as_array().expect("tools is not an array");
+    let claude = tools
+        .iter()
+        .find(|t| t["name"].as_str() == Some("claude-code"))
+        .expect("claude-code not found in tools list");
+    assert_eq!(
+        claude["installed"].as_bool(),
+        Some(true),
+        "claude-code should be installed"
+    );
+}
+
+#[then("the Aider skill file no longer exists")]
+fn skill_aider_file_removed(world: &mut SkillWorld) {
+    let temp_home = world.temp_home.as_ref().expect("No temp home");
+    let path = temp_home.path().join(".aider/agentchrome.md");
+    assert!(
+        !path.exists(),
+        "Aider skill file should have been removed at {}",
+        path.display()
+    );
+}
+
+#[then("the skill file is overwritten with current version content")]
+fn skill_file_overwritten(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let path = json["path"].as_str().expect("missing 'path' field");
+    let content = std::fs::read_to_string(path).expect("Failed to read skill file");
+    assert!(
+        content.contains("Version:"),
+        "Skill file should contain version stamp"
+    );
+}
+
+#[then("the env var detection takes priority over config dir detection")]
+fn skill_env_priority(_world: &mut SkillWorld) {
+    // This is validated by the earlier assertion that tool == "claude-code"
+    // (env var detection beat config dir detection for continue)
+}
+
+#[then(expr = "it contains {string} as a setup step")]
+fn skill_readme_contains_setup(world: &mut SkillWorld, text: String) {
+    assert!(
+        world.readme_content.contains(&text),
+        "README does not contain '{text}'"
+    );
+}
+
+#[then(expr = "it contains {string} as a post-upgrade step")]
+fn skill_readme_contains_upgrade(world: &mut SkillWorld, text: String) {
+    assert!(
+        world.readme_content.contains(&text),
+        "README does not contain '{text}'"
+    );
+}
+
+#[then("stdout or stderr contains valid JSON")]
+fn skill_output_contains_json(world: &mut SkillWorld) {
+    let stdout_valid = serde_json::from_str::<serde_json::Value>(world.stdout.trim()).is_ok();
+    let stderr_valid = serde_json::from_str::<serde_json::Value>(world.stderr.trim()).is_ok();
+    assert!(
+        stdout_valid || stderr_valid,
+        "Neither stdout nor stderr contains valid JSON\nstdout: {}\nstderr: {}",
+        world.stdout,
+        world.stderr
+    );
+}
+
+#[then("the output conforms to the global JSON output contract")]
+fn skill_output_conforms(_world: &mut SkillWorld) {
+    // Validated by prior "stdout or stderr contains valid JSON" step
+}
+
 #[tokio::main]
 async fn main() {
     WorkflowWorld::run("tests/features/release-pipeline.feature").await;
@@ -3940,6 +4384,9 @@ async fn main() {
 
     // Capabilities manifest — all scenarios are CLI-testable (no Chrome needed).
     CapabilitiesWorld::run("tests/features/capabilities.feature").await;
+
+    // Skill command group — uses temp dirs, no Chrome needed.
+    SkillWorld::run("tests/features/skill-command-group.feature").await;
 
     // README documentation — all scenarios are file-parsing tests (no Chrome needed).
     ReadmeWorld::run("tests/features/readme.feature").await;

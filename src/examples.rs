@@ -412,6 +412,37 @@ fn all_examples() -> Vec<CommandGroupSummary> {
             ],
         },
         CommandGroupSummary {
+            command: "skill".into(),
+            description: "Agentic tool skill installation and management".into(),
+            examples: vec![
+                ExampleEntry {
+                    cmd: "agentchrome skill install".into(),
+                    description: "Auto-detect agentic tool and install skill".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome skill install --tool cursor".into(),
+                    description: "Install skill for a specific tool".into(),
+                    flags: Some(vec!["--tool".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome skill list".into(),
+                    description: "List supported tools and installation status".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome skill update --tool claude-code".into(),
+                    description: "Update installed skill to current version".into(),
+                    flags: Some(vec!["--tool".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome skill uninstall --tool aider".into(),
+                    description: "Remove an installed skill".into(),
+                    flags: Some(vec!["--tool".into()]),
+                },
+            ],
+        },
+        CommandGroupSummary {
             command: "config".into(),
             description: "Configuration file management (show, init, path)".into(),
             examples: vec![
@@ -550,6 +581,7 @@ mod tests {
         assert!(names.contains(&"emulate"));
         assert!(names.contains(&"perf"));
         assert!(names.contains(&"dialog"));
+        assert!(names.contains(&"skill"));
         assert!(names.contains(&"config"));
     }
 

@@ -466,6 +466,32 @@ EXAMPLES:
     )]
     Dialog(DialogArgs),
 
+    /// Agentic tool skill installation and management
+    #[command(
+        long_about = "Install, update, uninstall, or list agentchrome skill files for agentic \
+            coding tools (Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor). \
+            The skill file is a minimal signpost that tells the AI agent what agentchrome is \
+            and how to discover its capabilities via the CLI's built-in help system. Auto-detects \
+            the active agentic environment, or use --tool to target a specific tool.",
+        after_long_help = "\
+EXAMPLES:
+  # Auto-detect and install
+  agentchrome skill install
+
+  # Install for a specific tool
+  agentchrome skill install --tool claude-code
+
+  # List supported tools and installation status
+  agentchrome skill list
+
+  # Update installed skill to current version
+  agentchrome skill update --tool claude-code
+
+  # Remove an installed skill
+  agentchrome skill uninstall --tool claude-code"
+    )]
+    Skill(SkillArgs),
+
     /// Configuration file management (show, init, path)
     #[command(
         long_about = "Manage the agentchrome configuration file. Show the resolved configuration \
@@ -1365,6 +1391,100 @@ pub enum DialogAction {
     Accept,
     /// Dismiss (Cancel) the dialog
     Dismiss,
+}
+
+/// Arguments for the `skill` subcommand group.
+#[derive(Args)]
+pub struct SkillArgs {
+    #[command(subcommand)]
+    pub command: SkillCommand,
+}
+
+/// Skill subcommands.
+#[derive(Subcommand)]
+pub enum SkillCommand {
+    /// Install the agentchrome skill for an agentic coding tool
+    #[command(
+        long_about = "Install a concise agentchrome skill/instruction file for the detected (or \
+            specified) agentic coding tool. The skill tells the AI agent what agentchrome is \
+            and how to discover its capabilities. Re-running install overwrites the existing \
+            skill file (idempotent).",
+        after_long_help = "\
+EXAMPLES:
+  # Auto-detect tool and install
+  agentchrome skill install
+
+  # Install for a specific tool
+  agentchrome skill install --tool claude-code"
+    )]
+    Install(SkillInstallArgs),
+
+    /// Remove a previously installed agentchrome skill
+    #[command(
+        long_about = "Remove a previously installed agentchrome skill file for the detected (or \
+            specified) agentic coding tool. For tools with shared rule files, only the \
+            agentchrome section is removed.",
+        after_long_help = "\
+EXAMPLES:
+  # Auto-detect and uninstall
+  agentchrome skill uninstall
+
+  # Uninstall for a specific tool
+  agentchrome skill uninstall --tool cursor"
+    )]
+    Uninstall(SkillToolArgs),
+
+    /// Update an installed skill to the current version
+    #[command(
+        long_about = "Replace an installed agentchrome skill file with the current version's \
+            content. Errors if no skill is currently installed for the tool.",
+        after_long_help = "\
+EXAMPLES:
+  # Update for auto-detected tool
+  agentchrome skill update
+
+  # Update for a specific tool
+  agentchrome skill update --tool claude-code"
+    )]
+    Update(SkillToolArgs),
+
+    /// List supported agentic tools and installation status
+    #[command(
+        long_about = "List all supported agentic coding tools with their detection method, \
+            install path, and whether a skill is currently installed.",
+        after_long_help = "\
+EXAMPLES:
+  # List all tools
+  agentchrome skill list"
+    )]
+    List,
+}
+
+/// Arguments for `skill install`.
+#[derive(Args)]
+pub struct SkillInstallArgs {
+    /// Target tool (auto-detected if omitted)
+    #[arg(long, value_enum)]
+    pub tool: Option<ToolName>,
+}
+
+/// Arguments for `skill uninstall` and `skill update`.
+#[derive(Args)]
+pub struct SkillToolArgs {
+    /// Target tool (auto-detected if omitted)
+    #[arg(long, value_enum)]
+    pub tool: Option<ToolName>,
+}
+
+/// Supported agentic coding tools.
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ToolName {
+    ClaudeCode,
+    Windsurf,
+    Aider,
+    Continue,
+    CopilotJb,
+    Cursor,
 }
 
 /// Wait strategy for navigation commands.

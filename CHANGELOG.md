@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-03-12
+
+### Added
+
+- Add `skill` command group with `install`, `uninstall`, `update`, and `list` subcommands for installing agentchrome skill files into agentic coding tools (#172)
+
 ## [1.8.0] - 2026-03-12
 
 ### Added

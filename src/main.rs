@@ -13,6 +13,7 @@ mod navigate;
 mod network;
 mod page;
 mod perf;
+mod skill;
 mod snapshot;
 mod tabs;
 
@@ -100,6 +101,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Perf(args) => perf::execute_perf(&global, args).await,
         Command::Cookie(args) => cookie::execute_cookie(&global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
+        Command::Skill(args) => skill::execute_skill(&global, args),
         Command::Examples(args) => examples::execute_examples(&global, args),
         Command::Capabilities(args) => capabilities::execute_capabilities(&global, args),
         Command::Completions(args) => execute_completions(args),
