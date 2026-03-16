@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-03-15
+
+### Changed
+
+- Replace large-response guidance object with temp file output: responses exceeding the threshold are now written to a UUID-named file in the OS temp directory, with the file path returned on stdout as a `TempFileOutput` object (#177)
+
+### Removed
+
+- Remove `--search` per-command flag from `page snapshot`, `page text`, `js exec`, `network list`, and `network get` (#177)
+- Remove `--full-response` global flag (#177)
+
 ## [1.12.0] - 2026-03-12
 
 ### Added
