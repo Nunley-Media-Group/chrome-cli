@@ -9,6 +9,7 @@ pub mod chrome;
 pub mod config;
 pub mod connection;
 pub mod error;
+pub mod frame;
 pub mod session;
 
 /// Returns the clap `Command` definition for man page and completion generation.

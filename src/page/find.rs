@@ -212,6 +212,8 @@ async fn capture_snapshot(
         url,
         timestamp: agentchrome::session::now_iso8601(),
         uid_map: build.uid_map.clone(),
+        frame_index: None,
+        frame_id: None,
     };
     if let Err(e) = crate::snapshot::write_snapshot_state(&state) {
         eprintln!("warning: could not save snapshot state: {e}");
@@ -244,7 +246,11 @@ fn assign_uid_from_snapshot(node: &crate::snapshot::SnapshotNode, m: &mut FindMa
 // Command executor
 // =============================================================================
 
-pub async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<(), AppError> {
+pub async fn execute_find(
+    global: &GlobalOpts,
+    args: &PageFindArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
     // Validate: at least one of query, selector, or role must be provided
     if args.query.is_none() && args.selector.is_none() && args.role.is_none() {
         return Err(AppError {
@@ -254,22 +260,50 @@ pub async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<()
         });
     }
 
-    let (_client, mut managed) = setup_session(global).await?;
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    // Enable required domains
-    managed.ensure_domain("Accessibility").await?;
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Runtime").await?;
+    // Resolve optional frame context
+    let mut frame_ctx = if let Some(frame_str) = frame {
+        let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
+        Some(agentchrome::frame::resolve_frame(&client, &mut managed, &arg).await?)
+    } else {
+        None
+    };
+
+    // Enable required domains (needs &mut)
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("Accessibility").await?;
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
 
     // Capture snapshot (used by both search paths for UID assignment)
-    let build = capture_snapshot(&managed).await?;
+    let build = {
+        let effective = if let Some(ref ctx) = frame_ctx {
+            agentchrome::frame::frame_session(ctx, &managed)
+        } else {
+            &managed
+        };
+        capture_snapshot(effective).await?
+    };
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
 
     let matches = if let Some(ref selector) = args.selector {
         // CSS selector path
-        let mut css_matches = find_by_selector(&managed, selector, args.limit).await?;
+        let mut css_matches = find_by_selector(effective, selector, args.limit).await?;
 
         // Enrich CSS matches with UIDs from the snapshot tree
         for m in &mut css_matches {
@@ -293,7 +327,7 @@ pub async fn execute_find(global: &GlobalOpts, args: &PageFindArgs) -> Result<()
         let mut matches = Vec::with_capacity(hits.len());
         for hit in hits {
             let bounding_box = if let Some(backend_id) = hit.backend_dom_node_id {
-                resolve_bounding_box(&managed, backend_id).await
+                resolve_bounding_box(effective, backend_id).await
             } else {
                 None
             };

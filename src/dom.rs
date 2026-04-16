@@ -1,18 +1,16 @@
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     DomArgs, DomCommand, DomGetAttributeArgs, DomGetStyleArgs, DomNodeIdArgs, DomSelectArgs,
     DomSetAttributeArgs, DomSetStyleArgs, DomSetTextArgs, DomTreeArgs, GlobalOpts,
 };
-use crate::emulate::apply_emulate_state;
+use crate::output::{print_output, setup_session_with_interceptors as setup_session};
 use crate::snapshot;
 
 // =============================================================================
@@ -103,66 +101,29 @@ struct TreeOutput {
 }
 
 // =============================================================================
-// Output formatting
-// =============================================================================
-
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-    managed.install_dialog_interceptors().await;
-
-    Ok((client, managed))
-}
-
-// =============================================================================
 // Core helpers
 // =============================================================================
 
 /// Get the document root nodeId.
-async fn get_document_root(session: &ManagedSession) -> Result<i64, AppError> {
+///
+/// For same-origin frames, this resolves the frame's document root via
+/// `Runtime.evaluate` with the frame's execution context, since
+/// `DOM.getDocument` always returns the main frame's document when using the
+/// shared page session.
+async fn get_document_root(
+    session: &ManagedSession,
+    _frame_ctx: Option<&agentchrome::frame::FrameContext>,
+) -> Result<i64, AppError> {
+    // Same-origin frames: this function cannot reliably return a nodeId for
+    // the frame's document because DOM.querySelectorAll needs the subtree
+    // loaded, but DOM.requestChildNodes is asynchronous and unreliable.
+    // Callers should use `query_selector_in_frame()` for CSS queries in
+    // same-origin frames instead.
+    //
+    // Fall through to the default DOM.getDocument path; callers must handle
+    // this case separately for CSS queries.
+
+    // Default: main frame or OOPIF session
     let doc = session
         .send_command("DOM.getDocument", None)
         .await
@@ -176,18 +137,164 @@ async fn get_document_root(session: &ManagedSession) -> Result<i64, AppError> {
         .ok_or_else(|| AppError::node_not_found("root"))
 }
 
-/// Check if a target string is a UID (matches pattern: 's' + digits).
-fn is_uid(target: &str) -> bool {
-    if !target.starts_with('s') {
-        return false;
+/// Run `document.querySelector(selector)` via `Runtime.evaluate` in a specific
+/// execution context (for same-origin frames) and return the matched element as
+/// a `ResolvedNode`. This bypasses `DOM.querySelectorAll` which cannot work
+/// with frame documents that haven't been loaded into the DOM agent's tree.
+async fn query_selector_in_context(
+    session: &ManagedSession,
+    selector: &str,
+    context_id: i64,
+) -> Result<ResolvedNode, AppError> {
+    let escaped = selector.replace('\\', "\\\\").replace('"', "\\\"");
+    let js = format!(r#"document.querySelector("{escaped}")"#);
+
+    let eval = session
+        .send_command(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": js,
+                "contextId": context_id,
+            })),
+        )
+        .await
+        .map_err(|e| AppError {
+            message: format!("CSS selector query failed: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    // Check for exception (e.g., invalid selector)
+    if let Some(exc) = eval.get("exceptionDetails") {
+        let desc = exc["exception"]["description"]
+            .as_str()
+            .unwrap_or("unknown error");
+        return Err(AppError {
+            message: format!("CSS selector query failed: {desc}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        });
     }
-    let rest = &target[1..];
-    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+
+    // Check for null result (element not found)
+    let result_type = eval["result"]["type"].as_str().unwrap_or("undefined");
+    if result_type == "undefined"
+        || (result_type == "object" && eval["result"]["subtype"].as_str() == Some("null"))
+    {
+        return Err(AppError::css_selector_not_found(selector));
+    }
+
+    let object_id = eval["result"]["objectId"]
+        .as_str()
+        .ok_or_else(|| AppError::css_selector_not_found(selector))?;
+
+    // Ensure DOM agent is initialized before requestNode
+    let _ = session.send_command("DOM.getDocument", None).await;
+
+    // Get the DOM node for the resolved object
+    let node_result = session
+        .send_command(
+            "DOM.requestNode",
+            Some(serde_json::json!({ "objectId": object_id })),
+        )
+        .await
+        .map_err(|e| AppError {
+            message: format!("DOM.requestNode failed: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    let node_id = node_result["nodeId"]
+        .as_i64()
+        .filter(|&id| id > 0)
+        .ok_or_else(|| AppError::css_selector_not_found(selector))?;
+
+    let backend_node_id = get_backend_node_id(session, node_id)
+        .await
+        .unwrap_or(node_id);
+
+    Ok(ResolvedNode {
+        node_id,
+        backend_node_id,
+    })
 }
 
-/// Check if a target string is a CSS selector (starts with 'css:').
-fn is_css_selector(target: &str) -> bool {
-    target.starts_with("css:")
+/// Run `document.querySelectorAll(selector)` via `Runtime.evaluate` in a
+/// specific execution context and return all matched elements as nodeIds.
+async fn query_selector_all_in_context(
+    session: &ManagedSession,
+    selector: &str,
+    context_id: i64,
+) -> Result<Vec<i64>, AppError> {
+    let escaped = selector.replace('\\', "\\\\").replace('"', "\\\"");
+    let js = format!(r#"Array.from(document.querySelectorAll("{escaped}"))"#);
+
+    let eval = session
+        .send_command(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": js,
+                "contextId": context_id,
+            })),
+        )
+        .await
+        .map_err(|e| AppError {
+            message: format!("CSS selector query failed: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    let array_obj_id = match eval["result"]["objectId"].as_str() {
+        Some(id) => id.to_string(),
+        None => return Ok(vec![]),
+    };
+
+    // Get properties (array elements)
+    let props = session
+        .send_command(
+            "Runtime.getProperties",
+            Some(serde_json::json!({
+                "objectId": array_obj_id,
+                "ownProperties": true,
+            })),
+        )
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to get query results: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    let mut node_ids = Vec::new();
+    if let Some(results) = props["result"].as_array() {
+        for prop in results {
+            // Skip non-numeric properties (like "length")
+            if prop["name"]
+                .as_str()
+                .and_then(|n| n.parse::<u32>().ok())
+                .is_none()
+            {
+                continue;
+            }
+            let Some(obj_id) = prop["value"]["objectId"].as_str() else {
+                continue;
+            };
+
+            let node_result = session
+                .send_command(
+                    "DOM.requestNode",
+                    Some(serde_json::json!({ "objectId": obj_id })),
+                )
+                .await;
+            if let Ok(nr) = node_result {
+                if let Some(nid) = nr["nodeId"].as_i64().filter(|&id| id > 0) {
+                    node_ids.push(nid);
+                }
+            }
+        }
+    }
+
+    Ok(node_ids)
 }
 
 /// Resolved node with both session-scoped `nodeId` and stable `backendNodeId`.
@@ -201,7 +308,11 @@ struct ResolvedNode {
 /// Unified node resolution: integer (backendNodeId), UID, or CSS selector → CDP nodeId.
 ///
 /// Integer targets are treated as `backendNodeId` values (stable across sessions).
-async fn resolve_node(session: &ManagedSession, target: &str) -> Result<ResolvedNode, AppError> {
+async fn resolve_node(
+    session: &ManagedSession,
+    target: &str,
+    frame_ctx: Option<&agentchrome::frame::FrameContext>,
+) -> Result<ResolvedNode, AppError> {
     // Try integer (backendNodeId) first
     if let Ok(backend_node_id) = target.parse::<i64>() {
         let node_id = push_backend_node_to_frontend(session, backend_node_id, target).await?;
@@ -212,7 +323,7 @@ async fn resolve_node(session: &ManagedSession, target: &str) -> Result<Resolved
     }
 
     // UID resolution
-    if is_uid(target) {
+    if snapshot::is_uid(target) {
         let state = snapshot::read_snapshot_state()?.ok_or_else(AppError::no_snapshot_state)?;
         let backend_node_id = state
             .uid_map
@@ -230,9 +341,16 @@ async fn resolve_node(session: &ManagedSession, target: &str) -> Result<Resolved
     }
 
     // CSS selector resolution
-    if is_css_selector(target) {
+    if snapshot::is_css_selector(target) {
         let selector = &target[4..];
-        let root_id = get_document_root(session).await?;
+
+        // For same-origin frames, use JS-based query (DOM.querySelector cannot
+        // reliably access the frame's document through the shared session)
+        if let Some(ctx_id) = frame_ctx.and_then(agentchrome::frame::execution_context_id) {
+            return query_selector_in_context(session, selector, ctx_id).await;
+        }
+
+        let root_id = get_document_root(session, frame_ctx).await?;
 
         let query = session
             .send_command(
@@ -277,7 +395,7 @@ async fn push_backend_node_to_frontend(
     label: &str,
 ) -> Result<i64, AppError> {
     // Ensure DOM domain is aware of the document tree
-    let _ = get_document_root(session).await?;
+    let _ = get_document_root(session, None).await?;
 
     // Resolve backendNodeId → Runtime.RemoteObject
     let resolve = session
@@ -392,21 +510,130 @@ async fn get_text_content(session: &ManagedSession, node_id: i64) -> Result<Stri
 // Dispatcher
 // =============================================================================
 
+/// Find elements inside shadow DOM roots via JavaScript traversal.
+///
+/// Used as a fallback when `DOM.querySelectorAll` returns no results and
+/// `--pierce-shadow` is set.
+async fn find_in_shadow_dom(
+    session: &ManagedSession,
+    selector: &str,
+) -> Result<Vec<i64>, AppError> {
+    // JS that recursively searches shadow roots for a CSS selector.
+    // Returns an array of remote objects; we'll request each as a nodeId.
+    let escaped = serde_json::to_string(selector).unwrap_or_default();
+    let expression = format!(
+        r"(function() {{
+            function findInShadow(root, sel) {{
+                var results = [];
+                var els = root.querySelectorAll(sel);
+                for (var i = 0; i < els.length; i++) results.push(els[i]);
+                var all = root.querySelectorAll('*');
+                for (var i = 0; i < all.length; i++) {{
+                    if (all[i].shadowRoot) {{
+                        var inner = findInShadow(all[i].shadowRoot, sel);
+                        for (var j = 0; j < inner.length; j++) results.push(inner[j]);
+                    }}
+                }}
+                return results;
+            }}
+            return findInShadow(document, {escaped});
+        }})()"
+    );
+
+    let result = session
+        .send_command(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": expression,
+                "returnByValue": false,
+            })),
+        )
+        .await
+        .map_err(|e| AppError {
+            message: format!("Shadow DOM search failed: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    let object_id = result["result"]["objectId"].as_str().unwrap_or_default();
+    if object_id.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Get the array properties to iterate elements
+    let props = session
+        .send_command(
+            "Runtime.getProperties",
+            Some(serde_json::json!({
+                "objectId": object_id,
+                "ownProperties": true,
+            })),
+        )
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to get shadow DOM results: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    let mut node_ids = Vec::new();
+    if let Some(props_arr) = props["result"].as_array() {
+        for prop in props_arr {
+            // Skip non-index properties (e.g., "length")
+            if prop["name"]
+                .as_str()
+                .and_then(|n| n.parse::<u32>().ok())
+                .is_none()
+            {
+                continue;
+            }
+            let elem_obj_id = prop["value"]["objectId"].as_str().unwrap_or_default();
+            if elem_obj_id.is_empty() {
+                continue;
+            }
+            // Convert remote object to DOM nodeId
+            if let Ok(req) = session
+                .send_command(
+                    "DOM.requestNode",
+                    Some(serde_json::json!({ "objectId": elem_obj_id })),
+                )
+                .await
+            {
+                if let Some(nid) = req["nodeId"].as_i64() {
+                    if nid > 0 {
+                        node_ids.push(nid);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(node_ids)
+}
+
 /// Execute the `dom` subcommand group.
 pub async fn execute_dom(global: &GlobalOpts, args: &DomArgs) -> Result<(), AppError> {
+    let frame = args.frame.as_deref();
+    let pierce_shadow = args.pierce_shadow;
     match &args.command {
-        DomCommand::Select(select_args) => execute_select(global, select_args).await,
-        DomCommand::GetAttribute(attr_args) => execute_get_attribute(global, attr_args).await,
-        DomCommand::GetText(node_args) => execute_get_text(global, node_args).await,
-        DomCommand::GetHtml(node_args) => execute_get_html(global, node_args).await,
-        DomCommand::SetAttribute(attr_args) => execute_set_attribute(global, attr_args).await,
-        DomCommand::SetText(text_args) => execute_set_text(global, text_args).await,
-        DomCommand::Remove(node_args) => execute_remove(global, node_args).await,
-        DomCommand::GetStyle(style_args) => execute_get_style(global, style_args).await,
-        DomCommand::SetStyle(style_args) => execute_set_style(global, style_args).await,
-        DomCommand::Parent(node_args) => execute_parent(global, node_args).await,
-        DomCommand::Children(node_args) => execute_children(global, node_args).await,
-        DomCommand::Siblings(node_args) => execute_siblings(global, node_args).await,
+        DomCommand::Select(select_args) => {
+            execute_select(global, select_args, frame, pierce_shadow).await
+        }
+        DomCommand::GetAttribute(attr_args) => {
+            execute_get_attribute(global, attr_args, frame).await
+        }
+        DomCommand::GetText(node_args) => execute_get_text(global, node_args, frame).await,
+        DomCommand::GetHtml(node_args) => execute_get_html(global, node_args, frame).await,
+        DomCommand::SetAttribute(attr_args) => {
+            execute_set_attribute(global, attr_args, frame).await
+        }
+        DomCommand::SetText(text_args) => execute_set_text(global, text_args, frame).await,
+        DomCommand::Remove(node_args) => execute_remove(global, node_args, frame).await,
+        DomCommand::GetStyle(style_args) => execute_get_style(global, style_args, frame).await,
+        DomCommand::SetStyle(style_args) => execute_set_style(global, style_args, frame).await,
+        DomCommand::Parent(node_args) => execute_parent(global, node_args, frame).await,
+        DomCommand::Children(node_args) => execute_children(global, node_args, frame).await,
+        DomCommand::Siblings(node_args) => execute_siblings(global, node_args, frame).await,
         DomCommand::Tree(tree_args) => execute_tree(global, tree_args).await,
     }
 }
@@ -416,20 +643,46 @@ pub async fn execute_dom(global: &GlobalOpts, args: &DomArgs) -> Result<(), AppE
 // =============================================================================
 
 #[allow(clippy::too_many_lines)]
-async fn execute_select(global: &GlobalOpts, args: &DomSelectArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_select(
+    global: &GlobalOpts,
+    args: &DomSelectArgs,
+    frame: Option<&str>,
+    pierce_shadow: bool,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Runtime").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let root_id = get_document_root(&managed).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
 
-    let node_ids = if args.xpath {
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    // For same-origin frames with CSS selectors, use JS-based query
+    let same_origin_ctx_id = frame_ctx
+        .as_ref()
+        .and_then(agentchrome::frame::execution_context_id);
+
+    let root_id = get_document_root(effective, frame_ctx.as_ref()).await?;
+
+    let mut node_ids = if args.xpath {
         // XPath via DOM.performSearch
-        let search = managed
+        let search = effective
             .send_command(
                 "DOM.performSearch",
                 Some(serde_json::json!({ "query": args.selector })),
@@ -445,7 +698,7 @@ async fn execute_select(global: &GlobalOpts, args: &DomSelectArgs) -> Result<(),
         let count = search["resultCount"].as_i64().unwrap_or(0);
 
         let ids = if count > 0 {
-            let results = managed
+            let results = effective
                 .send_command(
                     "DOM.getSearchResults",
                     Some(serde_json::json!({
@@ -469,7 +722,7 @@ async fn execute_select(global: &GlobalOpts, args: &DomSelectArgs) -> Result<(),
         };
 
         // Clean up search
-        let _ = managed
+        let _ = effective
             .send_command(
                 "DOM.discardSearchResults",
                 Some(serde_json::json!({ "searchId": search_id })),
@@ -477,9 +730,17 @@ async fn execute_select(global: &GlobalOpts, args: &DomSelectArgs) -> Result<(),
             .await;
 
         ids
+    } else if let Some(ctx_id) = same_origin_ctx_id {
+        // Same-origin frame: use JS-based query (strip css: prefix if present)
+        let css_selector = if snapshot::is_css_selector(&args.selector) {
+            &args.selector[4..]
+        } else {
+            &args.selector
+        };
+        query_selector_all_in_context(effective, css_selector, ctx_id).await?
     } else {
         // CSS via DOM.querySelectorAll
-        let query = managed
+        let query = effective
             .send_command(
                 "DOM.querySelectorAll",
                 Some(serde_json::json!({
@@ -504,10 +765,17 @@ async fn execute_select(global: &GlobalOpts, args: &DomSelectArgs) -> Result<(),
             .unwrap_or_default()
     };
 
+    // If pierce_shadow is set and no CSS results found, try shadow DOM JS traversal
+    if pierce_shadow && node_ids.is_empty() && !args.xpath {
+        if let Ok(shadow_ids) = find_in_shadow_dom(effective, &args.selector).await {
+            node_ids = shadow_ids;
+        }
+    }
+
     // Describe each node
     let mut elements = Vec::with_capacity(node_ids.len());
     for nid in node_ids {
-        if let Ok(el) = describe_element(&managed, nid).await {
+        if let Ok(el) = describe_element(effective, nid).await {
             elements.push(el);
         }
     }
@@ -540,17 +808,34 @@ async fn execute_select(global: &GlobalOpts, args: &DomSelectArgs) -> Result<(),
 async fn execute_get_attribute(
     global: &GlobalOpts,
     args: &DomGetAttributeArgs,
+    frame: Option<&str>,
 ) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let resolved = resolve_node(&managed, &args.node_id).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+    }
 
-    let attrs = managed
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let resolved = resolve_node(effective, &args.node_id, frame_ctx.as_ref()).await?;
+
+    let attrs = effective
         .send_command(
             "DOM.getAttributes",
             Some(serde_json::json!({ "nodeId": resolved.node_id })),
@@ -596,17 +881,39 @@ async fn execute_get_attribute(
 // dom get-text
 // =============================================================================
 
-async fn execute_get_text(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_get_text(
+    global: &GlobalOpts,
+    args: &DomNodeIdArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Runtime").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let node_id = resolve_node(&managed, &args.node_id).await?.node_id;
-    let text = get_text_content(&managed, node_id).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let node_id = resolve_node(effective, &args.node_id, frame_ctx.as_ref())
+        .await?
+        .node_id;
+    let text = get_text_content(effective, node_id).await?;
 
     if global.output.plain {
         print!("{text}");
@@ -621,17 +928,39 @@ async fn execute_get_text(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
 // dom get-html
 // =============================================================================
 
-async fn execute_get_html(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_get_html(
+    global: &GlobalOpts,
+    args: &DomNodeIdArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let node_id = resolve_node(&managed, &args.node_id).await?.node_id;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+    }
 
-    let html = managed
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let node_id = resolve_node(effective, &args.node_id, frame_ctx.as_ref())
+        .await?
+        .node_id;
+
+    let html = effective
         .send_command(
             "DOM.getOuterHTML",
             Some(serde_json::json!({ "nodeId": node_id })),
@@ -661,17 +990,34 @@ async fn execute_get_html(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
 async fn execute_set_attribute(
     global: &GlobalOpts,
     args: &DomSetAttributeArgs,
+    frame: Option<&str>,
 ) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let resolved = resolve_node(&managed, &args.node_id).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+    }
 
-    managed
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let resolved = resolve_node(effective, &args.node_id, frame_ctx.as_ref()).await?;
+
+    effective
         .send_command(
             "DOM.setAttributeValue",
             Some(serde_json::json!({
@@ -709,19 +1055,39 @@ async fn execute_set_attribute(
 // dom set-text
 // =============================================================================
 
-async fn execute_set_text(global: &GlobalOpts, args: &DomSetTextArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_set_text(
+    global: &GlobalOpts,
+    args: &DomSetTextArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Runtime").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let resolved = resolve_node(&managed, &args.node_id).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let resolved = resolve_node(effective, &args.node_id, frame_ctx.as_ref()).await?;
 
     // Resolve to JS object and set textContent
-    let resolve = managed
+    let resolve = effective
         .send_command(
             "DOM.resolveNode",
             Some(serde_json::json!({ "nodeId": resolved.node_id })),
@@ -733,7 +1099,7 @@ async fn execute_set_text(global: &GlobalOpts, args: &DomSetTextArgs) -> Result<
         .as_str()
         .ok_or_else(|| AppError::node_not_found(&args.node_id))?;
 
-    managed
+    effective
         .send_command(
             "Runtime.callFunctionOn",
             Some(serde_json::json!({
@@ -767,17 +1133,37 @@ async fn execute_set_text(global: &GlobalOpts, args: &DomSetTextArgs) -> Result<
 // dom remove
 // =============================================================================
 
-async fn execute_remove(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_remove(
+    global: &GlobalOpts,
+    args: &DomNodeIdArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let resolved = resolve_node(&managed, &args.node_id).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+    }
 
-    managed
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let resolved = resolve_node(effective, &args.node_id, frame_ctx.as_ref()).await?;
+
+    effective
         .send_command(
             "DOM.removeNode",
             Some(serde_json::json!({ "nodeId": resolved.node_id })),
@@ -807,18 +1193,40 @@ async fn execute_remove(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(),
 // dom get-style
 // =============================================================================
 
-async fn execute_get_style(global: &GlobalOpts, args: &DomGetStyleArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_get_style(
+    global: &GlobalOpts,
+    args: &DomGetStyleArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("CSS").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let node_id = resolve_node(&managed, &args.node_id).await?.node_id;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("CSS").await?;
+    }
 
-    let computed = managed
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let node_id = resolve_node(effective, &args.node_id, frame_ctx.as_ref())
+        .await?
+        .node_id;
+
+    let computed = effective
         .send_command(
             "CSS.getComputedStyleForNode",
             Some(serde_json::json!({ "nodeId": node_id })),
@@ -890,17 +1298,37 @@ async fn execute_get_style(global: &GlobalOpts, args: &DomGetStyleArgs) -> Resul
 // dom set-style
 // =============================================================================
 
-async fn execute_set_style(global: &GlobalOpts, args: &DomSetStyleArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_set_style(
+    global: &GlobalOpts,
+    args: &DomSetStyleArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let resolved = resolve_node(&managed, &args.node_id).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+    }
 
-    managed
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let resolved = resolve_node(effective, &args.node_id, frame_ctx.as_ref()).await?;
+
+    effective
         .send_command(
             "DOM.setAttributeValue",
             Some(serde_json::json!({
@@ -934,20 +1362,42 @@ async fn execute_set_style(global: &GlobalOpts, args: &DomSetStyleArgs) -> Resul
 // dom parent
 // =============================================================================
 
-async fn execute_parent(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_parent(
+    global: &GlobalOpts,
+    args: &DomNodeIdArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Runtime").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let node_id = resolve_node(&managed, &args.node_id).await?.node_id;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let node_id = resolve_node(effective, &args.node_id, frame_ctx.as_ref())
+        .await?
+        .node_id;
 
     // Use Runtime to get parentElement info since DOM.describeNode doesn't
     // always return parentId reliably for all node types
-    let resolve = managed
+    let resolve = effective
         .send_command(
             "DOM.resolveNode",
             Some(serde_json::json!({ "nodeId": node_id })),
@@ -960,7 +1410,7 @@ async fn execute_parent(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(),
         .ok_or_else(|| AppError::node_not_found(&args.node_id))?;
 
     // Check if parent exists
-    let parent_check = managed
+    let parent_check = effective
         .send_command(
             "Runtime.callFunctionOn",
             Some(serde_json::json!({
@@ -978,7 +1428,7 @@ async fn execute_parent(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(),
     }
 
     // Get parent node via DOM.requestNode on the parent object
-    let parent_obj = managed
+    let parent_obj = effective
         .send_command(
             "Runtime.callFunctionOn",
             Some(serde_json::json!({
@@ -992,7 +1442,7 @@ async fn execute_parent(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(),
         .as_str()
         .ok_or_else(AppError::no_parent)?;
 
-    let parent_node = managed
+    let parent_node = effective
         .send_command(
             "DOM.requestNode",
             Some(serde_json::json!({ "objectId": parent_object_id })),
@@ -1003,7 +1453,7 @@ async fn execute_parent(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(),
         .as_i64()
         .ok_or_else(AppError::no_parent)?;
 
-    let parent = describe_element(&managed, parent_node_id).await?;
+    let parent = describe_element(effective, parent_node_id).await?;
 
     if global.output.plain {
         println!(
@@ -1022,19 +1472,41 @@ async fn execute_parent(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(),
 // dom children
 // =============================================================================
 
-async fn execute_children(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_children(
+    global: &GlobalOpts,
+    args: &DomNodeIdArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Runtime").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let node_id = resolve_node(&managed, &args.node_id).await?.node_id;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let node_id = resolve_node(effective, &args.node_id, frame_ctx.as_ref())
+        .await?
+        .node_id;
 
     // Request child nodes
-    managed
+    effective
         .send_command(
             "DOM.requestChildNodes",
             Some(serde_json::json!({ "nodeId": node_id, "depth": 1 })),
@@ -1042,7 +1514,7 @@ async fn execute_children(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
         .await?;
 
     // Get children via describeNode with depth 1
-    let describe = managed
+    let describe = effective
         .send_command(
             "DOM.describeNode",
             Some(serde_json::json!({ "nodeId": node_id, "depth": 1 })),
@@ -1062,7 +1534,7 @@ async fn execute_children(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
         if node_type == 1 {
             let child_id = child["nodeId"].as_i64().unwrap_or(0);
             if child_id > 0 {
-                if let Ok(el) = describe_element(&managed, child_id).await {
+                if let Ok(el) = describe_element(effective, child_id).await {
                     elements.push(el);
                 }
             }
@@ -1088,19 +1560,41 @@ async fn execute_children(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
 // dom siblings
 // =============================================================================
 
-async fn execute_siblings(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_siblings(
+    global: &GlobalOpts,
+    args: &DomNodeIdArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Runtime").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    let node_id = resolve_node(&managed, &args.node_id).await?.node_id;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let node_id = resolve_node(effective, &args.node_id, frame_ctx.as_ref())
+        .await?
+        .node_id;
 
     // Get parent nodeId via Runtime
-    let resolve = managed
+    let resolve = effective
         .send_command(
             "DOM.resolveNode",
             Some(serde_json::json!({ "nodeId": node_id })),
@@ -1112,7 +1606,7 @@ async fn execute_siblings(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
         .as_str()
         .ok_or_else(|| AppError::node_not_found(&args.node_id))?;
 
-    let parent_obj = managed
+    let parent_obj = effective
         .send_command(
             "Runtime.callFunctionOn",
             Some(serde_json::json!({
@@ -1126,7 +1620,7 @@ async fn execute_siblings(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
         .as_str()
         .ok_or_else(AppError::no_parent)?;
 
-    let parent_node = managed
+    let parent_node = effective
         .send_command(
             "DOM.requestNode",
             Some(serde_json::json!({ "objectId": parent_object_id })),
@@ -1138,14 +1632,14 @@ async fn execute_siblings(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
         .ok_or_else(AppError::no_parent)?;
 
     // Get parent's children
-    managed
+    effective
         .send_command(
             "DOM.requestChildNodes",
             Some(serde_json::json!({ "nodeId": parent_node_id, "depth": 1 })),
         )
         .await?;
 
-    let describe = managed
+    let describe = effective
         .send_command(
             "DOM.describeNode",
             Some(serde_json::json!({ "nodeId": parent_node_id, "depth": 1 })),
@@ -1164,7 +1658,7 @@ async fn execute_siblings(global: &GlobalOpts, args: &DomNodeIdArgs) -> Result<(
         let node_type = child["nodeType"].as_i64().unwrap_or(0);
         let child_id = child["nodeId"].as_i64().unwrap_or(0);
         if node_type == 1 && child_id > 0 && child_id != node_id {
-            if let Ok(el) = describe_element(&managed, child_id).await {
+            if let Ok(el) = describe_element(effective, child_id).await {
                 elements.push(el);
             }
         }
@@ -1205,7 +1699,7 @@ async fn execute_tree(global: &GlobalOpts, args: &DomTreeArgs) -> Result<(), App
 
     let root_node = if let Some(ref root_target) = args.root {
         // Resolve root target and get its subtree
-        let node_id = resolve_node(&managed, root_target).await?.node_id;
+        let node_id = resolve_node(&managed, root_target, None).await?.node_id;
         managed
             .send_command(
                 "DOM.describeNode",
@@ -1365,30 +1859,30 @@ mod tests {
 
     #[test]
     fn is_uid_valid() {
-        assert!(is_uid("s1"));
-        assert!(is_uid("s42"));
-        assert!(is_uid("s999"));
+        assert!(snapshot::is_uid("s1"));
+        assert!(snapshot::is_uid("s42"));
+        assert!(snapshot::is_uid("s999"));
     }
 
     #[test]
     fn is_uid_invalid() {
-        assert!(!is_uid("s"));
-        assert!(!is_uid("s0a"));
-        assert!(!is_uid("css:button"));
-        assert!(!is_uid("button"));
-        assert!(!is_uid("42"));
+        assert!(!snapshot::is_uid("s"));
+        assert!(!snapshot::is_uid("s0a"));
+        assert!(!snapshot::is_uid("css:button"));
+        assert!(!snapshot::is_uid("button"));
+        assert!(!snapshot::is_uid("42"));
     }
 
     #[test]
     fn is_css_selector_valid() {
-        assert!(is_css_selector("css:#button"));
-        assert!(is_css_selector("css:.class"));
+        assert!(snapshot::is_css_selector("css:#button"));
+        assert!(snapshot::is_css_selector("css:.class"));
     }
 
     #[test]
     fn is_css_selector_invalid() {
-        assert!(!is_css_selector("#button"));
-        assert!(!is_css_selector("s1"));
+        assert!(!snapshot::is_css_selector("#button"));
+        assert!(!snapshot::is_css_selector("s1"));
     }
 
     #[test]

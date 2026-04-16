@@ -2,11 +2,12 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
+use agentchrome::cdp::CdpClient;
 use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
-use agentchrome::error::{AppError, ExitCode};
+use agentchrome::error::AppError;
 
 use crate::cli::{DialogAction, DialogArgs, DialogCommand, DialogHandleArgs, GlobalOpts};
+use crate::output::{cdp_config, print_output};
 
 // =============================================================================
 // Output types
@@ -35,21 +36,6 @@ struct InfoResult {
 // =============================================================================
 // Output formatting
 // =============================================================================
-
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
 
 fn print_handle_plain(result: &HandleResult) {
     let action_label = if result.action == "accept" {
@@ -90,18 +76,6 @@ fn print_info_plain(result: &InfoResult) {
             println!("Dialog open: {dialog_type} — \"{message}\"");
         }
     }
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
 }
 
 // =============================================================================

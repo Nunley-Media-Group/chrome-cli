@@ -42,15 +42,11 @@ struct JsExecError {
 // =============================================================================
 
 fn cdp_config(global: &GlobalOpts, exec_args: &JsExecArgs) -> CdpConfig {
-    let mut config = CdpConfig::default();
+    let mut config = crate::output::cdp_config(global);
     // Execution-specific --timeout overrides global --timeout
-    #[allow(clippy::cast_possible_truncation)]
-    let default_timeout = config.command_timeout.as_millis() as u64;
-    let timeout_ms = exec_args
-        .timeout
-        .or(global.timeout)
-        .unwrap_or(default_timeout);
-    config.command_timeout = Duration::from_millis(timeout_ms);
+    if let Some(timeout_ms) = exec_args.timeout {
+        config.command_timeout = Duration::from_millis(timeout_ms);
+    }
     config
 }
 
@@ -65,7 +61,7 @@ fn cdp_config(global: &GlobalOpts, exec_args: &JsExecArgs) -> CdpConfig {
 /// Returns `AppError` if the subcommand fails.
 pub async fn execute_js(global: &GlobalOpts, args: &JsArgs) -> Result<(), AppError> {
     match &args.command {
-        JsCommand::Exec(exec_args) => execute_exec(global, exec_args).await,
+        JsCommand::Exec(exec_args) => execute_exec(global, exec_args, args.frame.as_deref()).await,
     }
 }
 
@@ -105,11 +101,13 @@ fn resolve_code(args: &JsExecArgs) -> Result<String, AppError> {
     if let Some(ref path) = args.file {
         // --file <PATH>
         let path_str = path.display().to_string();
-        if !path.exists() {
-            return Err(AppError::script_file_not_found(&path_str));
-        }
-        std::fs::read_to_string(path)
-            .map_err(|e| AppError::script_file_read_failed(&path_str, &e.to_string()))
+        std::fs::read_to_string(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                AppError::script_file_not_found(&path_str)
+            } else {
+                AppError::script_file_read_failed(&path_str, &e.to_string())
+            }
+        })
     } else if let Some(ref code) = args.code {
         if code == "-" {
             // Read from stdin
@@ -231,35 +229,95 @@ fn extract_console_entries(events: &[serde_json::Value]) -> Vec<ConsoleEntry> {
 // =============================================================================
 
 #[allow(clippy::too_many_lines)]
-async fn execute_exec(global: &GlobalOpts, args: &JsExecArgs) -> Result<(), AppError> {
+async fn execute_exec(
+    global: &GlobalOpts,
+    args: &JsExecArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    // Validate mutual exclusion of --frame and --worker
+    if frame.is_some() && args.worker.is_some() {
+        return Err(AppError {
+            message: "--frame and --worker are mutually exclusive".into(),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        });
+    }
+
     let code = resolve_code(args)?;
-    let (_client, mut managed) = setup_session(global, args).await?;
+    let (client, mut managed) = setup_session(global, args).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    // Enable Runtime domain
-    managed.ensure_domain("Runtime").await?;
+    // Handle --worker: attach to the worker target and evaluate there
+    if let Some(worker_idx) = args.worker {
+        return execute_in_worker(&client, &mut managed, &code, worker_idx, args, global).await;
+    }
 
-    // Subscribe to console events before execution
-    let mut console_rx = managed
-        .subscribe("Runtime.consoleAPICalled")
-        .await
-        .map_err(|e| AppError {
-            message: format!("Failed to subscribe to console events: {e}"),
-            code: ExitCode::GeneralError,
-            custom_json: None,
-        })?;
+    // Resolve optional frame context for --frame
+    let mut frame_ctx = if let Some(frame_str) = frame {
+        let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
+        Some(agentchrome::frame::resolve_frame(&client, &mut managed, &arg).await?)
+    } else {
+        None
+    };
+
+    // Enable Runtime domain on effective session (needs &mut)
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("Runtime").await?;
+    }
+
+    // Subscribe to console events before execution (on effective session)
+    let mut console_rx = {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut
+            .subscribe("Runtime.consoleAPICalled")
+            .await
+            .map_err(|e| AppError {
+                message: format!("Failed to subscribe to console events: {e}"),
+                code: ExitCode::GeneralError,
+                custom_json: None,
+            })?
+    };
 
     let await_promise = !args.no_await;
+
+    // Get execution context ID for same-origin frame JS evaluation
+    let ctx_id = frame_ctx
+        .as_ref()
+        .and_then(agentchrome::frame::execution_context_id);
 
     // Execute based on whether --uid is provided
     let result = if let Some(ref uid) = args.uid {
         // Element context execution via Runtime.callFunctionOn
-        execute_with_uid(&mut managed, &code, uid, await_promise).await?
+        // For --frame with UID, use the frame session
+        if frame_ctx.is_some() {
+            let effective = if let Some(ref ctx) = frame_ctx {
+                agentchrome::frame::frame_session(ctx, &managed)
+            } else {
+                &managed
+            };
+            execute_with_uid_on_session(effective, &code, uid, await_promise).await?
+        } else {
+            execute_with_uid(&mut managed, &code, uid, await_promise).await?
+        }
     } else {
         // Expression evaluation via Runtime.evaluate
-        execute_expression(&managed, &code, await_promise).await?
+        let effective = if let Some(ref ctx) = frame_ctx {
+            agentchrome::frame::frame_session(ctx, &managed)
+        } else {
+            &managed
+        };
+        execute_expression_with_context(effective, &code, await_promise, ctx_id).await?
     };
 
     // Collect console events (drain with a short timeout)
@@ -370,18 +428,216 @@ async fn execute_expression(
     code: &str,
     await_promise: bool,
 ) -> Result<serde_json::Value, AppError> {
-    let params = serde_json::json!({
+    execute_expression_with_context(managed, code, await_promise, None).await
+}
+
+/// Execute a JavaScript expression via Runtime.evaluate, optionally with a context ID.
+///
+/// The `context_id` is used for same-origin frame execution to scope the evaluation.
+async fn execute_expression_with_context(
+    managed: &ManagedSession,
+    code: &str,
+    await_promise: bool,
+    context_id: Option<i64>,
+) -> Result<serde_json::Value, AppError> {
+    let mut params = serde_json::json!({
         "expression": code,
         "returnByValue": true,
         "awaitPromise": await_promise,
         "generatePreview": true,
     });
+    if let Some(ctx_id) = context_id {
+        params["contextId"] = serde_json::Value::from(ctx_id);
+    }
 
     managed
         .send_command("Runtime.evaluate", Some(params))
         .await
         .map_err(|e| {
             // Check if it's a timeout error
+            let err_str = format!("{e:?}");
+            if err_str.contains("CommandTimeout") {
+                AppError {
+                    message: format!("JavaScript execution timed out: {e}"),
+                    code: ExitCode::TimeoutError,
+                    custom_json: None,
+                }
+            } else {
+                AppError {
+                    message: format!("JavaScript execution failed: {e}"),
+                    code: ExitCode::GeneralError,
+                    custom_json: None,
+                }
+            }
+        })
+}
+
+/// Execute JS in a worker context via Target.attachToTarget + Runtime.evaluate.
+async fn execute_in_worker(
+    client: &CdpClient,
+    managed: &mut ManagedSession,
+    code: &str,
+    worker_idx: u32,
+    args: &JsExecArgs,
+    global: &GlobalOpts,
+) -> Result<(), AppError> {
+    // Enumerate workers
+    let targets_result = client
+        .send_command("Target.getTargets", None)
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to enumerate targets: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    let empty = Vec::new();
+    let targets = targets_result["targetInfos"].as_array().unwrap_or(&empty);
+
+    let workers: Vec<&serde_json::Value> = targets
+        .iter()
+        .filter(|t| {
+            matches!(
+                t["type"].as_str(),
+                Some("service_worker" | "shared_worker" | "worker")
+            )
+        })
+        .collect();
+
+    #[allow(clippy::cast_possible_truncation)]
+    let worker = workers
+        .get(worker_idx as usize)
+        .ok_or_else(|| AppError::worker_not_found(worker_idx))?;
+
+    let target_id = worker["targetId"].as_str().unwrap_or_default();
+
+    // Attach to the worker target
+    let worker_session_raw = client
+        .create_session(target_id)
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to attach to worker target: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+    let mut worker_session = agentchrome::connection::ManagedSession::new(worker_session_raw);
+    worker_session.ensure_domain("Runtime").await?;
+
+    let await_promise = !args.no_await;
+    let result = execute_expression(&worker_session, code, await_promise).await?;
+
+    // Check for exception
+    if let Some(exception_details) = result.get("exceptionDetails") {
+        let exception = &exception_details["exception"];
+        let error_desc = exception["description"]
+            .as_str()
+            .or_else(|| exception_details["text"].as_str())
+            .unwrap_or("unknown error")
+            .to_string();
+        let js_error = JsExecError {
+            error: error_desc.clone(),
+            stack: None,
+            code: ExitCode::GeneralError as u8,
+        };
+        let err_json = serde_json::to_string(&js_error)
+            .unwrap_or_else(|_| format!(r#"{{"error":"{error_desc}","code":1}}"#));
+        return Err(AppError::js_execution_failed_with_json(
+            &error_desc,
+            err_json,
+        ));
+    }
+
+    let cdp_result = &result["result"];
+    let js_type = js_type_string(cdp_result);
+    let value = extract_result_value(cdp_result);
+    let (value, was_truncated) = apply_truncation(value, args.max_size);
+
+    let output = JsExecResult {
+        result: value.clone(),
+        r#type: js_type,
+        console: None,
+        truncated: if was_truncated { Some(true) } else { None },
+    };
+
+    let _ = managed; // session kept alive for the duration
+
+    if global.output.plain {
+        let text = match &value {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Null => "undefined".to_string(),
+            other => serde_json::to_string(other).unwrap_or_default(),
+        };
+        crate::output::emit_plain(&text, &global.output)?;
+        return Ok(());
+    }
+
+    crate::output::emit(&output, &global.output, "js exec", |r| {
+        let size = serde_json::to_string(&r.result)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        serde_json::json!({
+            "result_type": r.r#type,
+            "size_bytes": size,
+        })
+    })
+}
+
+/// Execute a function with an element context via Runtime.callFunctionOn on a given session.
+async fn execute_with_uid_on_session(
+    session: &ManagedSession,
+    code: &str,
+    uid: &str,
+    await_promise: bool,
+) -> Result<serde_json::Value, AppError> {
+    let state = crate::snapshot::read_snapshot_state()
+        .map_err(|e| AppError {
+            message: format!("Failed to read snapshot state: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?
+        .ok_or_else(|| AppError {
+            message: "No snapshot state found. Run 'agentchrome page snapshot' first.".to_string(),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    let backend_node_id = state
+        .uid_map
+        .get(uid)
+        .ok_or_else(|| AppError::uid_not_found(uid))?;
+
+    let resolve_result = session
+        .send_command(
+            "DOM.resolveNode",
+            Some(serde_json::json!({ "backendNodeId": backend_node_id })),
+        )
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to resolve UID '{uid}': {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    let object_id = resolve_result["object"]["objectId"]
+        .as_str()
+        .ok_or_else(|| AppError {
+            message: format!("UID '{uid}' could not be resolved to a DOM object"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    let params = serde_json::json!({
+        "functionDeclaration": code,
+        "objectId": object_id,
+        "arguments": [{ "objectId": object_id }],
+        "returnByValue": true,
+        "awaitPromise": await_promise,
+    });
+
+    session
+        .send_command("Runtime.callFunctionOn", Some(params))
+        .await
+        .map_err(|e| {
             let err_str = format!("{e:?}");
             if err_str.contains("CommandTimeout") {
                 AppError {
@@ -826,6 +1082,7 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            worker: None,
         };
         let code = resolve_code(&args).unwrap();
         assert_eq!(code, "document.title");
@@ -840,6 +1097,7 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            worker: None,
         };
         let err = resolve_code(&args).unwrap_err();
         assert!(err.message.contains("No JavaScript code provided"));
@@ -854,6 +1112,7 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            worker: None,
         };
         let err = resolve_code(&args).unwrap_err();
         assert!(err.message.contains("Script file not found"));
@@ -873,6 +1132,7 @@ mod tests {
             no_await: false,
             timeout: None,
             max_size: None,
+            worker: None,
         };
         let code = resolve_code(&args).unwrap();
         assert_eq!(code, "document.title");

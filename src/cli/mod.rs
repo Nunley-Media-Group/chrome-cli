@@ -848,6 +848,10 @@ pub struct NavigateReloadArgs {
 /// Arguments for the `page` subcommand group.
 #[derive(Args)]
 pub struct PageArgs {
+    /// Target frame by index, path (1/0), or 'auto'
+    #[arg(long)]
+    pub frame: Option<String>,
+
     #[command(subcommand)]
     pub command: PageCommand,
 }
@@ -992,6 +996,34 @@ EXAMPLES:
   agentchrome page wait --text \"loaded\" --timeout 5000 --interval 200"
     )]
     Wait(PageWaitArgs),
+
+    /// List all frames (iframes, framesets) in the page hierarchy
+    #[command(
+        long_about = "List all frames in the current page, including iframes and frameset frames. \
+            Returns a JSON array with each frame's index, ID, URL, name, security origin, \
+            dimensions, and nesting depth. Use the index with --frame on other commands to target \
+            a specific frame.",
+        after_long_help = "\
+EXAMPLES:
+  # List all frames
+  agentchrome page frames
+
+  # Pretty-printed output
+  agentchrome page --pretty frames"
+    )]
+    Frames,
+
+    /// List all workers (service, shared, dedicated) associated with the page
+    #[command(
+        long_about = "List all workers associated with the current page, including Service Workers, \
+            Shared Workers, and dedicated Web Workers. Returns a JSON array with each worker's \
+            index, target ID, type, script URL, and status.",
+        after_long_help = "\
+EXAMPLES:
+  # List all workers
+  agentchrome page workers"
+    )]
+    Workers,
 }
 
 /// Image format for screenshots.
@@ -1060,6 +1092,10 @@ pub struct PageSnapshotArgs {
     /// Return only interactive and semantically meaningful elements (reduces token usage for AI agents)
     #[arg(long)]
     pub compact: bool,
+
+    /// Include shadow DOM content in the accessibility tree
+    #[arg(long)]
+    pub pierce_shadow: bool,
 }
 
 /// Arguments for `page find`.
@@ -1188,6 +1224,10 @@ pub struct PerfVitalsArgs {
 /// Arguments for the `js` subcommand group.
 #[derive(Args)]
 pub struct JsArgs {
+    /// Target frame by index, path (1/0), or 'auto'
+    #[arg(long)]
+    pub frame: Option<String>,
+
     #[command(subcommand)]
     pub command: JsCommand,
 }
@@ -1248,6 +1288,10 @@ pub struct JsExecArgs {
     /// Truncate result output exceeding this size in bytes
     #[arg(long)]
     pub max_size: Option<usize>,
+
+    /// Worker index from 'page workers' for executing JS in a worker context
+    #[arg(long)]
+    pub worker: Option<u32>,
 }
 
 /// Arguments for the `cookie` subcommand group.
@@ -1633,6 +1677,10 @@ pub struct ConnectArgs {
 /// Arguments for the `interact` subcommand group.
 #[derive(Args)]
 pub struct InteractArgs {
+    /// Target frame by index, path (1/0), or 'auto'
+    #[arg(long)]
+    pub frame: Option<String>,
+
     #[command(subcommand)]
     pub command: InteractCommand,
 }
@@ -1963,6 +2011,10 @@ pub struct ScrollArgs {
 /// Arguments for the `form` subcommand group.
 #[derive(Args)]
 pub struct FormArgs {
+    /// Target frame by index, path (1/0), or 'auto'
+    #[arg(long)]
+    pub frame: Option<String>,
+
     #[command(subcommand)]
     pub command: FormCommand,
 }
@@ -2340,6 +2392,10 @@ pub struct NetworkListArgs {
     /// Include requests from previous navigations
     #[arg(long)]
     pub include_preserved: bool,
+
+    /// Filter network requests by originating frame index
+    #[arg(long)]
+    pub frame: Option<String>,
 }
 
 /// Arguments for `network get`.
@@ -2422,6 +2478,14 @@ pub struct PageWaitArgs {
 /// Arguments for the `dom` subcommand group.
 #[derive(Args)]
 pub struct DomArgs {
+    /// Target frame by index, path (1/0), or 'auto'
+    #[arg(long)]
+    pub frame: Option<String>,
+
+    /// Pierce open shadow DOM boundaries for element queries
+    #[arg(long)]
+    pub pierce_shadow: bool,
+
     #[command(subcommand)]
     pub command: DomCommand,
 }

@@ -2,14 +2,14 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig, CdpEvent};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::cdp::CdpEvent;
+use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     GlobalOpts, NavigateArgs, NavigateCommand, NavigateReloadArgs, NavigateUrlArgs, WaitUntil,
 };
-use crate::emulate::apply_emulate_state;
+use crate::output::{print_output, setup_session_with_interceptors as setup_session};
 use crate::page::wait::check_selector_condition;
 
 /// Default navigation wait timeout in milliseconds.
@@ -37,37 +37,6 @@ struct HistoryResult {
 }
 
 // =============================================================================
-// Output formatting
-// =============================================================================
-
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
 // Dispatcher
 // =============================================================================
 
@@ -83,30 +52,6 @@ pub async fn execute_navigate(global: &GlobalOpts, args: &NavigateArgs) -> Resul
         Some(NavigateCommand::Reload(reload_args)) => execute_reload(global, reload_args).await,
         None => execute_url(global, &args.url_args).await,
     }
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-    managed.install_dialog_interceptors().await;
-
-    Ok((client, managed))
 }
 
 // =============================================================================

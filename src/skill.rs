@@ -3,6 +3,7 @@ use serde::Serialize;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{GlobalOpts, SkillArgs, SkillCommand, ToolName};
+use crate::output::print_output;
 
 // =============================================================================
 // Types
@@ -638,25 +639,6 @@ fn unpatch_aider_config(config_path: &std::path::Path, skill_path: &str) {
 }
 
 // =============================================================================
-// Output helpers
-// =============================================================================
-
-fn print_output(value: &impl Serialize, global: &GlobalOpts) -> Result<(), AppError> {
-    let json = if global.output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
-// =============================================================================
 // Dispatcher
 // =============================================================================
 
@@ -665,21 +647,21 @@ pub fn execute_skill(global: &GlobalOpts, args: &SkillArgs) -> Result<(), AppErr
         SkillCommand::Install(install_args) => {
             let tool = resolve_tool(install_args.tool.as_ref())?;
             let result = install_skill(tool)?;
-            print_output(&result, global)
+            print_output(&result, &global.output)
         }
         SkillCommand::Uninstall(tool_args) => {
             let tool = resolve_tool(tool_args.tool.as_ref())?;
             let result = uninstall_skill(tool)?;
-            print_output(&result, global)
+            print_output(&result, &global.output)
         }
         SkillCommand::Update(tool_args) => {
             let tool = resolve_tool(tool_args.tool.as_ref())?;
             let result = update_skill(tool)?;
-            print_output(&result, global)
+            print_output(&result, &global.output)
         }
         SkillCommand::List => {
             let result = list_tools()?;
-            print_output(&result, global)
+            print_output(&result, &global.output)
         }
     }
 }

@@ -1,15 +1,11 @@
-use std::time::Duration;
-
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     CookieArgs, CookieCommand, CookieDeleteArgs, CookieListArgs, CookieSetArgs, GlobalOpts,
 };
-use crate::emulate::apply_emulate_state;
+use crate::output::{print_output, setup_session_with_interceptors as setup_session};
 
 // =============================================================================
 // Output types
@@ -46,21 +42,6 @@ struct DeleteResult {
 // Output formatting
 // =============================================================================
 
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
 fn print_list_plain(cookies: &[CookieInfo]) {
     if cookies.is_empty() {
         println!("No cookies");
@@ -81,42 +62,6 @@ fn print_delete_plain(result: &DeleteResult) {
 
 fn print_clear_plain(result: &DeleteResult) {
     println!("Cleared {} cookie(s)", result.deleted);
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-    managed.install_dialog_interceptors().await;
-
-    Ok((client, managed))
 }
 
 // =============================================================================
@@ -378,12 +323,12 @@ mod tests {
         let cookie = CookieInfo {
             name: "test".into(),
             value: "val".into(),
-            domain: "".into(),
+            domain: String::new(),
             path: "/".into(),
             expires: 0.0,
             http_only: false,
             secure: false,
-            same_site: "".into(),
+            same_site: String::new(),
             size: 0,
         };
         let json: serde_json::Value = serde_json::to_value(&cookie).unwrap();
@@ -428,7 +373,7 @@ mod tests {
                     "value": "abc123",
                     "domain": ".example.com",
                     "path": "/",
-                    "expires": 1735689600.0,
+                    "expires": 1_735_689_600.0,
                     "size": 22,
                     "httpOnly": true,
                     "secure": true,

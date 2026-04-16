@@ -113,7 +113,11 @@ pub(crate) async fn check_selector_condition(
 // Command executor
 // =============================================================================
 
-pub async fn execute_wait(global: &GlobalOpts, args: &PageWaitArgs) -> Result<(), AppError> {
+pub async fn execute_wait(
+    global: &GlobalOpts,
+    args: &PageWaitArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
     let timeout_ms = global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS);
 
     // Network idle path (event-driven, not polled)
@@ -122,15 +126,38 @@ pub async fn execute_wait(global: &GlobalOpts, args: &PageWaitArgs) -> Result<()
     }
 
     // Poll-based conditions: --url, --text, --selector
-    let (_client, mut managed) = setup_session(global).await?;
-    managed.ensure_domain("Runtime").await?;
+    let (client, mut managed) = setup_session(global).await?;
+
+    // Resolve optional frame context
+    let mut frame_ctx = if let Some(frame_str) = frame {
+        let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
+        Some(agentchrome::frame::resolve_frame(&client, &mut managed, &arg).await?)
+    } else {
+        None
+    };
+
+    // Enable Runtime domain (needs &mut)
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("Runtime").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
 
     if let Some(ref pattern) = args.url {
-        poll_url(global, &managed, pattern, timeout_ms, args.interval).await
+        poll_url(global, effective, pattern, timeout_ms, args.interval).await
     } else if let Some(ref text) = args.text {
-        poll_text(global, &managed, text, timeout_ms, args.interval).await
+        poll_text(global, effective, text, timeout_ms, args.interval).await
     } else if let Some(ref selector) = args.selector {
-        poll_selector(global, &managed, selector, timeout_ms, args.interval).await
+        poll_selector(global, effective, selector, timeout_ms, args.interval).await
     } else {
         unreachable!("No condition specified — clap should have caught this");
     }

@@ -2,17 +2,67 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::connection::ManagedSession;
 use agentchrome::error::AppError;
 
 use crate::cli::{
     ClickArgs, ClickAtArgs, DragArgs, GlobalOpts, HoverArgs, InteractArgs, InteractCommand,
     KeyArgs, ScrollArgs, ScrollDirection, TypeArgs, WaitUntil,
 };
-use crate::emulate::apply_emulate_state;
 use crate::navigate::{DEFAULT_NAVIGATE_TIMEOUT_MS, wait_for_event, wait_for_network_idle};
+use crate::output::{print_output, setup_session};
 use crate::snapshot;
+
+// =============================================================================
+// Frame helpers
+// =============================================================================
+
+/// Get the top-left offset of a frame's viewport in page coordinates.
+///
+/// Used by `click-at --frame N` to translate frame-local coordinates to page-global ones.
+/// Returns `(0.0, 0.0)` for the main frame.
+async fn get_frame_viewport_offset(
+    managed: &mut ManagedSession,
+    frame_ctx: &agentchrome::frame::FrameContext,
+) -> Result<(f64, f64), AppError> {
+    let Some(frame_id) = agentchrome::frame::frame_id(frame_ctx) else {
+        return Ok((0.0, 0.0)); // main frame — no offset
+    };
+
+    // Use DOM.getFrameOwner to get the backendNodeId of the <iframe> element
+    let owner = managed
+        .send_command(
+            "DOM.getFrameOwner",
+            Some(serde_json::json!({ "frameId": frame_id })),
+        )
+        .await
+        .map_err(|e| AppError::interaction_failed("get_frame_owner", &e.to_string()))?;
+
+    let backend_node_id = owner["backendNodeId"].as_i64().unwrap_or(0);
+    if backend_node_id == 0 {
+        return Ok((0.0, 0.0));
+    }
+
+    // Get the box model of the <iframe> element in page coordinates
+    let box_model = managed
+        .send_command(
+            "DOM.getBoxModel",
+            Some(serde_json::json!({ "backendNodeId": backend_node_id })),
+        )
+        .await
+        .map_err(|e| AppError::interaction_failed("get_frame_box_model", &e.to_string()))?;
+
+    let content = box_model["model"]["content"].as_array();
+    let (frame_x, frame_y) = if let Some(c) = content {
+        let x = c.first().and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        let y = c.get(1).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        (x, y)
+    } else {
+        (0.0, 0.0)
+    };
+
+    Ok((frame_x, frame_y))
+}
 
 // =============================================================================
 // Output types
@@ -101,21 +151,6 @@ struct ScrollResult {
 // Output formatting
 // =============================================================================
 
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: agentchrome::error::ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
 fn print_click_plain(result: &ClickResult) {
     if result.double_click == Some(true) {
         println!("Double-clicked {}", result.clicked);
@@ -201,67 +236,18 @@ fn print_scroll_plain(result: &ScrollResult, mode: &str) {
 }
 
 // =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-
-    Ok((client, managed))
-}
-
-// =============================================================================
 // Target resolution helpers
 // =============================================================================
-
-/// Check if a target string is a UID (matches pattern: 's' + digits).
-fn is_uid(target: &str) -> bool {
-    if !target.starts_with('s') {
-        return false;
-    }
-    let rest = &target[1..];
-    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
-}
-
-/// Check if a target string is a CSS selector (starts with 'css:').
-fn is_css_selector(target: &str) -> bool {
-    target.starts_with("css:")
-}
 
 /// Resolve a target (UID or CSS selector) to a backend DOM node ID.
 ///
 /// For UIDs: reads snapshot state and looks up the backendDOMNodeId.
 /// For CSS selectors: queries the DOM and resolves the node.
 async fn resolve_target_to_backend_node_id(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     target: &str,
 ) -> Result<i64, AppError> {
-    if is_uid(target) {
+    if snapshot::is_uid(target) {
         // Read snapshot state
         let state = snapshot::read_snapshot_state()?.ok_or_else(AppError::no_snapshot_state)?;
 
@@ -273,7 +259,7 @@ async fn resolve_target_to_backend_node_id(
             .ok_or_else(|| AppError::uid_not_found(target))?;
 
         Ok(backend_node_id)
-    } else if is_css_selector(target) {
+    } else if snapshot::is_css_selector(target) {
         // Strip 'css:' prefix
         let selector = &target[4..];
 
@@ -317,7 +303,7 @@ async fn resolve_target_to_backend_node_id(
 ///
 /// Returns (x, y) coordinates of the element's center.
 async fn get_element_center(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     backend_node_id: i64,
 ) -> Result<(f64, f64), AppError> {
     let params = serde_json::json!({ "backendNodeId": backend_node_id });
@@ -353,10 +339,7 @@ async fn get_element_center(
 }
 
 /// Scroll an element into view if needed.
-async fn scroll_into_view(
-    session: &mut ManagedSession,
-    backend_node_id: i64,
-) -> Result<(), AppError> {
+async fn scroll_into_view(session: &ManagedSession, backend_node_id: i64) -> Result<(), AppError> {
     let params = serde_json::json!({ "backendNodeId": backend_node_id });
     session
         .send_command("DOM.scrollIntoViewIfNeeded", Some(params))
@@ -372,7 +355,7 @@ async fn scroll_into_view(
 /// 2. Scroll element into view
 /// 3. Get element center coordinates
 async fn resolve_target_coords(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     target: &str,
 ) -> Result<(f64, f64), AppError> {
     let backend_node_id = resolve_target_to_backend_node_id(session, target).await?;
@@ -988,7 +971,7 @@ async fn dispatch_key_combination(
 // =============================================================================
 
 /// Get the current page URL via `Runtime.evaluate`.
-async fn get_current_url(managed: &mut ManagedSession) -> Result<String, AppError> {
+async fn get_current_url(managed: &ManagedSession) -> Result<String, AppError> {
     let url_response = managed
         .send_command(
             "Runtime.evaluate",
@@ -1033,6 +1016,8 @@ async fn take_snapshot(
         url: url.to_string(),
         timestamp: agentchrome::session::now_iso8601(),
         uid_map: build_result.uid_map,
+        frame_index: None,
+        frame_id: None,
     };
     snapshot::write_snapshot_state(&state)?;
 
@@ -1055,7 +1040,7 @@ async fn take_snapshot(
 // =============================================================================
 
 /// Read the current page scroll position (scrollX, scrollY).
-async fn get_scroll_position(session: &mut ManagedSession) -> Result<(f64, f64), AppError> {
+async fn get_scroll_position(session: &ManagedSession) -> Result<(f64, f64), AppError> {
     let response = session
         .send_command(
             "Runtime.evaluate",
@@ -1080,7 +1065,7 @@ async fn get_scroll_position(session: &mut ManagedSession) -> Result<(f64, f64),
 }
 
 /// Read the current viewport dimensions (innerWidth, innerHeight).
-async fn get_viewport_dimensions(session: &mut ManagedSession) -> Result<(f64, f64), AppError> {
+async fn get_viewport_dimensions(session: &ManagedSession) -> Result<(f64, f64), AppError> {
     let response = session
         .send_command(
             "Runtime.evaluate",
@@ -1106,7 +1091,7 @@ async fn get_viewport_dimensions(session: &mut ManagedSession) -> Result<(f64, f
 
 /// Scroll the page by a delta using `window.scrollBy()`.
 async fn dispatch_page_scroll(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     dx: f64,
     dy: f64,
     smooth: bool,
@@ -1125,7 +1110,7 @@ async fn dispatch_page_scroll(
 
 /// Scroll the page to an absolute position using `window.scrollTo()`.
 async fn dispatch_page_scroll_to(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     x: f64,
     y: f64,
     smooth: bool,
@@ -1144,7 +1129,7 @@ async fn dispatch_page_scroll_to(
 
 /// Resolve a backend node ID to a Runtime object ID via DOM.resolveNode.
 async fn resolve_to_object_id(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     backend_node_id: i64,
 ) -> Result<String, AppError> {
     let resolve_params = serde_json::json!({ "backendNodeId": backend_node_id });
@@ -1161,7 +1146,7 @@ async fn resolve_to_object_id(
 
 /// Scroll a container element by a delta.
 async fn dispatch_container_scroll(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     backend_node_id: i64,
     dx: f64,
     dy: f64,
@@ -1186,7 +1171,7 @@ async fn dispatch_container_scroll(
 
 /// Read a container element's scroll position.
 async fn get_container_scroll_position(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     backend_node_id: i64,
 ) -> Result<(f64, f64), AppError> {
     let object_id = resolve_to_object_id(session, backend_node_id).await?;
@@ -1214,7 +1199,7 @@ async fn get_container_scroll_position(
 }
 
 /// Wait for a smooth page scroll to finish by polling position until stable.
-async fn wait_for_smooth_page_scroll(session: &mut ManagedSession) -> Result<(), AppError> {
+async fn wait_for_smooth_page_scroll(session: &ManagedSession) -> Result<(), AppError> {
     let mut last_pos = get_scroll_position(session).await?;
     for _ in 0..15 {
         // 15 × 200ms = 3s timeout
@@ -1230,7 +1215,7 @@ async fn wait_for_smooth_page_scroll(session: &mut ManagedSession) -> Result<(),
 
 /// Wait for a smooth container scroll to finish by polling position until stable.
 async fn wait_for_smooth_container_scroll(
-    session: &mut ManagedSession,
+    session: &ManagedSession,
     backend_node_id: i64,
 ) -> Result<(), AppError> {
     let mut last_pos = get_container_scroll_position(session, backend_node_id).await?;
@@ -1250,7 +1235,7 @@ async fn wait_for_smooth_container_scroll(
 // =============================================================================
 
 /// Get the document scroll height.
-async fn get_document_scroll_height(session: &mut ManagedSession) -> Result<f64, AppError> {
+async fn get_document_scroll_height(session: &ManagedSession) -> Result<f64, AppError> {
     let response = session
         .send_command(
             "Runtime.evaluate",
@@ -1270,77 +1255,86 @@ fn compute_delta(before: (f64, f64), after: (f64, f64)) -> (f64, f64, f64, f64) 
 }
 
 /// Execute the `interact scroll` command.
-async fn execute_scroll(global: &GlobalOpts, args: &ScrollArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_scroll(
+    global: &GlobalOpts,
+    args: &ScrollArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("Runtime").await?;
-    managed.ensure_domain("DOM").await?;
+    let scroll_element = args.to_element.as_deref();
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, scroll_element).await?;
+
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("Runtime").await?;
+        eff_mut.ensure_domain("DOM").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
 
     let mode_label;
     let (scrolled_x, scrolled_y, final_x, final_y) = if let Some(ref target) = args.to_element {
         mode_label = "to-element";
-        let before = get_scroll_position(&mut managed).await?;
-        let backend_node_id = resolve_target_to_backend_node_id(&mut managed, target).await?;
-        scroll_into_view(&mut managed, backend_node_id).await?;
-        compute_delta(before, get_scroll_position(&mut managed).await?)
+        let before = get_scroll_position(effective).await?;
+        let backend_node_id = resolve_target_to_backend_node_id(effective, target).await?;
+        scroll_into_view(effective, backend_node_id).await?;
+        compute_delta(before, get_scroll_position(effective).await?)
     } else if args.to_top {
         mode_label = "to-top";
-        let before = get_scroll_position(&mut managed).await?;
-        dispatch_page_scroll_to(&mut managed, 0.0, 0.0, args.smooth).await?;
+        let before = get_scroll_position(effective).await?;
+        dispatch_page_scroll_to(effective, 0.0, 0.0, args.smooth).await?;
         if args.smooth {
-            wait_for_smooth_page_scroll(&mut managed).await?;
+            wait_for_smooth_page_scroll(effective).await?;
         }
-        compute_delta(before, get_scroll_position(&mut managed).await?)
+        compute_delta(before, get_scroll_position(effective).await?)
     } else if args.to_bottom {
         mode_label = "to-bottom";
-        let before = get_scroll_position(&mut managed).await?;
-        let height = get_document_scroll_height(&mut managed).await?;
-        dispatch_page_scroll_to(&mut managed, 0.0, height, args.smooth).await?;
+        let before = get_scroll_position(effective).await?;
+        let height = get_document_scroll_height(effective).await?;
+        dispatch_page_scroll_to(effective, 0.0, height, args.smooth).await?;
         if args.smooth {
-            wait_for_smooth_page_scroll(&mut managed).await?;
+            wait_for_smooth_page_scroll(effective).await?;
         }
-        compute_delta(before, get_scroll_position(&mut managed).await?)
+        compute_delta(before, get_scroll_position(effective).await?)
     } else if let Some(ref container_target) = args.container {
         mode_label = "container";
-        let cid = resolve_target_to_backend_node_id(&mut managed, container_target).await?;
-        let before = get_container_scroll_position(&mut managed, cid).await?;
-        let (vw, vh) = get_viewport_dimensions(&mut managed).await?;
+        let cid = resolve_target_to_backend_node_id(effective, container_target).await?;
+        let before = get_container_scroll_position(effective, cid).await?;
+        let (vw, vh) = get_viewport_dimensions(effective).await?;
         let (dx, dy) = compute_scroll_delta(args.direction, args.amount, vw, vh);
-        dispatch_container_scroll(&mut managed, cid, dx, dy, args.smooth).await?;
+        dispatch_container_scroll(effective, cid, dx, dy, args.smooth).await?;
         if args.smooth {
-            wait_for_smooth_container_scroll(&mut managed, cid).await?;
+            wait_for_smooth_container_scroll(effective, cid).await?;
         }
-        compute_delta(
-            before,
-            get_container_scroll_position(&mut managed, cid).await?,
-        )
+        compute_delta(before, get_container_scroll_position(effective, cid).await?)
     } else {
         mode_label = "direction";
-        let before = get_scroll_position(&mut managed).await?;
-        let (vw, vh) = get_viewport_dimensions(&mut managed).await?;
+        let before = get_scroll_position(effective).await?;
+        let (vw, vh) = get_viewport_dimensions(effective).await?;
         let (dx, dy) = compute_scroll_delta(args.direction, args.amount, vw, vh);
-        dispatch_page_scroll(&mut managed, dx, dy, args.smooth).await?;
+        dispatch_page_scroll(effective, dx, dy, args.smooth).await?;
         if args.smooth {
-            wait_for_smooth_page_scroll(&mut managed).await?;
+            wait_for_smooth_page_scroll(effective).await?;
         }
-        compute_delta(before, get_scroll_position(&mut managed).await?)
+        compute_delta(before, get_scroll_position(effective).await?)
     };
 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
-        let url_response = managed
-            .send_command(
-                "Runtime.evaluate",
-                Some(serde_json::json!({ "expression": "window.location.href" })),
-            )
-            .await?;
-        let url = url_response["result"]["value"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let url = get_current_url(effective).await?;
         Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
@@ -1382,25 +1376,46 @@ fn compute_scroll_delta(
 }
 
 /// Execute the `interact click` command.
-async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_click(
+    global: &GlobalOpts,
+    args: &ClickArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    // Enable required domains
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, Some(&args.target))
+            .await?;
+
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+    }
+
     managed.ensure_domain("Page").await?;
 
-    // Resolve target coordinates
-    let (x, y) = resolve_target_coords(&mut managed, &args.target).await?;
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    // Resolve target coordinates via the effective (frame-scoped) session
+    let (x, y) = resolve_target_coords(effective, &args.target).await?;
 
     // Determine button and click count
     let button = if args.right { "right" } else { "left" };
     let click_count = if args.double { 2 } else { 1 };
 
     // Get pre-click URL for comparison
-    let pre_url = get_current_url(&mut managed).await?;
+    let pre_url = get_current_url(&managed).await?;
 
     let navigated;
 
@@ -1432,7 +1447,7 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
             dispatch_click(&mut managed, x, y, button, click_count).await?;
             let timeout_ms = global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS);
             wait_for_network_idle(req_rx, fin_rx, fail_rx, timeout_ms).await?;
-            let post_url = get_current_url(&mut managed).await?;
+            let post_url = get_current_url(&managed).await?;
             navigated = post_url != pre_url;
         }
         None => {
@@ -1445,7 +1460,7 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
     }
 
     // Get current URL
-    let url = get_current_url(&mut managed).await?;
+    let url = get_current_url(&managed).await?;
 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
@@ -1473,11 +1488,28 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
 }
 
 /// Execute the `interact click-at` command.
-async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_click_at(
+    global: &GlobalOpts,
+    args: &ClickAtArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
+
+    // Resolve frame context for coordinate translation
+    let frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
+
+    // Translate frame-local coordinates to page-global coordinates
+    let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
+        get_frame_viewport_offset(&mut managed, ctx).await?
+    } else {
+        (0.0, 0.0)
+    };
+    let click_x = args.x + offset_x;
+    let click_y = args.y + offset_y;
 
     // Determine button and click count
     let button = if args.right { "right" } else { "left" };
@@ -1485,47 +1517,47 @@ async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(),
 
     let (url, navigated) = match args.wait_until {
         Some(WaitUntil::None) => {
-            dispatch_click(&mut managed, args.x, args.y, button, click_count).await?;
+            dispatch_click(&mut managed, click_x, click_y, button, click_count).await?;
             (None, None)
         }
         Some(WaitUntil::Load) => {
             managed.ensure_domain("Page").await?;
-            let pre_url = get_current_url(&mut managed).await?;
+            let pre_url = get_current_url(&managed).await?;
             let wait_rx = managed.subscribe("Page.loadEventFired").await?;
-            dispatch_click(&mut managed, args.x, args.y, button, click_count).await?;
+            dispatch_click(&mut managed, click_x, click_y, button, click_count).await?;
             let timeout_ms = global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS);
             wait_for_event(wait_rx, timeout_ms, "load").await?;
-            let post_url = get_current_url(&mut managed).await?;
+            let post_url = get_current_url(&managed).await?;
             let nav = post_url != pre_url;
             (Some(post_url), Some(nav))
         }
         Some(WaitUntil::Domcontentloaded) => {
             managed.ensure_domain("Page").await?;
-            let pre_url = get_current_url(&mut managed).await?;
+            let pre_url = get_current_url(&managed).await?;
             let wait_rx = managed.subscribe("Page.domContentEventFired").await?;
-            dispatch_click(&mut managed, args.x, args.y, button, click_count).await?;
+            dispatch_click(&mut managed, click_x, click_y, button, click_count).await?;
             let timeout_ms = global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS);
             wait_for_event(wait_rx, timeout_ms, "domcontentloaded").await?;
-            let post_url = get_current_url(&mut managed).await?;
+            let post_url = get_current_url(&managed).await?;
             let nav = post_url != pre_url;
             (Some(post_url), Some(nav))
         }
         Some(WaitUntil::Networkidle) => {
             managed.ensure_domain("Network").await?;
-            let pre_url = get_current_url(&mut managed).await?;
+            let pre_url = get_current_url(&managed).await?;
             let req_rx = managed.subscribe("Network.requestWillBeSent").await?;
             let fin_rx = managed.subscribe("Network.loadingFinished").await?;
             let fail_rx = managed.subscribe("Network.loadingFailed").await?;
-            dispatch_click(&mut managed, args.x, args.y, button, click_count).await?;
+            dispatch_click(&mut managed, click_x, click_y, button, click_count).await?;
             let timeout_ms = global.timeout.unwrap_or(DEFAULT_NAVIGATE_TIMEOUT_MS);
             wait_for_network_idle(req_rx, fin_rx, fail_rx, timeout_ms).await?;
-            let post_url = get_current_url(&mut managed).await?;
+            let post_url = get_current_url(&managed).await?;
             let nav = post_url != pre_url;
             (Some(post_url), Some(nav))
         }
         None => {
             // Legacy behavior: dispatch click, no navigation check
-            dispatch_click(&mut managed, args.x, args.y, button, click_count).await?;
+            dispatch_click(&mut managed, click_x, click_y, button, click_count).await?;
             (None, None)
         }
     };
@@ -1535,7 +1567,7 @@ async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(),
         let snap_url = if let Some(ref u) = url {
             u.clone()
         } else {
-            get_current_url(&mut managed).await?
+            get_current_url(&managed).await?
         };
         Some(take_snapshot(&mut managed, &snap_url, args.compact).await?)
     } else {
@@ -1564,35 +1596,45 @@ async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(),
 }
 
 /// Execute the `interact hover` command.
-async fn execute_hover(global: &GlobalOpts, args: &HoverArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_hover(
+    global: &GlobalOpts,
+    args: &HoverArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    // Enable DOM domain
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, Some(&args.target))
+            .await?;
 
-    // Resolve target coordinates
-    let (x, y) = resolve_target_coords(&mut managed, &args.target).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
 
-    // Dispatch hover
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    // Resolve target coordinates via the effective session
+    let (x, y) = resolve_target_coords(effective, &args.target).await?;
+
+    // Dispatch hover (always on main page session)
     dispatch_hover(&mut managed, x, y).await?;
 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
-        // Need to get current URL for snapshot state
-        managed.ensure_domain("Runtime").await?;
-        let url_response = managed
-            .send_command(
-                "Runtime.evaluate",
-                Some(serde_json::json!({ "expression": "window.location.href" })),
-            )
-            .await?;
-        let url = url_response["result"]["value"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let url = get_current_url(&managed).await?;
         Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
@@ -1613,40 +1655,50 @@ async fn execute_hover(global: &GlobalOpts, args: &HoverArgs) -> Result<(), AppE
 }
 
 /// Execute the `interact drag` command.
-async fn execute_drag(global: &GlobalOpts, args: &DragArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+async fn execute_drag(
+    global: &GlobalOpts,
+    args: &DragArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    // Enable DOM domain
-    managed.ensure_domain("DOM").await?;
+    let mut frame_ctx =
+        crate::output::resolve_optional_frame(&client, &mut managed, frame, Some(&args.from))
+            .await?;
 
-    // Resolve "from" target
-    let from_backend_id = resolve_target_to_backend_node_id(&mut managed, &args.from).await?;
-    scroll_into_view(&mut managed, from_backend_id).await?;
-    let (from_x, from_y) = get_element_center(&mut managed, from_backend_id).await?;
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+    }
 
-    // Resolve "to" target
-    let (to_x, to_y) = resolve_target_coords(&mut managed, &args.to).await?;
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
 
-    // Dispatch drag
+    // Resolve "from" target via effective session
+    let from_backend_id = resolve_target_to_backend_node_id(effective, &args.from).await?;
+    scroll_into_view(effective, from_backend_id).await?;
+    let (from_x, from_y) = get_element_center(effective, from_backend_id).await?;
+
+    // Resolve "to" target via effective session
+    let (to_x, to_y) = resolve_target_coords(effective, &args.to).await?;
+
+    // Dispatch drag (always on main page session)
     dispatch_drag(&mut managed, from_x, from_y, to_x, to_y).await?;
 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
-        // Need to get current URL for snapshot state
-        managed.ensure_domain("Runtime").await?;
-        let url_response = managed
-            .send_command(
-                "Runtime.evaluate",
-                Some(serde_json::json!({ "expression": "window.location.href" })),
-            )
-            .await?;
-        let url = url_response["result"]["value"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let url = get_current_url(&managed).await?;
         Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
@@ -1670,7 +1722,11 @@ async fn execute_drag(global: &GlobalOpts, args: &DragArgs) -> Result<(), AppErr
 }
 
 /// Execute the `interact type` command.
-async fn execute_type(global: &GlobalOpts, args: &TypeArgs) -> Result<(), AppError> {
+async fn execute_type(
+    global: &GlobalOpts,
+    args: &TypeArgs,
+    _frame: Option<&str>,
+) -> Result<(), AppError> {
     let (_client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
@@ -1679,7 +1735,8 @@ async fn execute_type(global: &GlobalOpts, args: &TypeArgs) -> Result<(), AppErr
     let text = &args.text;
     let length = text.chars().count();
 
-    // Type each character
+    // Type each character (keyboard events go to whichever element has focus,
+    // which is typically the main page session regardless of --frame)
     for ch in text.chars() {
         dispatch_char(&mut managed, ch).await?;
 
@@ -1691,16 +1748,7 @@ async fn execute_type(global: &GlobalOpts, args: &TypeArgs) -> Result<(), AppErr
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
         managed.ensure_domain("Runtime").await?;
-        let url_response = managed
-            .send_command(
-                "Runtime.evaluate",
-                Some(serde_json::json!({ "expression": "window.location.href" })),
-            )
-            .await?;
-        let url = url_response["result"]["value"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let url = get_current_url(&managed).await?;
         Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
@@ -1721,7 +1769,11 @@ async fn execute_type(global: &GlobalOpts, args: &TypeArgs) -> Result<(), AppErr
 }
 
 /// Execute the `interact key` command.
-async fn execute_key(global: &GlobalOpts, args: &KeyArgs) -> Result<(), AppError> {
+async fn execute_key(
+    global: &GlobalOpts,
+    args: &KeyArgs,
+    _frame: Option<&str>,
+) -> Result<(), AppError> {
     // Validate the key combination before connecting to Chrome
     let parsed = parse_key_combination(&args.keys)?;
 
@@ -1730,7 +1782,7 @@ async fn execute_key(global: &GlobalOpts, args: &KeyArgs) -> Result<(), AppError
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    // Press the key combination (possibly repeated)
+    // Press the key combination (key events are always dispatched at the main page level)
     for _ in 0..args.repeat {
         if parsed.modifiers != 0 {
             dispatch_key_combination(&mut managed, &parsed).await?;
@@ -1742,16 +1794,7 @@ async fn execute_key(global: &GlobalOpts, args: &KeyArgs) -> Result<(), AppError
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
         managed.ensure_domain("Runtime").await?;
-        let url_response = managed
-            .send_command(
-                "Runtime.evaluate",
-                Some(serde_json::json!({ "expression": "window.location.href" })),
-            )
-            .await?;
-        let url = url_response["result"]["value"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let url = get_current_url(&managed).await?;
         Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
@@ -1785,14 +1828,17 @@ async fn execute_key(global: &GlobalOpts, args: &KeyArgs) -> Result<(), AppError
 ///
 /// Returns `AppError` if the subcommand fails.
 pub async fn execute_interact(global: &GlobalOpts, args: &InteractArgs) -> Result<(), AppError> {
+    let frame = args.frame.as_deref();
     match &args.command {
-        InteractCommand::Click(click_args) => execute_click(global, click_args).await,
-        InteractCommand::ClickAt(click_at_args) => execute_click_at(global, click_at_args).await,
-        InteractCommand::Hover(hover_args) => execute_hover(global, hover_args).await,
-        InteractCommand::Drag(drag_args) => execute_drag(global, drag_args).await,
-        InteractCommand::Type(type_args) => execute_type(global, type_args).await,
-        InteractCommand::Key(key_args) => execute_key(global, key_args).await,
-        InteractCommand::Scroll(scroll_args) => execute_scroll(global, scroll_args).await,
+        InteractCommand::Click(click_args) => execute_click(global, click_args, frame).await,
+        InteractCommand::ClickAt(click_at_args) => {
+            execute_click_at(global, click_at_args, frame).await
+        }
+        InteractCommand::Hover(hover_args) => execute_hover(global, hover_args, frame).await,
+        InteractCommand::Drag(drag_args) => execute_drag(global, drag_args, frame).await,
+        InteractCommand::Type(type_args) => execute_type(global, type_args, frame).await,
+        InteractCommand::Key(key_args) => execute_key(global, key_args, frame).await,
+        InteractCommand::Scroll(scroll_args) => execute_scroll(global, scroll_args, frame).await,
     }
 }
 
@@ -1806,32 +1852,32 @@ mod tests {
 
     #[test]
     fn is_uid_valid() {
-        assert!(is_uid("s1"));
-        assert!(is_uid("s42"));
-        assert!(is_uid("s999"));
+        assert!(snapshot::is_uid("s1"));
+        assert!(snapshot::is_uid("s42"));
+        assert!(snapshot::is_uid("s999"));
     }
 
     #[test]
     fn is_uid_invalid() {
-        assert!(!is_uid("s"));
-        assert!(!is_uid("s0a"));
-        assert!(!is_uid("css:button"));
-        assert!(!is_uid("button"));
-        assert!(!is_uid("1s"));
+        assert!(!snapshot::is_uid("s"));
+        assert!(!snapshot::is_uid("s0a"));
+        assert!(!snapshot::is_uid("css:button"));
+        assert!(!snapshot::is_uid("button"));
+        assert!(!snapshot::is_uid("1s"));
     }
 
     #[test]
     fn is_css_selector_valid() {
-        assert!(is_css_selector("css:#button"));
-        assert!(is_css_selector("css:.class"));
-        assert!(is_css_selector("css:div > p"));
+        assert!(snapshot::is_css_selector("css:#button"));
+        assert!(snapshot::is_css_selector("css:.class"));
+        assert!(snapshot::is_css_selector("css:div > p"));
     }
 
     #[test]
     fn is_css_selector_invalid() {
-        assert!(!is_css_selector("#button"));
-        assert!(!is_css_selector("s1"));
-        assert!(!is_css_selector("button"));
+        assert!(!snapshot::is_css_selector("#button"));
+        assert!(!snapshot::is_css_selector("s1"));
+        assert!(!snapshot::is_css_selector("button"));
     }
 
     #[test]

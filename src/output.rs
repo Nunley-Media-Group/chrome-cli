@@ -1,8 +1,14 @@
+use std::time::Duration;
+
 use serde::Serialize;
 
+use agentchrome::cdp::{CdpClient, CdpConfig};
+use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
 use agentchrome::error::{AppError, ExitCode};
 
-use crate::cli::OutputFormat;
+use crate::cli::{GlobalOpts, OutputFormat};
+use crate::emulate::apply_emulate_state;
+use crate::snapshot;
 
 // =============================================================================
 // Constants
@@ -59,6 +65,127 @@ pub fn format_human_size(bytes: u64) -> String {
         format!("{} KB", bytes / 1024)
     } else {
         format!("{bytes} bytes")
+    }
+}
+
+// =============================================================================
+// Shared output helpers
+// =============================================================================
+
+/// Serialize a value to JSON and print to stdout.
+///
+/// Uses compact or pretty formatting based on `OutputFormat` flags.
+pub fn print_output(value: &impl Serialize, output: &OutputFormat) -> Result<(), AppError> {
+    let json = if output.pretty {
+        serde_json::to_string_pretty(value)
+    } else {
+        serde_json::to_string(value)
+    };
+    let json = json.map_err(serialization_error)?;
+    println!("{json}");
+    Ok(())
+}
+
+// =============================================================================
+// CDP config helper
+// =============================================================================
+
+/// Build a `CdpConfig` from the global CLI options.
+pub fn cdp_config(global: &GlobalOpts) -> CdpConfig {
+    let mut config = CdpConfig::default();
+    if let Some(timeout_ms) = global.timeout {
+        config.command_timeout = Duration::from_millis(timeout_ms);
+    }
+    config
+}
+
+// =============================================================================
+// Session setup
+// =============================================================================
+
+/// Connect to Chrome, attach to a target, and apply emulation state.
+pub async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
+    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let target = resolve_target(
+        &conn.host,
+        conn.port,
+        global.tab.as_deref(),
+        global.page_id.as_deref(),
+    )
+    .await?;
+
+    let config = cdp_config(global);
+    let client = CdpClient::connect(&conn.ws_url, config).await?;
+    let session = client.create_session(&target.id).await?;
+    let mut managed = ManagedSession::new(session);
+    apply_emulate_state(&mut managed).await?;
+
+    Ok((client, managed))
+}
+
+/// Like `setup_session`, but without applying emulation state.
+///
+/// Used by emulate commands that set (rather than apply) emulation state.
+pub async fn setup_session_bare(
+    global: &GlobalOpts,
+) -> Result<(CdpClient, ManagedSession), AppError> {
+    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let target = resolve_target(
+        &conn.host,
+        conn.port,
+        global.tab.as_deref(),
+        global.page_id.as_deref(),
+    )
+    .await?;
+
+    let config = cdp_config(global);
+    let client = CdpClient::connect(&conn.ws_url, config).await?;
+    let session = client.create_session(&target.id).await?;
+    let managed = ManagedSession::new(session);
+
+    Ok((client, managed))
+}
+
+/// Like `setup_session`, but also installs dialog interceptors.
+pub async fn setup_session_with_interceptors(
+    global: &GlobalOpts,
+) -> Result<(CdpClient, ManagedSession), AppError> {
+    let (client, managed) = setup_session(global).await?;
+    managed.install_dialog_interceptors().await;
+    Ok((client, managed))
+}
+
+// =============================================================================
+// Frame resolution
+// =============================================================================
+
+/// Resolve the optional `--frame` argument and return a `FrameContext`.
+///
+/// `uid` is the target element identifier; it is required when `frame` is
+/// `"auto"` so that `resolve_frame_auto` can locate the correct frame.
+pub async fn resolve_optional_frame(
+    client: &CdpClient,
+    managed: &mut ManagedSession,
+    frame: Option<&str>,
+    uid: Option<&str>,
+) -> Result<Option<agentchrome::frame::FrameContext>, AppError> {
+    if let Some(frame_str) = frame {
+        let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
+        if matches!(arg, agentchrome::frame::FrameArg::Auto) {
+            let target_uid = uid.unwrap_or_default();
+            let state = snapshot::read_snapshot_state().ok().flatten();
+            let hint = state
+                .as_ref()
+                .and_then(|s| s.frame_index.map(|idx| (idx, &s.uid_map)));
+            let (ctx, _frame_idx) =
+                agentchrome::frame::resolve_frame_auto(client, managed, target_uid, hint).await?;
+            Ok(Some(ctx))
+        } else {
+            let ctx = agentchrome::frame::resolve_frame(client, managed, &arg).await?;
+            Ok(Some(ctx))
+        }
+    } else {
+        Ok(None)
     }
 }
 
@@ -201,7 +328,11 @@ mod tests {
         let read_back = std::fs::read_to_string(&path).unwrap();
         assert_eq!(read_back, content);
         assert!(path.contains("agentchrome-"));
-        assert!(path.ends_with(".txt"));
+        assert!(
+            std::path::Path::new(&path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -209,7 +340,11 @@ mod tests {
     fn write_temp_file_json_extension() {
         let content = r#"{"key":"value"}"#;
         let path = write_temp_file(content, "json").unwrap();
-        assert!(path.ends_with(".json"));
+        assert!(
+            std::path::Path::new(&path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        );
         let _ = std::fs::remove_file(&path);
     }
 

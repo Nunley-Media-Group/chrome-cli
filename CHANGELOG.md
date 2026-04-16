@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-04-15
+
+### Added
+
+- Add iframe/frame targeting support with `page frames` command to list all frames, `--frame <index>` parameter on all page, dom, interact, form, js, and network commands for targeting specific iframe contexts, CDP frame session attachment for cross-origin iframes (OOPIFs), frame-scoped accessibility tree snapshots, JS execution, input dispatch with coordinate translation, and `page workers` command for worker enumeration (#189)
+
 ## [1.16.0] - 2026-04-15
 
 ### Added

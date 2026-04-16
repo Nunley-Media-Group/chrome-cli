@@ -245,6 +245,7 @@ fn clip_dimensions(clip: &ClipRegion) -> (u32, u32) {
 pub async fn execute_screenshot(
     global: &GlobalOpts,
     args: &PageScreenshotArgs,
+    frame: Option<&str>,
 ) -> Result<(), AppError> {
     // Validate mutual exclusion: --full-page vs --selector/--uid
     if args.full_page && (args.selector.is_some() || args.uid.is_some()) {
@@ -253,39 +254,65 @@ pub async fn execute_screenshot(
         ));
     }
 
-    let (_client, mut managed) = setup_session(global).await?;
+    let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    managed.ensure_domain("Page").await?;
-    managed.ensure_domain("Runtime").await?;
+    // Resolve optional frame context
+    let mut frame_ctx = if let Some(frame_str) = frame {
+        let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
+        Some(agentchrome::frame::resolve_frame(&client, &mut managed, &arg).await?)
+    } else {
+        None
+    };
+
+    // Enable required domains (needs &mut)
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("Page").await?;
+        eff_mut.ensure_domain("Runtime").await?;
+        if args.selector.is_some() {
+            eff_mut.ensure_domain("DOM").await?;
+        }
+    }
 
     let format_str = screenshot_format_str(args.format);
 
     // Determine capture strategy
-    let (clip, capture_beyond_viewport, dimensions) = if let Some(ref selector) = args.selector {
-        managed.ensure_domain("DOM").await?;
-        let clip = resolve_selector_clip(&managed, selector).await?;
-        let dims = clip_dimensions(&clip);
-        (Some(clip), false, dims)
-    } else if let Some(ref uid) = args.uid {
-        let clip = resolve_uid_clip(&mut managed, uid).await?;
-        let dims = clip_dimensions(&clip);
-        (Some(clip), false, dims)
-    } else if args.full_page {
-        let (page_w, page_h) = get_page_dimensions(&managed).await?;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let dims = (page_w as u32, page_h as u32);
-        set_viewport_size(&managed, dims.0, dims.1).await?;
-        (None, true, dims)
-    } else if let Some(ref clip_str) = args.clip {
-        let clip = parse_clip(clip_str)?;
-        let dims = clip_dimensions(&clip);
-        (Some(clip), false, dims)
-    } else {
-        let dims = get_viewport_dimensions(&managed).await?;
-        (None, false, dims)
+    let (clip, capture_beyond_viewport, dimensions) = {
+        let effective = if let Some(ref ctx) = frame_ctx {
+            agentchrome::frame::frame_session(ctx, &managed)
+        } else {
+            &managed
+        };
+
+        if let Some(ref selector) = args.selector {
+            let clip = resolve_selector_clip(effective, selector).await?;
+            let dims = clip_dimensions(&clip);
+            (Some(clip), false, dims)
+        } else if let Some(ref uid) = args.uid {
+            let clip = resolve_uid_clip(&mut managed, uid).await?;
+            let dims = clip_dimensions(&clip);
+            (Some(clip), false, dims)
+        } else if args.full_page {
+            let (page_w, page_h) = get_page_dimensions(effective).await?;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let dims = (page_w as u32, page_h as u32);
+            set_viewport_size(effective, dims.0, dims.1).await?;
+            (None, true, dims)
+        } else if let Some(ref clip_str) = args.clip {
+            let clip = parse_clip(clip_str)?;
+            let dims = clip_dimensions(&clip);
+            (Some(clip), false, dims)
+        } else {
+            let dims = get_viewport_dimensions(effective).await?;
+            (None, false, dims)
+        }
     };
 
     // Build CDP params
@@ -311,14 +338,19 @@ pub async fn execute_screenshot(
     }
 
     // Capture
-    let result = managed
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+    let result = effective
         .send_command("Page.captureScreenshot", Some(params))
         .await
         .map_err(|e| AppError::screenshot_failed(&e.to_string()))?;
 
     // Restore viewport if full-page
     if args.full_page {
-        clear_viewport_override(&managed).await?;
+        clear_viewport_override(effective).await?;
     }
 
     let data = result["data"]

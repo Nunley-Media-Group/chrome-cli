@@ -5,14 +5,13 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     GlobalOpts, NetworkArgs, NetworkCommand, NetworkFollowArgs, NetworkGetArgs, NetworkListArgs,
 };
-use crate::emulate::apply_emulate_state;
+use crate::output::setup_session;
 
 // =============================================================================
 // Output types
@@ -144,6 +143,8 @@ struct NetworkRequestBuilder {
     error_text: Option<String>,
     navigation_id: u32,
     loading_finished_timestamp: Option<f64>,
+    /// CDP frame ID from `Network.requestWillBeSent` event.
+    frame_id: Option<String>,
 }
 
 // =============================================================================
@@ -211,41 +212,6 @@ fn format_detail_plain(detail: &NetworkRequestDetail) -> String {
 #[cfg(test)]
 fn print_detail_plain(detail: &NetworkRequestDetail) {
     print!("{}", format_detail_plain(detail));
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-
-    Ok((client, managed))
 }
 
 // =============================================================================
@@ -697,6 +663,7 @@ async fn collect_and_correlate(
                 } else {
                     let monotonic_ts = event.params["timestamp"].as_f64().unwrap_or(0.0);
                     let wall_time = event.params["wallTime"].as_f64().unwrap_or(0.0);
+                    let frame_id = event.params["frameId"].as_str().map(String::from);
                     let builder = NetworkRequestBuilder {
                         cdp_request_id: request_id.clone(),
                         assigned_id: next_id,
@@ -727,6 +694,7 @@ async fn collect_and_correlate(
                         error_text: None,
                         navigation_id: event.navigation_id,
                         loading_finished_timestamp: None,
+                        frame_id,
                     };
                     builders.insert(request_id, builder);
                     next_id += 1;
@@ -824,6 +792,28 @@ fn builder_to_summary(builder: &NetworkRequestBuilder) -> NetworkRequestSummary 
     }
 }
 
+/// Resolve a path-based frame arg (e.g., `1/0`) to a CDP frame ID string.
+///
+/// Segments are child indices relative to the current frame. Returns `None`
+/// if the path is invalid.
+fn resolve_frame_id_by_path(
+    frames: &[agentchrome::frame::FrameInfo],
+    segments: &[u32],
+) -> Option<String> {
+    if segments.is_empty() {
+        return frames.iter().find(|f| f.depth == 0).map(|f| f.id.clone());
+    }
+    // Find the main frame (depth 0)
+    let main = frames.iter().find(|f| f.depth == 0)?;
+    let mut current_id = main.id.clone();
+    for &seg in segments {
+        let current = frames.iter().find(|f| f.id == current_id)?;
+        let child_id = current.child_ids.get(seg as usize)?.clone();
+        current_id = child_id;
+    }
+    Some(current_id)
+}
+
 // =============================================================================
 // Dispatcher
 // =============================================================================
@@ -846,14 +836,44 @@ pub async fn execute_network(global: &GlobalOpts, args: &NetworkArgs) -> Result<
 // =============================================================================
 
 async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+    let (client, mut managed) = setup_session(global).await?;
 
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
+    // Resolve frame filter: convert frame index arg to a CDP frame ID string
+    let filter_frame_id: Option<String> = if let Some(ref frame_str) = args.frame {
+        let frame_arg = agentchrome::frame::parse_frame_arg(frame_str)?;
+        managed.ensure_domain("Page").await?;
+        let frames = agentchrome::frame::list_frames(&mut managed).await?;
+        // Resolve the frame arg to an index, then get the frame ID
+        match frame_arg {
+            agentchrome::frame::FrameArg::Index(idx) => {
+                frames.iter().find(|f| f.index == idx).map(|f| f.id.clone())
+            }
+            agentchrome::frame::FrameArg::Path(ref segments) => {
+                // Walk the frame tree by path
+                resolve_frame_id_by_path(&frames, segments)
+            }
+            agentchrome::frame::FrameArg::Auto => None,
+        }
+    } else {
+        None
+    };
+
     let (builders, _nav_id) =
         collect_and_correlate(&mut managed, args.include_preserved, global.timeout).await?;
+
+    // Apply frame filter on builders before converting to summaries
+    let builders: Vec<_> = if let Some(ref fid) = filter_frame_id {
+        builders
+            .into_iter()
+            .filter(|b| b.frame_id.as_deref() == Some(fid.as_str()))
+            .collect()
+    } else {
+        builders
+    };
 
     // Convert to summaries and sort by assigned_id
     let mut requests: Vec<NetworkRequestSummary> =
@@ -874,6 +894,9 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
     if let Some(ref method) = args.method {
         requests = filter_by_method(requests, method);
     }
+
+    // Suppress unused warning — client must live long enough
+    let _ = &client;
 
     // Paginate
     requests = paginate(requests, args.limit, args.page);
@@ -1767,6 +1790,7 @@ mod tests {
             error_text: None,
             navigation_id: 0,
             loading_finished_timestamp: Some(62090.544),
+            frame_id: None,
         };
         let summary = builder_to_summary(&builder);
         // Must show 2024, NOT 1970
@@ -2010,6 +2034,7 @@ mod tests {
             error_text: None,
             navigation_id: 0,
             loading_finished_timestamp: Some(62090.544),
+            frame_id: None,
         };
         let summary = builder_to_summary(&builder);
         assert_eq!(

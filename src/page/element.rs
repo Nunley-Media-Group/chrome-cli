@@ -61,10 +61,7 @@ fn is_element_css_selector(target: &str) -> bool {
 }
 
 /// Resolve a target (UID or CSS selector) to a backend DOM node ID.
-async fn resolve_element_target(
-    session: &mut ManagedSession,
-    target: &str,
-) -> Result<i64, AppError> {
+async fn resolve_element_target(session: &ManagedSession, target: &str) -> Result<i64, AppError> {
     if is_element_uid(target) {
         let state = crate::snapshot::read_snapshot_state()
             .map_err(|e| AppError {
@@ -145,7 +142,7 @@ fn format_opt_bool(val: Option<bool>) -> &'static str {
 
 /// Retrieve element info from CDP given a `backendNodeId`.
 async fn fetch_element_info(
-    managed: &mut ManagedSession,
+    managed: &ManagedSession,
     backend_node_id: i64,
     target: &str,
 ) -> Result<ElementInfo, AppError> {
@@ -275,14 +272,40 @@ fn print_element_plain(info: &ElementInfo) {
 // Command executor
 // =============================================================================
 
-pub async fn execute_element(global: &GlobalOpts, args: &PageElementArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+pub async fn execute_element(
+    global: &GlobalOpts,
+    args: &PageElementArgs,
+    frame: Option<&str>,
+) -> Result<(), AppError> {
+    let (client, mut managed) = setup_session(global).await?;
 
-    managed.ensure_domain("DOM").await?;
-    managed.ensure_domain("Accessibility").await?;
+    // Resolve optional frame context
+    let mut frame_ctx = if let Some(frame_str) = frame {
+        let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
+        Some(agentchrome::frame::resolve_frame(&client, &mut managed, &arg).await?)
+    } else {
+        None
+    };
 
-    let backend_node_id = resolve_element_target(&mut managed, &args.target).await?;
-    let element_info = fetch_element_info(&mut managed, backend_node_id, &args.target).await?;
+    // Enable domains on effective session (needs &mut)
+    {
+        let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+            agentchrome::frame::frame_session_mut(ctx, &mut managed)
+        } else {
+            &mut managed
+        };
+        eff_mut.ensure_domain("DOM").await?;
+        eff_mut.ensure_domain("Accessibility").await?;
+    }
+
+    let effective = if let Some(ref ctx) = frame_ctx {
+        agentchrome::frame::frame_session(ctx, &managed)
+    } else {
+        &managed
+    };
+
+    let backend_node_id = resolve_element_target(effective, &args.target).await?;
+    let element_info = fetch_element_info(effective, backend_node_id, &args.target).await?;
 
     if global.output.plain {
         print_element_plain(&element_info);

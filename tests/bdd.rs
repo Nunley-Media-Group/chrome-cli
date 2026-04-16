@@ -3681,8 +3681,7 @@ fn extract_function_body(source: &str, fn_name: &str) -> String {
         .find("\nasync fn ")
         .or_else(|| rest[1..].find("\nfn "))
         .or_else(|| rest[1..].find("\n/// "))
-        .map(|i| i + 1)
-        .unwrap_or(rest.len());
+        .map_or(rest.len(), |i| i + 1);
     rest[..end].to_string()
 }
 
@@ -3815,8 +3814,7 @@ fn check_resolve_uid_clip(world: &mut PageSourceWorld) {
         .find("\nasync fn ")
         .or_else(|| rest[1..].find("\nfn "))
         .or_else(|| rest[1..].find("\n/// "))
-        .map(|i| i + 1)
-        .unwrap_or(rest.len());
+        .map_or(rest.len(), |i| i + 1);
     world.function_body = rest[..end].to_string();
 }
 
@@ -4366,6 +4364,7 @@ const COMPACT_SNAPSHOT_SOURCE_TESTABLE: &[&str] = &[
 ];
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() {
     WorkflowWorld::run("tests/features/release-pipeline.feature").await;
     CliWorld::run("tests/features/cli-skeleton.feature").await;

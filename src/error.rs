@@ -465,6 +465,62 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn frame_not_found(index: u32) -> Self {
+        Self {
+            message: format!(
+                "Frame index {index} not found. \
+                 Use 'agentchrome page frames' to list available frames."
+            ),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn frame_path_invalid(path: &str, segment: u32, max_children: u32) -> Self {
+        Self {
+            message: format!(
+                "Frame path '{path}' failed at segment {segment}: \
+                 parent frame has only {max_children} children."
+            ),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn frame_detached() -> Self {
+        Self {
+            message: "Frame is no longer available (detached or navigated away).".into(),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn element_not_in_any_frame() -> Self {
+        Self {
+            message: "Element not found in any frame. \
+                      Use 'agentchrome page frames' to list available frames."
+                .into(),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
+    pub fn worker_not_found(index: u32) -> Self {
+        Self {
+            message: format!(
+                "Worker index {index} not found. \
+                 Use 'agentchrome page workers' to list available workers."
+            ),
+            code: ExitCode::TargetError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
     pub fn css_selector_not_found(selector: &str) -> Self {
         Self {
             message: format!("No element matches selector '{selector}'"),
@@ -864,5 +920,45 @@ mod tests {
         assert!(err.message.contains("3000ms"));
         assert!(err.message.contains("Products"));
         assert!(matches!(err.code, ExitCode::TimeoutError));
+    }
+
+    #[test]
+    fn frame_not_found_error() {
+        let err = AppError::frame_not_found(5);
+        assert!(err.message.contains("Frame index 5 not found"));
+        assert!(err.message.contains("page frames"));
+        assert!(matches!(err.code, ExitCode::TargetError));
+    }
+
+    #[test]
+    fn frame_path_invalid_error() {
+        let err = AppError::frame_path_invalid("1/3", 3, 2);
+        assert!(err.message.contains("Frame path '1/3'"));
+        assert!(err.message.contains("segment 3"));
+        assert!(err.message.contains("2 children"));
+        assert!(matches!(err.code, ExitCode::TargetError));
+    }
+
+    #[test]
+    fn frame_detached_error() {
+        let err = AppError::frame_detached();
+        assert!(err.message.contains("no longer available"));
+        assert!(matches!(err.code, ExitCode::TargetError));
+    }
+
+    #[test]
+    fn element_not_in_any_frame_error() {
+        let err = AppError::element_not_in_any_frame();
+        assert!(err.message.contains("not found in any frame"));
+        assert!(err.message.contains("page frames"));
+        assert!(matches!(err.code, ExitCode::TargetError));
+    }
+
+    #[test]
+    fn worker_not_found_error() {
+        let err = AppError::worker_not_found(2);
+        assert!(err.message.contains("Worker index 2 not found"));
+        assert!(err.message.contains("page workers"));
+        assert!(matches!(err.code, ExitCode::TargetError));
     }
 }

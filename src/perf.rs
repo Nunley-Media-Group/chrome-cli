@@ -5,14 +5,14 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use agentchrome::cdp::{CdpClient, CdpConfig, CdpEvent};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::cdp::CdpEvent;
+use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     GlobalOpts, PerfAnalyzeArgs, PerfArgs, PerfCommand, PerfRecordArgs, PerfVitalsArgs,
 };
-use crate::emulate::apply_emulate_state;
+use crate::output::{self, setup_session};
 
 /// Default trace timeout in milliseconds (30 seconds).
 const DEFAULT_TRACE_TIMEOUT_MS: u64 = 30_000;
@@ -82,30 +82,7 @@ fn print_output(
             return Ok(());
         }
     }
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
+    output::print_output(value, output)
 }
 
 // =============================================================================
@@ -123,29 +100,6 @@ pub async fn execute_perf(global: &GlobalOpts, args: &PerfArgs) -> Result<(), Ap
         PerfCommand::Analyze(analyze_args) => execute_analyze(global, analyze_args),
         PerfCommand::Vitals(vitals_args) => execute_vitals(global, vitals_args).await,
     }
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-
-    Ok((client, managed))
 }
 
 // =============================================================================
