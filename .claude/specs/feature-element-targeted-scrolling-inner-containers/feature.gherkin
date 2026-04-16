@@ -1,0 +1,67 @@
+# File: tests/features/element-targeted-scrolling.feature
+#
+# Generated from: .claude/specs/feature-element-targeted-scrolling-inner-containers/requirements.md
+# Issue: #182
+
+Feature: Element-targeted scrolling for inner containers
+  As a developer or AI agent automating pages with scrollable inner containers
+  I want to scroll specific elements by CSS selector or accessibility UID
+  So that I can navigate content within nested scrollable containers without resorting to js exec
+
+  Background:
+    Given a Chrome session is connected
+
+  # --- Happy Path ---
+
+  Scenario: Scroll inner container by CSS selector (AC1)
+    Given a page with a scrollable container matching CSS selector ".stage"
+    When I run interact scroll with selector ".stage" and direction "down"
+    Then the command exits with code 0
+    And the JSON output "scrolled.y" is greater than 0
+    And the JSON output "position.y" is greater than 0
+
+  # --- Alternative Path ---
+
+  Scenario: Scroll inner container by UID (AC2)
+    Given a page with a scrollable container
+    And I have taken a page snapshot
+    And the scrollable container has a UID assigned
+    When I run interact scroll with the container UID and direction "down" and amount 300
+    Then the command exits with code 0
+    And the JSON output "scrolled.y" is approximately 300
+
+  # --- Error Handling ---
+
+  Scenario: Error on non-scrollable target (AC3)
+    Given a page with a non-scrollable element "#static-div"
+    When I run interact scroll with selector "#static-div" and direction "down"
+    Then the command exits with a non-zero code
+    And stderr contains a JSON error with message matching "not scrollable"
+
+  Scenario: Selector and UID flags conflict with each other (AC4)
+    When I run interact scroll with both selector ".stage" and uid "s1"
+    Then the command exits with a non-zero code
+    And stderr contains a JSON error about conflicting arguments
+
+  # --- Smooth Scroll ---
+
+  Scenario: Smooth scroll works with targeted containers (AC5)
+    Given a page with a scrollable container matching CSS selector ".panel"
+    When I run interact scroll with selector ".panel" and direction "down" and smooth
+    Then the command exits with code 0
+    And the JSON output "scrolled.y" is greater than 0
+
+  # --- Direction Coverage ---
+
+  Scenario Outline: All four scroll directions work with targeted containers (AC6)
+    Given a page with a scrollable container that has both horizontal and vertical overflow
+    When I run interact scroll with selector ".panel" and direction "<direction>"
+    Then the command exits with code 0
+    And the JSON output "<scroll_field>" is not zero
+
+    Examples:
+      | direction | scroll_field |
+      | down      | scrolled.y   |
+      | up        | scrolled.y   |
+      | right     | scrolled.x   |
+      | left      | scrolled.x   |
