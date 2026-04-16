@@ -27,6 +27,10 @@ struct WaitResult {
     text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selector: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    js_expression: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    count: Option<u64>,
 }
 
 // =============================================================================
@@ -47,6 +51,12 @@ fn print_wait_plain(result: &WaitResult) {
     if let Some(ref s) = result.selector {
         println!("Selector:  {s}");
     }
+    if let Some(ref expr) = result.js_expression {
+        println!("Expression: {expr}");
+    }
+    if let Some(count) = result.count {
+        println!("Count:     {count}");
+    }
 }
 
 // =============================================================================
@@ -66,7 +76,62 @@ pub(crate) async fn eval_js(
         )
         .await
         .ok()?;
+    // If the evaluation threw a JS exception, treat it as failure
+    if result.get("exceptionDetails").is_some() {
+        return None;
+    }
     Some(result["result"]["value"].clone())
+}
+
+/// Outcome of evaluating a JS expression with rich error discrimination.
+enum EvalOutcome {
+    /// Expression evaluated successfully, result value returned.
+    Value(serde_json::Value),
+    /// Expression threw a JavaScript exception (`SyntaxError`, `TypeError`, etc.).
+    JsException(String),
+    /// CDP communication failed (page navigating, context destroyed, etc.).
+    TransientError,
+}
+
+/// Evaluate a JS expression with rich error information for `--js-expression`.
+/// Distinguishes between successful evaluation, JS exceptions, and CDP failures.
+async fn eval_js_checked(
+    managed: &agentchrome::connection::ManagedSession,
+    expression: &str,
+) -> EvalOutcome {
+    let Ok(result) = managed
+        .send_command(
+            "Runtime.evaluate",
+            Some(serde_json::json!({ "expression": expression })),
+        )
+        .await
+    else {
+        return EvalOutcome::TransientError;
+    };
+
+    // Check for JavaScript exception
+    if let Some(exception) = result.get("exceptionDetails") {
+        let msg = exception["exception"]["description"]
+            .as_str()
+            .or_else(|| exception["text"].as_str())
+            .unwrap_or("Unknown JavaScript error")
+            .to_string();
+        return EvalOutcome::JsException(msg);
+    }
+
+    let value = result["result"]["value"].clone();
+    EvalOutcome::Value(value)
+}
+
+/// Check whether a `serde_json::Value` is truthy according to JavaScript semantics.
+fn is_truthy(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Bool(b) => *b,
+        serde_json::Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
+        serde_json::Value::String(s) => !s.is_empty(),
+        serde_json::Value::Null => false,
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => true,
+    }
 }
 
 /// Check the URL condition: fetch location.href and match against a glob.
@@ -96,13 +161,20 @@ async fn check_text_condition(
     val.as_bool().unwrap_or(false)
 }
 
-/// Check the selector condition: evaluate document.querySelector(sel) !== null.
+/// Check the selector condition with optional count threshold.
+/// When `count <= 1`: checks `document.querySelector(sel) !== null` (presence).
+/// When `count > 1`: checks `document.querySelectorAll(sel).length >= count`.
 pub(crate) async fn check_selector_condition(
     managed: &agentchrome::connection::ManagedSession,
     selector: &str,
+    count: u64,
 ) -> bool {
     let encoded = serde_json::to_string(selector).unwrap_or_default();
-    let expr = format!("document.querySelector({encoded}) !== null");
+    let expr = if count <= 1 {
+        format!("document.querySelector({encoded}) !== null")
+    } else {
+        format!("document.querySelectorAll({encoded}).length >= {count}")
+    };
     let Some(val) = eval_js(managed, &expr).await else {
         return false;
     };
@@ -125,7 +197,7 @@ pub async fn execute_wait(
         return execute_network_idle_wait(global, timeout_ms).await;
     }
 
-    // Poll-based conditions: --url, --text, --selector
+    // Poll-based conditions: --url, --text, --selector, --js-expression
     let (client, mut managed) = setup_session(global).await?;
 
     // Resolve optional frame context
@@ -157,7 +229,17 @@ pub async fn execute_wait(
     } else if let Some(ref text) = args.text {
         poll_text(global, effective, text, timeout_ms, args.interval).await
     } else if let Some(ref selector) = args.selector {
-        poll_selector(global, effective, selector, timeout_ms, args.interval).await
+        poll_selector(
+            global,
+            effective,
+            selector,
+            args.count,
+            timeout_ms,
+            args.interval,
+        )
+        .await
+    } else if let Some(ref expression) = args.js_expression {
+        poll_js_expression(global, effective, expression, timeout_ms, args.interval).await
     } else {
         unreachable!("No condition specified — clap should have caught this");
     }
@@ -192,6 +274,8 @@ async fn poll_url(
             Some(pattern.to_string()),
             None,
             None,
+            None,
+            None,
         )
         .await;
     }
@@ -212,6 +296,8 @@ async fn poll_url(
                 Some(pattern.to_string()),
                 None,
                 None,
+                None,
+                None,
             )
             .await;
         }
@@ -230,7 +316,17 @@ async fn poll_text(
     let interval = Duration::from_millis(interval_ms);
 
     if check_text_condition(managed, text).await {
-        return finish_poll_wait(global, managed, "text", None, Some(text.to_string()), None).await;
+        return finish_poll_wait(
+            global,
+            managed,
+            "text",
+            None,
+            Some(text.to_string()),
+            None,
+            None,
+            None,
+        )
+        .await;
     }
 
     loop {
@@ -242,24 +338,35 @@ async fn poll_text(
             ));
         }
         if check_text_condition(managed, text).await {
-            return finish_poll_wait(global, managed, "text", None, Some(text.to_string()), None)
-                .await;
+            return finish_poll_wait(
+                global,
+                managed,
+                "text",
+                None,
+                Some(text.to_string()),
+                None,
+                None,
+                None,
+            )
+            .await;
         }
     }
 }
 
-/// Poll for a CSS selector matching an element.
+/// Poll for a CSS selector matching elements, with optional count threshold.
 async fn poll_selector(
     global: &GlobalOpts,
     managed: &agentchrome::connection::ManagedSession,
     selector: &str,
+    count: u64,
     timeout_ms: u64,
     interval_ms: u64,
 ) -> Result<(), AppError> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(interval_ms);
+    let count_output = if count > 1 { Some(count) } else { None };
 
-    if check_selector_condition(managed, selector).await {
+    if check_selector_condition(managed, selector, count).await {
         return finish_poll_wait(
             global,
             managed,
@@ -267,6 +374,8 @@ async fn poll_selector(
             None,
             None,
             Some(selector.to_string()),
+            None,
+            count_output,
         )
         .await;
     }
@@ -274,12 +383,14 @@ async fn poll_selector(
     loop {
         tokio::time::sleep(interval).await;
         if Instant::now() > deadline {
-            return Err(AppError::wait_timeout(
-                timeout_ms,
-                &format!("selector \"{selector}\" not found"),
-            ));
+            let condition = if count > 1 {
+                format!("selector \"{selector}\" count >= {count} not reached")
+            } else {
+                format!("selector \"{selector}\" not found")
+            };
+            return Err(AppError::wait_timeout(timeout_ms, &condition));
         }
-        if check_selector_condition(managed, selector).await {
+        if check_selector_condition(managed, selector, count).await {
             return finish_poll_wait(
                 global,
                 managed,
@@ -287,13 +398,86 @@ async fn poll_selector(
                 None,
                 None,
                 Some(selector.to_string()),
+                None,
+                count_output,
             )
             .await;
         }
     }
 }
 
+/// Poll for a JavaScript expression to evaluate to truthy.
+async fn poll_js_expression(
+    global: &GlobalOpts,
+    managed: &agentchrome::connection::ManagedSession,
+    expression: &str,
+    timeout_ms: u64,
+    interval_ms: u64,
+) -> Result<(), AppError> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let interval = Duration::from_millis(interval_ms);
+    let mut consecutive_errors: u32 = 0;
+
+    // Immediate pre-check
+    match eval_js_checked(managed, expression).await {
+        EvalOutcome::Value(ref v) if is_truthy(v) => {
+            return finish_poll_wait(
+                global,
+                managed,
+                "js-expression",
+                None,
+                None,
+                None,
+                Some(expression.to_string()),
+                None,
+            )
+            .await;
+        }
+        EvalOutcome::JsException(_) => {
+            consecutive_errors += 1;
+        }
+        EvalOutcome::Value(_) | EvalOutcome::TransientError => {
+            consecutive_errors = 0;
+        }
+    }
+
+    loop {
+        tokio::time::sleep(interval).await;
+        if Instant::now() > deadline {
+            return Err(AppError::wait_timeout(
+                timeout_ms,
+                "js-expression not truthy",
+            ));
+        }
+        match eval_js_checked(managed, expression).await {
+            EvalOutcome::Value(ref v) if is_truthy(v) => {
+                return finish_poll_wait(
+                    global,
+                    managed,
+                    "js-expression",
+                    None,
+                    None,
+                    None,
+                    Some(expression.to_string()),
+                    None,
+                )
+                .await;
+            }
+            EvalOutcome::JsException(msg) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= 3 {
+                    return Err(AppError::js_eval_error(&msg));
+                }
+            }
+            EvalOutcome::Value(_) | EvalOutcome::TransientError => {
+                consecutive_errors = 0;
+            }
+        }
+    }
+}
+
 /// Build and output the `WaitResult` after a poll-based condition is met.
+#[allow(clippy::too_many_arguments)]
 async fn finish_poll_wait(
     global: &GlobalOpts,
     managed: &agentchrome::connection::ManagedSession,
@@ -301,6 +485,8 @@ async fn finish_poll_wait(
     pattern: Option<String>,
     text: Option<String>,
     selector: Option<String>,
+    js_expression: Option<String>,
+    count: Option<u64>,
 ) -> Result<(), AppError> {
     let (url, title) = get_page_info(managed).await?;
     let result = WaitResult {
@@ -311,6 +497,8 @@ async fn finish_poll_wait(
         pattern,
         text,
         selector,
+        js_expression,
+        count,
     };
 
     if global.output.plain {
@@ -343,6 +531,8 @@ async fn execute_network_idle_wait(global: &GlobalOpts, timeout_ms: u64) -> Resu
         pattern: None,
         text: None,
         selector: None,
+        js_expression: None,
+        count: None,
     };
 
     if global.output.plain {
@@ -406,6 +596,61 @@ mod tests {
         assert!(m.is_match("https://sub.example.com/"));
     }
 
+    // --- is_truthy tests ---
+
+    #[test]
+    fn is_truthy_bool_true() {
+        assert!(super::is_truthy(&serde_json::Value::Bool(true)));
+    }
+
+    #[test]
+    fn is_truthy_bool_false() {
+        assert!(!super::is_truthy(&serde_json::Value::Bool(false)));
+    }
+
+    #[test]
+    fn is_truthy_number_nonzero() {
+        assert!(super::is_truthy(&serde_json::json!(42)));
+        assert!(super::is_truthy(&serde_json::json!(-1)));
+        assert!(super::is_truthy(&serde_json::json!(0.5)));
+    }
+
+    #[test]
+    fn is_truthy_number_zero() {
+        assert!(!super::is_truthy(&serde_json::json!(0)));
+        assert!(!super::is_truthy(&serde_json::json!(0.0)));
+    }
+
+    #[test]
+    fn is_truthy_string_nonempty() {
+        assert!(super::is_truthy(&serde_json::json!("hello")));
+        assert!(super::is_truthy(&serde_json::json!("0")));
+    }
+
+    #[test]
+    fn is_truthy_string_empty() {
+        assert!(!super::is_truthy(&serde_json::json!("")));
+    }
+
+    #[test]
+    fn is_truthy_null() {
+        assert!(!super::is_truthy(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn is_truthy_array() {
+        assert!(super::is_truthy(&serde_json::json!([])));
+        assert!(super::is_truthy(&serde_json::json!([1, 2])));
+    }
+
+    #[test]
+    fn is_truthy_object() {
+        assert!(super::is_truthy(&serde_json::json!({})));
+        assert!(super::is_truthy(&serde_json::json!({"a": 1})));
+    }
+
+    // --- WaitResult serialization tests ---
+
     #[test]
     fn wait_result_serialization_url_condition() {
         let result = super::WaitResult {
@@ -416,6 +661,8 @@ mod tests {
             pattern: Some("*/dashboard*".to_string()),
             text: None,
             selector: None,
+            js_expression: None,
+            count: None,
         };
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
         assert_eq!(json["condition"], "url");
@@ -424,6 +671,8 @@ mod tests {
         assert_eq!(json["pattern"], "*/dashboard*");
         assert!(json.get("text").is_none());
         assert!(json.get("selector").is_none());
+        assert!(json.get("js_expression").is_none());
+        assert!(json.get("count").is_none());
     }
 
     #[test]
@@ -436,6 +685,8 @@ mod tests {
             pattern: None,
             text: Some("Products".to_string()),
             selector: None,
+            js_expression: None,
+            count: None,
         };
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
         assert_eq!(json["condition"], "text");
@@ -454,12 +705,34 @@ mod tests {
             pattern: None,
             text: None,
             selector: Some("#results-table".to_string()),
+            js_expression: None,
+            count: None,
         };
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
         assert_eq!(json["condition"], "selector");
         assert_eq!(json["selector"], "#results-table");
         assert!(json.get("pattern").is_none());
         assert!(json.get("text").is_none());
+        assert!(json.get("count").is_none());
+    }
+
+    #[test]
+    fn wait_result_serialization_selector_with_count() {
+        let result = super::WaitResult {
+            condition: "selector".to_string(),
+            matched: true,
+            url: "https://example.com/items".to_string(),
+            title: "Item List".to_string(),
+            pattern: None,
+            text: None,
+            selector: Some(".item".to_string()),
+            js_expression: None,
+            count: Some(3),
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["condition"], "selector");
+        assert_eq!(json["selector"], ".item");
+        assert_eq!(json["count"], 3);
     }
 
     #[test]
@@ -472,6 +745,8 @@ mod tests {
             pattern: None,
             text: None,
             selector: None,
+            js_expression: None,
+            count: None,
         };
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
         assert_eq!(json["condition"], "network-idle");
@@ -479,5 +754,34 @@ mod tests {
         assert!(json.get("pattern").is_none());
         assert!(json.get("text").is_none());
         assert!(json.get("selector").is_none());
+        assert!(json.get("js_expression").is_none());
+    }
+
+    #[test]
+    fn wait_result_serialization_js_expression() {
+        let result = super::WaitResult {
+            condition: "js-expression".to_string(),
+            matched: true,
+            url: "https://example.com/wizard".to_string(),
+            title: "Setup Wizard".to_string(),
+            pattern: None,
+            text: None,
+            selector: None,
+            js_expression: Some(
+                "document.querySelector('.next-btn').disabled === false".to_string(),
+            ),
+            count: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["condition"], "js-expression");
+        assert_eq!(json["matched"], true);
+        assert_eq!(
+            json["js_expression"],
+            "document.querySelector('.next-btn').disabled === false"
+        );
+        assert!(json.get("pattern").is_none());
+        assert!(json.get("text").is_none());
+        assert!(json.get("selector").is_none());
+        assert!(json.get("count").is_none());
     }
 }

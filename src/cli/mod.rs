@@ -1007,8 +1007,9 @@ EXAMPLES:
         arg_required_else_help = true,
         long_about = "Wait until a specified condition is met on the current page. Supports \
             waiting for a URL to match a glob pattern, text to appear, a CSS selector to match, \
-            or network activity to settle. Exactly one condition must be specified. The command \
-            blocks until the condition is satisfied or the timeout is reached.",
+            network activity to settle, or a JavaScript expression to evaluate to truthy. \
+            Exactly one condition must be specified. The command blocks until the condition is \
+            satisfied or the timeout is reached.",
         after_long_help = "\
 EXAMPLES:
   # Wait for URL to match a glob pattern
@@ -1020,8 +1021,17 @@ EXAMPLES:
   # Wait for a CSS selector to match
   agentchrome page wait --selector \"#results-table\"
 
+  # Wait for at least 5 elements to match a selector
+  agentchrome page wait --selector \".item\" --count 5
+
   # Wait for network to settle
   agentchrome page wait --network-idle
+
+  # Wait for a JavaScript expression to become truthy
+  agentchrome page wait --js-expression \"document.querySelector('.btn').disabled === false\"
+
+  # Wait for audio element to finish playing
+  agentchrome page wait --js-expression \"document.querySelector('audio').ended\"
 
   # Custom timeout and poll interval
   agentchrome page wait --text \"loaded\" --timeout 5000 --interval 200"
@@ -2845,7 +2855,15 @@ pub struct PageWaitArgs {
     #[arg(long, group = "condition")]
     pub network_idle: bool,
 
-    /// Poll interval in milliseconds (for --url, --text, --selector)
+    /// Wait for a JavaScript expression to evaluate to a truthy value
+    #[arg(long, group = "condition")]
+    pub js_expression: Option<String>,
+
+    /// Minimum number of elements that must match the selector (requires --selector)
+    #[arg(long, requires = "selector", default_value = "1")]
+    pub count: u64,
+
+    /// Poll interval in milliseconds (for --url, --text, --selector, --js-expression)
     #[arg(long, default_value = "100")]
     pub interval: u64,
 }

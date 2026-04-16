@@ -3542,6 +3542,8 @@ const PAGE_WAIT_TESTABLE_SCENARIOS: &[&str] = &[
     "Wait help displays usage",
     "Wait with no condition shows help",
     "Page help lists wait subcommand",
+    "Count without selector is rejected",
+    "Help text includes new condition examples",
 ];
 
 /// Page ID global flag scenarios that can be tested without a running Chrome instance.
@@ -4783,9 +4785,9 @@ async fn main() {
         )
         .await;
 
-    // Page wait command (issue #163) — only CLI argument validation and help text scenarios
-    // can be tested without Chrome. Scenarios requiring actual page state changes need a running
-    // Chrome instance.
+    // Page wait command (issues #163, #195) — only CLI argument validation and help text
+    // scenarios can be tested without Chrome. Scenarios requiring actual page state changes
+    // need a running Chrome instance.
     CliWorld::cucumber()
         .filter_run_and_exit(
             "tests/features/page-wait.feature",

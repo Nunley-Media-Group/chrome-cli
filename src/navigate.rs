@@ -152,7 +152,7 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
         let interval = Duration::from_millis(100);
 
         // Immediate pre-check
-        if !check_selector_condition(&managed, selector).await {
+        if !check_selector_condition(&managed, selector, 1).await {
             loop {
                 tokio::time::sleep(interval).await;
                 if Instant::now() > deadline {
@@ -161,7 +161,7 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
                         &format!("selector \"{selector}\" not found"),
                     ));
                 }
-                if check_selector_condition(&managed, selector).await {
+                if check_selector_condition(&managed, selector, 1).await {
                     break;
                 }
             }

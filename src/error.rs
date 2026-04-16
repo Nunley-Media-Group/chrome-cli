@@ -553,6 +553,15 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn js_eval_error(js_message: &str) -> Self {
+        Self {
+            message: format!("JavaScript expression evaluation failed: {js_message}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        }
+    }
+
+    #[must_use]
     pub fn wait_timeout(timeout_ms: u64, condition: &str) -> Self {
         Self {
             message: format!("Wait timed out after {timeout_ms}ms: {condition}"),
@@ -931,6 +940,17 @@ mod tests {
         assert!(err.message.contains(".stage"));
         assert!(err.message.contains("not scrollable"));
         assert!(err.message.contains("does not overflow"));
+        assert!(matches!(err.code, ExitCode::GeneralError));
+    }
+
+    #[test]
+    fn js_eval_error() {
+        let err = AppError::js_eval_error("SyntaxError: Unexpected token '('");
+        assert!(
+            err.message
+                .contains("JavaScript expression evaluation failed")
+        );
+        assert!(err.message.contains("SyntaxError"));
         assert!(matches!(err.code, ExitCode::GeneralError));
     }
 
