@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.25.0] - 2026-04-16
 
+### Added
+
+- Add `interact drag-at` command for coordinate-based drag sequences (mousedown → interpolated mousemoves → mouseup) with `--steps` for smooth interpolation (#194)
+- Add `interact mousedown-at` and `interact mouseup-at` decomposed mouse commands for long-press, hover-then-click, and custom multi-step mouse interaction patterns (#194)
+- Add `--button` option (left/middle/right) on decomposed mouse commands and `--frame` support on all new coordinate-based commands (#194)
+
 ## [1.24.0] - 2026-04-16
 
 ### Added
