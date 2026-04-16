@@ -216,6 +216,143 @@ async fn clear_viewport_override(managed: &ManagedSession) -> Result<(), AppErro
 }
 
 // =============================================================================
+// Scroll-container helpers
+// =============================================================================
+
+/// Get the scroll dimensions of a specific element via `Runtime.evaluate`.
+async fn get_container_scroll_dimensions(
+    managed: &ManagedSession,
+    selector: &str,
+) -> Result<(f64, f64), AppError> {
+    let js = format!(
+        r#"(() => {{
+            const el = document.querySelector({sel});
+            if (!el) return JSON.stringify({{ error: "not_found" }});
+            return JSON.stringify({{ width: el.scrollWidth, height: el.scrollHeight }});
+        }})()"#,
+        sel =
+            serde_json::to_string(selector).expect("serde_json::to_string is infallible for &str")
+    );
+
+    let result = managed
+        .send_command(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": js,
+                "returnByValue": true,
+            })),
+        )
+        .await
+        .map_err(|e| {
+            AppError::screenshot_failed(&format!("Failed to get container scroll dimensions: {e}"))
+        })?;
+
+    let value_str = result["result"]["value"]
+        .as_str()
+        .ok_or_else(|| AppError::screenshot_failed("Failed to read container dimensions"))?;
+    let dims: serde_json::Value = serde_json::from_str(value_str).map_err(|e| {
+        AppError::screenshot_failed(&format!("Failed to parse container dimensions: {e}"))
+    })?;
+
+    if dims.get("error").is_some() {
+        return Err(AppError::element_not_found(selector));
+    }
+
+    let width = dims["width"].as_f64().unwrap_or(1280.0);
+    let height = dims["height"].as_f64().unwrap_or(720.0);
+
+    Ok((width, height))
+}
+
+/// Override styles on the target element and its ancestors to make overflow visible.
+/// Returns a saved-styles token (JSON string) for restoration.
+async fn override_container_styles(
+    managed: &ManagedSession,
+    selector: &str,
+) -> Result<String, AppError> {
+    let js = format!(
+        r#"(() => {{
+            const el = document.querySelector({sel});
+            if (!el) return JSON.stringify({{ error: "not_found" }});
+            const saved = [];
+            let current = el;
+            while (current && current !== document.documentElement.parentNode) {{
+                saved.push({{ tag: current.tagName, idx: saved.length, css: current.style.cssText }});
+                current.style.overflow = "visible";
+                current.style.height = "auto";
+                current.style.maxHeight = "none";
+                current = current.parentElement;
+            }}
+            return JSON.stringify({{ saved: saved, selector: {sel} }});
+        }})()"#,
+        sel =
+            serde_json::to_string(selector).expect("serde_json::to_string is infallible for &str")
+    );
+
+    let result = managed
+        .send_command(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": js,
+                "returnByValue": true,
+            })),
+        )
+        .await
+        .map_err(|e| {
+            AppError::screenshot_failed(&format!("Failed to override container styles: {e}"))
+        })?;
+
+    let value_str = result["result"]["value"]
+        .as_str()
+        .ok_or_else(|| AppError::screenshot_failed("Failed to read style override result"))?;
+
+    let parsed: serde_json::Value = serde_json::from_str(value_str).map_err(|e| {
+        AppError::screenshot_failed(&format!("Failed to parse style override result: {e}"))
+    })?;
+
+    if parsed.get("error").is_some() {
+        return Err(AppError::element_not_found(selector));
+    }
+
+    Ok(value_str.to_string())
+}
+
+/// Restore original styles on the target element and its ancestors.
+async fn restore_container_styles(
+    managed: &ManagedSession,
+    saved_token: &str,
+) -> Result<(), AppError> {
+    let js = format!(
+        r"(() => {{
+            const data = {saved_token};
+            const el = document.querySelector(data.selector);
+            if (!el) return;
+            let current = el;
+            for (const entry of data.saved) {{
+                if (!current) break;
+                current.style.cssText = entry.css;
+                current = current.parentElement;
+            }}
+        }})()"
+    );
+
+    managed
+        .send_command(
+            "Runtime.evaluate",
+            Some(serde_json::json!({
+                "expression": js,
+                "returnByValue": true,
+            })),
+        )
+        .await
+        .map_err(|e| {
+            AppError::screenshot_failed(&format!("Failed to restore container styles: {e}"))
+        })?;
+
+    Ok(())
+}
+
+// =============================================================================
 // Format helpers
 // =============================================================================
 
@@ -238,6 +375,27 @@ fn clip_dimensions(clip: &ClipRegion) -> (u32, u32) {
 }
 
 // =============================================================================
+// Validation helpers
+// =============================================================================
+
+/// Validate `--scroll-container` flag combinations.
+fn validate_scroll_container(args: &PageScreenshotArgs) -> Result<(), AppError> {
+    if let Some(ref _sc) = args.scroll_container {
+        if !args.full_page {
+            return Err(AppError::screenshot_failed(
+                "--scroll-container requires --full-page",
+            ));
+        }
+        if args.selector.is_some() || args.uid.is_some() || args.clip.is_some() {
+            return Err(AppError::screenshot_failed(
+                "Cannot combine --scroll-container with --selector, --uid, or --clip",
+            ));
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
 // Command executor
 // =============================================================================
 
@@ -247,6 +405,9 @@ pub async fn execute_screenshot(
     args: &PageScreenshotArgs,
     frame: Option<&str>,
 ) -> Result<(), AppError> {
+    // Validate --scroll-container flag combinations (checked first for specific error messages)
+    validate_scroll_container(args)?;
+
     // Validate mutual exclusion: --full-page vs --selector/--uid
     if args.full_page && (args.selector.is_some() || args.uid.is_some()) {
         return Err(AppError::screenshot_failed(
@@ -276,12 +437,15 @@ pub async fn execute_screenshot(
         };
         eff_mut.ensure_domain("Page").await?;
         eff_mut.ensure_domain("Runtime").await?;
-        if args.selector.is_some() {
+        if args.selector.is_some() || args.scroll_container.is_some() {
             eff_mut.ensure_domain("DOM").await?;
         }
     }
 
     let format_str = screenshot_format_str(args.format);
+
+    // Track whether we need to restore container styles after capture
+    let mut saved_styles_token: Option<String> = None;
 
     // Determine capture strategy
     let (clip, capture_beyond_viewport, dimensions) = {
@@ -299,8 +463,29 @@ pub async fn execute_screenshot(
             let clip = resolve_uid_clip(&mut managed, uid).await?;
             let dims = clip_dimensions(&clip);
             (Some(clip), false, dims)
+        } else if let (true, Some(sc_selector)) = (args.full_page, &args.scroll_container) {
+            // Get container scroll dimensions
+            let (cont_w, cont_h) = get_container_scroll_dimensions(effective, sc_selector).await?;
+            // Override styles to make overflow content visible
+            let token = override_container_styles(effective, sc_selector).await?;
+            saved_styles_token = Some(token);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let dims = (cont_w as u32, cont_h as u32);
+            set_viewport_size(effective, dims.0, dims.1).await?;
+            (None, true, dims)
         } else if args.full_page {
             let (page_w, page_h) = get_page_dimensions(effective).await?;
+            // Auto-detect: warn if full-page dimensions match viewport
+            let (_vp_w, vp_h) = get_viewport_dimensions(effective).await?;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let page_h_u32 = page_h as u32;
+            if page_h_u32 <= vp_h {
+                eprintln!(
+                    "warning: full-page dimensions match viewport ({page_h_u32}px). \
+                     Content may be inside a scrollable container. \
+                     Use --scroll-container <selector> to capture it."
+                );
+            }
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let dims = (page_w as u32, page_h as u32);
             set_viewport_size(effective, dims.0, dims.1).await?;
@@ -346,12 +531,20 @@ pub async fn execute_screenshot(
     let result = effective
         .send_command("Page.captureScreenshot", Some(params))
         .await
-        .map_err(|e| AppError::screenshot_failed(&e.to_string()))?;
+        .map_err(|e| AppError::screenshot_failed(&e.to_string()));
+
+    // Restore container styles if we overrode them (before checking the capture result)
+    if let Some(ref token) = saved_styles_token {
+        let _ = restore_container_styles(effective, token).await;
+    }
 
     // Restore viewport if full-page
     if args.full_page {
         clear_viewport_override(effective).await?;
     }
+
+    // Now unwrap the capture result
+    let result = result?;
 
     let data = result["data"]
         .as_str()
@@ -548,5 +741,106 @@ mod tests {
     fn extract_clip_missing_model() {
         let box_model = serde_json::json!({});
         assert!(extract_clip_from_box_model(&box_model).is_none());
+    }
+
+    // =========================================================================
+    // validate_scroll_container tests
+    // =========================================================================
+
+    #[test]
+    fn validate_scroll_container_requires_full_page() {
+        let args = PageScreenshotArgs {
+            full_page: false,
+            selector: None,
+            uid: None,
+            scroll_container: Some(".main-content".to_string()),
+            format: ScreenshotFormat::Png,
+            quality: None,
+            file: None,
+            clip: None,
+        };
+        let err = validate_scroll_container(&args).unwrap_err();
+        assert!(
+            err.message
+                .contains("--scroll-container requires --full-page")
+        );
+    }
+
+    #[test]
+    fn validate_scroll_container_conflicts_with_selector() {
+        let args = PageScreenshotArgs {
+            full_page: true,
+            selector: Some("#logo".to_string()),
+            uid: None,
+            scroll_container: Some(".main-content".to_string()),
+            format: ScreenshotFormat::Png,
+            quality: None,
+            file: None,
+            clip: None,
+        };
+        let err = validate_scroll_container(&args).unwrap_err();
+        assert!(err.message.contains("Cannot combine --scroll-container"));
+    }
+
+    #[test]
+    fn validate_scroll_container_conflicts_with_uid() {
+        let args = PageScreenshotArgs {
+            full_page: true,
+            selector: None,
+            uid: Some("s1".to_string()),
+            scroll_container: Some(".main-content".to_string()),
+            format: ScreenshotFormat::Png,
+            quality: None,
+            file: None,
+            clip: None,
+        };
+        let err = validate_scroll_container(&args).unwrap_err();
+        assert!(err.message.contains("Cannot combine --scroll-container"));
+    }
+
+    #[test]
+    fn validate_scroll_container_conflicts_with_clip() {
+        let args = PageScreenshotArgs {
+            full_page: true,
+            selector: None,
+            uid: None,
+            scroll_container: Some(".main-content".to_string()),
+            format: ScreenshotFormat::Png,
+            quality: None,
+            file: None,
+            clip: Some("0,0,100,100".to_string()),
+        };
+        let err = validate_scroll_container(&args).unwrap_err();
+        assert!(err.message.contains("Cannot combine --scroll-container"));
+    }
+
+    #[test]
+    fn validate_scroll_container_valid_with_full_page() {
+        let args = PageScreenshotArgs {
+            full_page: true,
+            selector: None,
+            uid: None,
+            scroll_container: Some(".main-content".to_string()),
+            format: ScreenshotFormat::Png,
+            quality: None,
+            file: None,
+            clip: None,
+        };
+        assert!(validate_scroll_container(&args).is_ok());
+    }
+
+    #[test]
+    fn validate_scroll_container_none_is_ok() {
+        let args = PageScreenshotArgs {
+            full_page: false,
+            selector: None,
+            uid: None,
+            scroll_container: None,
+            format: ScreenshotFormat::Png,
+            quality: None,
+            file: None,
+            clip: None,
+        };
+        assert!(validate_scroll_container(&args).is_ok());
     }
 }

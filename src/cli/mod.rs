@@ -1117,6 +1117,10 @@ pub struct PageScreenshotArgs {
     #[arg(long)]
     pub uid: Option<String>,
 
+    /// CSS selector for the inner scrollable element (requires --full-page)
+    #[arg(long)]
+    pub scroll_container: Option<String>,
+
     /// Image format [default: png] [possible values: png, jpeg, webp]
     #[arg(long, value_enum, default_value_t = ScreenshotFormat::Png)]
     pub format: ScreenshotFormat,

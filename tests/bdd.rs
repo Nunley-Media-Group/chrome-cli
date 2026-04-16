@@ -4379,6 +4379,15 @@ const PAGE_HITTEST_TESTABLE_SCENARIOS: &[&str] = &[
 /// AC4 (documentation) is the only scenario testable via CLI alone.
 const PAGE_ANALYZE_TESTABLE_SCENARIOS: &[&str] = &["AC4 - Documentation updated"];
 
+/// Full-page screenshot scrollable containers BDD scenarios testable without Chrome.
+/// AC5 (requires --full-page) and AC6 (conflicts) fail at validation before connecting.
+const SCROLL_CONTAINER_TESTABLE_SCENARIOS: &[&str] = &[
+    "--scroll-container requires --full-page",
+    "--scroll-container conflicts with --selector",
+    "--scroll-container conflicts with --uid",
+    "--scroll-container conflicts with --clip",
+];
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -4857,6 +4866,18 @@ async fn main() {
             "tests/features/page-analyze.feature",
             |_feature, _rule, scenario| {
                 PAGE_ANALYZE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Full-page screenshot scrollable containers (issue #184) — only validation error scenarios
+    // (AC5: requires --full-page, AC6: conflicts) can be tested without Chrome. Chrome-dependent
+    // scenarios (AC1-AC4, AC7) verified via manual smoke test.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/full-page-screenshot-scrollable-containers.feature",
+            |_feature, _rule, scenario| {
+                SCROLL_CONTAINER_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;
