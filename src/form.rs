@@ -332,10 +332,11 @@ async fn resolve_to_object_id(session: &ManagedSession, target: &str) -> Result<
 ///
 /// Uses `DOM.describeNode` which is read-only and does not invalidate cached
 /// accessibility tree backend node IDs (unlike `DOM.resolveNode`).
+/// Returns `(node_name, input_type, role)`.
 async fn describe_element(
     session: &ManagedSession,
     backend_node_id: i64,
-) -> Result<(String, Option<String>), AppError> {
+) -> Result<(String, Option<String>, Option<String>), AppError> {
     let params = serde_json::json!({ "backendNodeId": backend_node_id });
     let response = session
         .send_command("DOM.describeNode", Some(params))
@@ -347,15 +348,28 @@ async fn describe_element(
         .unwrap_or("")
         .to_lowercase();
 
-    // Parse the flat attributes array [name1, val1, name2, val2, ...] to find "type"
-    let input_type = response["node"]["attributes"].as_array().and_then(|attrs| {
-        attrs
-            .chunks(2)
-            .find(|pair| pair.first().and_then(|v| v.as_str()) == Some("type"))
-            .and_then(|pair| pair.get(1).and_then(|v| v.as_str()).map(String::from))
-    });
+    // Parse the flat attributes array [name1, val1, name2, val2, ...] to find "type" and "role"
+    let (input_type, role) =
+        response["node"]["attributes"]
+            .as_array()
+            .map_or((None, None), |attrs| {
+                let mut input_type = None;
+                let mut role = None;
+                for pair in attrs.chunks(2) {
+                    match pair.first().and_then(|v| v.as_str()) {
+                        Some("type") => {
+                            input_type = pair.get(1).and_then(|v| v.as_str()).map(String::from);
+                        }
+                        Some("role") => {
+                            role = pair.get(1).and_then(|v| v.as_str()).map(String::from);
+                        }
+                        _ => {}
+                    }
+                }
+                (input_type, role)
+            });
 
-    Ok((node_name, input_type))
+    Ok((node_name, input_type, role))
 }
 
 /// Returns true if the element is a text-type input that should use keyboard simulation.
@@ -416,6 +430,123 @@ async fn fill_element_keyboard(
     Ok(())
 }
 
+/// JavaScript expression to check if a combobox's listbox has visible options.
+///
+/// Checks `aria-expanded="true"` on the combobox, then looks for `[role="option"]`
+/// elements in the associated listbox (via `aria-owns`/`aria-controls`, or fallback
+/// to any `[role="listbox"]` on the page).
+const COMBOBOX_LISTBOX_VISIBLE_JS: &str = r#"(function(){
+    var cb = document.querySelector('[role="combobox"][aria-expanded="true"]');
+    if (!cb) return false;
+    var listboxId = cb.getAttribute('aria-owns') || cb.getAttribute('aria-controls');
+    var listbox = listboxId ? document.getElementById(listboxId) : document.querySelector('[role="listbox"]');
+    if (!listbox) return false;
+    var options = listbox.querySelectorAll('[role="option"]');
+    return options.length > 0;
+})()"#;
+
+/// Fill an ARIA combobox element using the click-type-wait-confirm sequence.
+///
+/// 1. Focus the element via `DOM.focus`
+/// 2. Click the element via `Runtime.callFunctionOn` to open the dropdown
+/// 3. Wait 50ms for dropdown to start rendering
+/// 4. Type the value character-by-character via `Input.dispatchKeyEvent`
+/// 5. Poll for listbox visibility (up to 3000ms)
+/// 6. Dispatch confirmation key (Enter or custom)
+async fn fill_element_combobox(
+    session: &ManagedSession,
+    backend_node_id: i64,
+    object_id: &str,
+    value: &str,
+    confirm_key: &str,
+) -> Result<(), AppError> {
+    // Step 1: Focus the element
+    let focus_params = serde_json::json!({ "backendNodeId": backend_node_id });
+    session
+        .send_command("DOM.focus", Some(focus_params))
+        .await
+        .map_err(|e| AppError::interaction_failed("combobox_focus", &e.to_string()))?;
+
+    // Step 2: Click to open the dropdown
+    let click_params = serde_json::json!({
+        "objectId": object_id,
+        "functionDeclaration": "function() { this.click(); }",
+        "arguments": [],
+    });
+    session
+        .send_command("Runtime.callFunctionOn", Some(click_params))
+        .await
+        .map_err(|e| AppError::interaction_failed("combobox_click", &e.to_string()))?;
+
+    // Step 3: Wait for dropdown to start rendering
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Step 4: Type the value character-by-character
+    for ch in value.chars() {
+        let params = serde_json::json!({
+            "type": "char",
+            "text": ch.to_string(),
+        });
+        session
+            .send_command("Input.dispatchKeyEvent", Some(params))
+            .await
+            .map_err(|e| AppError::interaction_failed("combobox_type", &e.to_string()))?;
+    }
+
+    // Step 5: Poll for listbox visibility (100ms intervals, up to 3000ms)
+    let mut listbox_visible = false;
+    for _ in 0..30 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let poll_result = session
+            .send_command(
+                "Runtime.evaluate",
+                Some(serde_json::json!({ "expression": COMBOBOX_LISTBOX_VISIBLE_JS })),
+            )
+            .await
+            .map_err(|e| AppError::interaction_failed("combobox_poll", &e.to_string()))?;
+
+        if poll_result["result"]["value"].as_bool().unwrap_or(false) {
+            listbox_visible = true;
+            break;
+        }
+    }
+
+    if !listbox_visible {
+        return Err(AppError {
+            message: format!("No matching option found in combobox for value: {value}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        });
+    }
+
+    // Step 6: Dispatch confirmation key (keyDown + keyUp)
+    session
+        .send_command(
+            "Input.dispatchKeyEvent",
+            Some(serde_json::json!({
+                "type": "keyDown",
+                "key": confirm_key,
+                "code": confirm_key,
+            })),
+        )
+        .await
+        .map_err(|e| AppError::interaction_failed("combobox_confirm", &e.to_string()))?;
+
+    session
+        .send_command(
+            "Input.dispatchKeyEvent",
+            Some(serde_json::json!({
+                "type": "keyUp",
+                "key": confirm_key,
+                "code": confirm_key,
+            })),
+        )
+        .await
+        .map_err(|e| AppError::interaction_failed("combobox_confirm", &e.to_string()))?;
+
+    Ok(())
+}
+
 /// Clear a text-type element using DOM.focus + React-compatible JavaScript.
 ///
 /// Uses `DOM.focus` to focus the element, then `Runtime.evaluate` to clear the value
@@ -449,13 +580,29 @@ async fn clear_element_keyboard(
     Ok(())
 }
 
-/// Fill an element's value. Text-type inputs use keyboard simulation (React-compatible);
+/// Fill an element's value. ARIA combobox elements use the click-type-confirm sequence;
+/// text-type inputs use keyboard simulation (React-compatible);
 /// select/checkbox/radio use the existing JS setter approach.
-async fn fill_element(session: &ManagedSession, target: &str, value: &str) -> Result<(), AppError> {
+async fn fill_element(
+    session: &ManagedSession,
+    target: &str,
+    value: &str,
+    confirm_key: Option<&str>,
+) -> Result<(), AppError> {
     let backend_node_id = resolve_target_to_backend_node_id(session, target).await?;
-    let (node_name, input_type) = describe_element(session, backend_node_id).await?;
+    let (node_name, input_type, role) = describe_element(session, backend_node_id).await?;
 
-    if is_text_input(&node_name, input_type.as_deref()) {
+    if role.as_deref() == Some("combobox") {
+        let object_id = resolve_to_object_id(session, target).await?;
+        fill_element_combobox(
+            session,
+            backend_node_id,
+            &object_id,
+            value,
+            confirm_key.unwrap_or("Enter"),
+        )
+        .await
+    } else if is_text_input(&node_name, input_type.as_deref()) {
         fill_element_keyboard(session, backend_node_id, value).await
     } else {
         let object_id = resolve_to_object_id(session, target).await?;
@@ -478,7 +625,7 @@ async fn fill_element(session: &ManagedSession, target: &str, value: &str) -> Re
 /// select/checkbox/radio use the existing JS setter approach.
 async fn clear_element(session: &ManagedSession, target: &str) -> Result<(), AppError> {
     let backend_node_id = resolve_target_to_backend_node_id(session, target).await?;
-    let (node_name, input_type) = describe_element(session, backend_node_id).await?;
+    let (node_name, input_type, _role) = describe_element(session, backend_node_id).await?;
 
     if is_text_input(&node_name, input_type.as_deref()) {
         clear_element_keyboard(session, backend_node_id).await
@@ -552,7 +699,13 @@ async fn execute_fill(
     };
 
     // Fill the element via the effective (frame-scoped) session
-    fill_element(effective, &args.target, &args.value).await?;
+    fill_element(
+        effective,
+        &args.target,
+        &args.value,
+        args.confirm_key.as_deref(),
+    )
+    .await?;
 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
@@ -628,7 +781,7 @@ async fn execute_fill_many(
     // Fill each element via the effective session
     let mut results = Vec::with_capacity(entries.len());
     for entry in &entries {
-        fill_element(effective, &entry.uid, &entry.value).await?;
+        fill_element(effective, &entry.uid, &entry.value, None).await?;
         results.push(FillResult {
             filled: entry.uid.clone(),
             value: entry.value.clone(),

@@ -2401,8 +2401,10 @@ pub enum FormCommand {
     #[command(
         long_about = "Set the value of a form field identified by UID (from 'page snapshot', \
             e.g., 's5') or CSS selector (prefixed with 'css:', e.g., 'css:#email'). Works \
-            with text inputs, textareas, select dropdowns, and checkboxes. Dispatches change \
-            and input events to trigger form validation.",
+            with text inputs, textareas, select dropdowns, checkboxes, and ARIA combobox \
+            elements (role=\"combobox\"). Combobox elements are automatically detected and \
+            filled using a click-type-confirm sequence. Dispatches change and input events \
+            to trigger form validation.",
         after_long_help = "\
 EXAMPLES:
   # Fill by UID
@@ -2412,7 +2414,13 @@ EXAMPLES:
   agentchrome form fill css:#email \"user@example.com\"
 
   # Select a dropdown option
-  agentchrome form fill s8 \"Option B\""
+  agentchrome form fill s8 \"Option B\"
+
+  # Fill an ARIA combobox
+  agentchrome form fill s5 \"Acme Corp\"
+
+  # Custom confirmation key for combobox
+  agentchrome form fill --confirm-key Tab s5 \"Acme Corp\""
     )]
     Fill(FormFillArgs),
 
@@ -2491,6 +2499,10 @@ pub struct FormFillArgs {
 
     /// Value to set on the form field
     pub value: String,
+
+    /// Key to confirm combobox selection (default: Enter)
+    #[arg(long)]
+    pub confirm_key: Option<String>,
 
     /// Include updated accessibility snapshot in output
     #[arg(long)]

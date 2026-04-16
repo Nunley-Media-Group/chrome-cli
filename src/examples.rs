@@ -431,6 +431,16 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: None,
                 },
                 ExampleEntry {
+                    cmd: "agentchrome form fill s5 \"Acme Corp\"".into(),
+                    description: "Fill an ARIA combobox field (auto click-type-confirm)".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome form fill --confirm-key Tab s5 \"Acme Corp\"".into(),
+                    description: "Fill combobox with custom confirmation key".into(),
+                    flags: Some(vec!["--confirm-key".into()]),
+                },
+                ExampleEntry {
                     cmd: "agentchrome form --frame 1 fill s2 \"value\"".into(),
                     description: "Fill a form field inside an iframe".into(),
                     flags: Some(vec!["--frame".into()]),
