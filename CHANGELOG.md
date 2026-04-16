@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-04-16
+
+### Added
+
+- Add `media` command group for audio/video element control: `media list` to enumerate all media elements with playback state, `media play`, `media pause`, `media seek <time>`, and `media seek-end` for individual element control, `--all` flag for bulk operations across all media elements, `--frame` support for iframe-scoped targeting, CSS selector targeting via `css:` prefix, and built-in examples. Eliminates repetitive `js exec` boilerplate for SCORM course narration gates (#193)
+
 ## [1.20.0] - 2026-04-16
 
 ### Added
