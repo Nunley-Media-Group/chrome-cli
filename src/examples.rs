@@ -202,6 +202,37 @@ fn all_examples() -> Vec<CommandGroupSummary> {
             ],
         },
         CommandGroupSummary {
+            command: "diagnose".into(),
+            description: "Pre-automation challenge scan (iframes, overlays, media gates, frameworks, patterns)".into(),
+            examples: vec![
+                ExampleEntry {
+                    cmd: "agentchrome diagnose https://example.com/course".into(),
+                    description: "Navigate to a URL and diagnose it for automation challenges".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome diagnose --current".into(),
+                    description: "Diagnose the already-loaded page without navigating".into(),
+                    flags: Some(vec!["--current".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome diagnose --current | jq -r '.patterns[].suggestion'".into(),
+                    description: "Extract all pattern strategy suggestions via jq".into(),
+                    flags: Some(vec!["--current".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome diagnose https://app.example.com --wait-until networkidle".into(),
+                    description: "Diagnose after waiting for network idle (for SPAs)".into(),
+                    flags: Some(vec!["--wait-until".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome diagnose --current | jq '.summary'".into(),
+                    description: "Check if the page is straightforward to automate".into(),
+                    flags: Some(vec!["--current".into()]),
+                },
+            ],
+        },
+        CommandGroupSummary {
             command: "dom".into(),
             description: "DOM inspection and manipulation".into(),
             examples: vec![

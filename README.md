@@ -221,6 +221,7 @@ agentchrome page snapshot
 | `dialog` | Browser dialog handling (alert, confirm, prompt, beforeunload) |
 | `media` | Media element control (list, play, pause, seek) |
 | `audit` | Run audits against the current page (Lighthouse) |
+| `diagnose` | Pre-automation challenge scan (iframes, overlays, media gates, frameworks, patterns) |
 | `skill` | Agentic tool skill installation and management |
 | `config` | Configuration file management (show, init, path) |
 | `completions` | Generate shell completion scripts |
@@ -306,6 +307,25 @@ agentchrome network list --filter "api"
 
 # Get details for a specific request
 agentchrome network get <request-id>
+```
+
+</details>
+
+<details>
+<summary><strong>Pre-automation diagnostics</strong></summary>
+
+```sh
+# Scan a new URL for automation challenges before you begin
+agentchrome diagnose https://example.com/course
+
+# Diagnose the already-loaded page in place (no navigation)
+agentchrome diagnose --current
+
+# Extract strategy suggestions for each matched pattern
+agentchrome diagnose --current | jq -r '.patterns[].suggestion'
+
+# Check if the page is straightforward to automate
+agentchrome diagnose --current | jq '.summary.straightforward'
 ```
 
 </details>

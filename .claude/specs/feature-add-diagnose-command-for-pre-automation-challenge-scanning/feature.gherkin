@@ -1,0 +1,117 @@
+# File: tests/features/diagnose.feature
+#
+# Generated from: .claude/specs/feature-add-diagnose-command-for-pre-automation-challenge-scanning/requirements.md
+# Issue: #200
+
+Feature: Diagnose Command for Pre-Automation Challenge Scanning
+  As a browser automation engineer starting work on a new target page
+  I want an automated diagnostic scan that identifies potential automation challenges before I begin
+  So that I can set expectations and choose the right interaction strategy from the start
+
+  # --- Happy Path ---
+
+  Scenario: Diagnose a URL produces a structured JSON report
+    Given a headless Chrome session is active
+    And the fixture page "diagnose.html" is hosted at a file URL
+    When I run "agentchrome diagnose <fixture-url>"
+    Then the command exits with code 0
+    And stdout contains a JSON object with fields "url", "scope", "challenges", "patterns", "summary"
+    And the "scope" field equals "diagnosed"
+    And the "url" field equals <fixture-url>
+
+  Scenario: Known pattern suggestions include actionable agentchrome commands
+    Given a headless Chrome session is active
+    And the fixture page "diagnose.html" (with Storyline acc-blocker signals) is loaded
+    When I run "agentchrome diagnose --current"
+    Then the output "patterns" array contains an entry with "name" equal to "storyline-acc-blocker"
+    And that entry's "confidence" is "high"
+    And that entry's "evidence" mentions the "acc-blocker" selector
+    And that entry's "suggestion" contains the substring "interact click-at --frame"
+
+  Scenario: Clean page reports straightforward
+    Given a headless Chrome session is active
+    And the fixture page "diagnose-clean.html" (no iframes, overlays, shadow DOM, canvas, media, or framework quirks) is loaded
+    When I run "agentchrome diagnose --current"
+    Then the command exits with code 0
+    And the output "challenges" array is empty
+    And the output "patterns" array is empty
+    And the output "summary.challengeCount" is 0
+    And the output "summary.patternMatchCount" is 0
+    And the output "summary.straightforward" is true
+    And the output "summary.hasHighSeverity" is false
+
+  Scenario: Diagnose the current page does not issue a navigation
+    Given a headless Chrome session is active
+    And the fixture page "diagnose.html" is already loaded in the active tab
+    When I run "agentchrome diagnose --current"
+    Then the command exits with code 0
+    And the output "scope" equals "current"
+    And the output "url" equals the currently-displayed URL of the active tab
+    And no Page.navigate CDP call was issued during command execution
+
+  Scenario: Documentation and examples are discoverable
+    Given the agentchrome binary is built
+    When I run "agentchrome examples diagnose"
+    Then stdout contains a "diagnose" command group
+    And that group's examples include a URL-mode invocation
+    And that group's examples include a "--current" invocation
+    And that group's examples include at least one example demonstrating strategy suggestions referencing another agentchrome subcommand
+    When I run "agentchrome diagnose --help"
+    Then stdout describes the command, the "<url>" vs "--current" mutual-exclusion rule, the JSON output schema, and exit codes
+
+  # --- Alternative / Edge Cases ---
+
+  Scenario: Cross-origin iframe fields serialize as null, not omitted or zero
+    Given a headless Chrome session is active
+    And the fixture page contains a cross-origin iframe
+    When I run "agentchrome diagnose --current"
+    Then the command exits with code 0
+    And the iframes challenge details include an entry with "crossOrigin" true
+    And that entry's "interactiveElementCount" serializes as JSON null
+    And no field is coerced to 0 or false where the data was actually unmeasurable
+
+  Scenario: Undetermined fields serialize as null
+    Given a headless Chrome session is active
+    And a page where at least one diagnostic dimension cannot be measured
+    When I run "agentchrome diagnose --current"
+    Then the command exits with code 0
+    And the unmeasurable fields in the output serialize as JSON null
+    And fields that were measured with a true zero value are serialized as 0 or false, not null
+
+  # --- Error Handling ---
+
+  Scenario: Missing URL without --current is an argument error
+    When I run "agentchrome diagnose"
+    Then the command exits with code 1
+    And stdout is empty
+    And stderr contains a JSON object whose "message" references either "url" or "current"
+
+  Scenario: Supplying both URL and --current is mutually exclusive
+    When I run "agentchrome diagnose https://example.com --current"
+    Then the command exits with code 1
+    And stdout is empty
+    And stderr contains a JSON object whose "message" references the conflict between "url" and "current"
+
+  Scenario: Navigation failure is reported with the same exit code shape as navigate
+    Given a headless Chrome session is active
+    And a URL that cannot be reached due to DNS or connection failure
+    When I run "agentchrome diagnose <unreachable-url>"
+    Then the command exits with a non-zero code matching "agentchrome navigate <unreachable-url>" for the same URL (4 for timeout or 5 for protocol error)
+    And stdout is empty
+    And stderr contains a JSON object describing the navigation failure
+
+  Scenario: No active Chrome session is reported as a connection error
+    Given no Chrome instance is currently connected
+    When I run "agentchrome diagnose https://example.com"
+    Then the command exits with code 2
+    And stdout is empty
+    And stderr contains a JSON object matching the standard agentchrome connection-error shape
+
+  Scenario: Unknown patterns or missing signals do not cause failure
+    Given a headless Chrome session is active
+    And a page that matches no known patterns and exposes no expected structural signals
+    When I run "agentchrome diagnose --current"
+    Then the command exits with code 0
+    And the "patterns" array is empty or contains only true matches
+    And no pattern entry has "matched" set to false
+    And no error is emitted for unrecognized signals

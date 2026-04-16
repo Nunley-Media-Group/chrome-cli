@@ -534,6 +534,40 @@ EXAMPLES:
     )]
     Audit(AuditArgs),
 
+    /// Pre-automation challenge scan (iframes, overlays, media gates, frameworks, patterns)
+    #[command(
+        long_about = "Scan a page for automation challenges — iframes, overlay blockers, shadow \
+            DOM, canvas/WebGL rendering, media playback gates, and framework-specific interaction \
+            quirks — plus named-pattern matches (e.g., Storyline acc-blocker, SCORM player, React \
+            portal) with actionable agentchrome command suggestions. Accepts a URL to \
+            navigate-then-analyze, or `--current` to analyze the already-loaded page in place.\n\n\
+            OUTPUT SCHEMA (JSON on stdout):\n\
+              {\n\
+                \"url\": string,\n\
+                \"scope\": \"diagnosed\" | \"current\",\n\
+                \"challenges\": [{category, severity, summary, details, suggestion?}],\n\
+                \"patterns\":   [{name, matched, confidence, evidence, suggestion}],\n\
+                \"summary\":    {challengeCount, patternMatchCount, hasHighSeverity, straightforward}\n\
+              }\n\n\
+            EXIT CODES: 0 success; 1 general/arg errors; 2 connection; 3 target; 4 timeout; \
+            5 protocol.\n\n\
+            Note: <url> and --current are mutually exclusive. Exactly one must be provided.",
+        after_long_help = "\
+EXAMPLES:
+  # Navigate to a URL and diagnose it for automation challenges
+  agentchrome diagnose https://example.com/course
+
+  # Diagnose the already-loaded page in the active tab (no navigation)
+  agentchrome diagnose --current
+
+  # Extract strategy suggestions using jq
+  agentchrome diagnose --current | jq -r '.patterns[].suggestion'
+
+  # Diagnose with network-idle wait strategy
+  agentchrome diagnose https://app.example.com --wait-until networkidle"
+    )]
+    Diagnose(DiagnoseArgs),
+
     /// Agentic tool skill installation and management
     #[command(
         long_about = "Install, update, uninstall, or list agentchrome skill files for agentic \
@@ -1748,6 +1782,28 @@ pub struct AuditLighthouseArgs {
     /// Save the full Lighthouse JSON report to this file
     #[arg(long)]
     pub output_file: Option<PathBuf>,
+}
+
+/// Arguments for the `diagnose` subcommand.
+#[derive(Args)]
+#[command(group(clap::ArgGroup::new("target").required(true).args(["url", "current"])))]
+pub struct DiagnoseArgs {
+    /// URL to navigate to and diagnose (mutually exclusive with --current)
+    #[arg(conflicts_with = "current")]
+    pub url: Option<String>,
+
+    /// Diagnose the already-loaded page in the active tab without navigating
+    /// (mutually exclusive with <url>)
+    #[arg(long, conflicts_with = "url")]
+    pub current: bool,
+
+    /// Wait strategy after navigation (URL mode only; ignored with --current)
+    #[arg(long, value_enum, default_value_t = WaitUntil::Load)]
+    pub wait_until: WaitUntil,
+
+    /// Navigation timeout in milliseconds (URL mode only; ignored with --current)
+    #[arg(long)]
+    pub timeout: Option<u64>,
 }
 
 /// Arguments for the `skill` subcommand group.
@@ -3438,4 +3494,67 @@ pub struct CapabilitiesArgs {
     /// Minimal output: command names and descriptions only
     #[arg(long)]
     pub compact: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::Parser;
+
+    // Helper: parse a space-separated command string as if run from the CLI.
+    fn try_parse(cmd: &str) -> Result<Cli, clap::Error> {
+        let parts: Vec<&str> = std::iter::once("agentchrome")
+            .chain(cmd.split_whitespace())
+            .collect();
+        Cli::try_parse_from(parts)
+    }
+
+    // AC8: No arguments → clap error (required arg group not satisfied)
+    #[test]
+    fn diagnose_no_args_is_error() {
+        assert!(
+            try_parse("diagnose").is_err(),
+            "Expected a clap error when neither URL nor --current is supplied"
+        );
+    }
+
+    // AC9: Both URL and --current → clap error (conflict)
+    #[test]
+    fn diagnose_url_and_current_is_error() {
+        assert!(
+            try_parse("diagnose https://example.com --current").is_err(),
+            "Expected a clap error when both URL and --current are supplied"
+        );
+    }
+
+    // Positive: URL only → parses successfully
+    #[test]
+    fn diagnose_url_only_parses() {
+        let cli = try_parse("diagnose https://example.com").expect("URL-only form should parse");
+        let super::Command::Diagnose(args) = cli.command else {
+            panic!("Expected Diagnose command variant");
+        };
+        assert_eq!(args.url.as_deref(), Some("https://example.com"));
+        assert!(!args.current);
+    }
+
+    // Positive: --current only → parses successfully
+    #[test]
+    fn diagnose_current_only_parses() {
+        let cli = try_parse("diagnose --current").expect("--current-only form should parse");
+        let super::Command::Diagnose(args) = cli.command else {
+            panic!("Expected Diagnose command variant");
+        };
+        assert!(args.current);
+        assert!(args.url.is_none());
+    }
+
+    // --current before a positional URL value still conflicts (order-independent)
+    #[test]
+    fn diagnose_current_before_url_is_error() {
+        assert!(
+            try_parse("diagnose --current https://example.com").is_err(),
+            "Expected a clap error when --current appears before the URL"
+        );
+    }
 }

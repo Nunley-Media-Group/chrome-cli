@@ -3443,8 +3443,101 @@ fn readme_links_to_guide(world: &mut ClaudeCodeGuideWorld, target: String) {
 }
 
 // =============================================================================
+// DiagnoseWorld — diagnose command BDD tests (issue #200)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct DiagnoseWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+#[given("the agentchrome binary is built")]
+fn diagnose_binary_is_built(world: &mut DiagnoseWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[when(expr = "I run the command {string}")]
+fn diagnose_run_command(world: &mut DiagnoseWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given the agentchrome binary is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "agentchrome") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[then(expr = "the command exits with code {int}")]
+fn diagnose_exits_with_code(world: &mut DiagnoseWorld, expected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, expected,
+        "Expected exit code {expected}, got {actual}\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then("stdout is empty")]
+fn diagnose_stdout_is_empty(world: &mut DiagnoseWorld) {
+    assert!(
+        world.stdout.trim().is_empty(),
+        "Expected stdout to be empty, but got: {}",
+        world.stdout
+    );
+}
+
+#[then("stderr contains a JSON error object")]
+fn diagnose_stderr_contains_json_error(world: &mut DiagnoseWorld) {
+    let trimmed = world.stderr.trim();
+    let json: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|e| {
+        panic!("stderr is not valid JSON: {e}\nstderr: {trimmed}");
+    });
+    assert!(
+        json.get("error").is_some() || json.get("message").is_some(),
+        "stderr JSON does not have 'error' or 'message' key\nJSON: {json}"
+    );
+}
+
+#[then(expr = "stdout contains {string}")]
+fn diagnose_stdout_contains(world: &mut DiagnoseWorld, expected: String) {
+    assert!(
+        world.stdout.contains(&expected),
+        "stdout does not contain '{expected}'\nstdout: {}",
+        world.stdout
+    );
+}
+
+// =============================================================================
 // Main — run all worlds
 // =============================================================================
+
+/// Diagnose command BDD scenarios testable without a running Chrome instance.
+/// All 5 scenarios use only argument parsing and help output — no Chrome needed.
+const DIAGNOSE_TESTABLE_SCENARIOS: &[&str] = &[
+    "Missing URL without --current is an argument error",
+    "Supplying both URL and --current is mutually exclusive",
+    "URL argument parses successfully",
+    "--current flag parses successfully with help",
+    "Documentation and examples are discoverable",
+];
 
 /// Interact BDD scenarios that can be tested without a running Chrome instance.
 /// These are pure CLI argument validation scenarios that fail before Chrome connection.
@@ -5063,6 +5156,18 @@ async fn main() {
             "tests/features/coordinate-drag-decomposed-mouse.feature",
             |_feature, _rule, scenario| {
                 COORD_DRAG_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Diagnose command (issue #200) — only CLI argument validation and help/examples scenarios
+    // can be tested without Chrome. Chrome-dependent scenarios (AC1-AC12) are documented as
+    // comments in the feature file and verified via manual smoke test.
+    DiagnoseWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/diagnose.feature",
+            |_feature, _rule, scenario| {
+                DIAGNOSE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

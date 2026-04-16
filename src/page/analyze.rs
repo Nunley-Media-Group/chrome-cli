@@ -32,14 +32,14 @@ pub struct AnalyzeResult {
 /// Iframe metadata.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IframeInfo {
-    pub index: u32,
-    pub url: String,
-    pub name: String,
-    pub visible: bool,
-    pub width: u32,
-    pub height: u32,
-    pub cross_origin: bool,
+pub(crate) struct IframeInfo {
+    pub(crate) index: u32,
+    pub(crate) url: String,
+    pub(crate) name: String,
+    pub(crate) visible: bool,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) cross_origin: bool,
 }
 
 /// Interactive element counts per frame.
@@ -53,31 +53,31 @@ pub struct InteractiveElements {
 /// Media element metadata.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MediaInfo {
-    pub tag: String,
-    pub src: Option<String>,
-    pub state: Option<String>,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
+pub(crate) struct MediaInfo {
+    pub(crate) tag: String,
+    pub(crate) src: Option<String>,
+    pub(crate) state: Option<String>,
+    pub(crate) width: Option<u32>,
+    pub(crate) height: Option<u32>,
 }
 
 /// Overlay/blocker element metadata.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OverlayInfo {
-    pub selector: String,
-    pub z_index: i64,
-    pub width: u32,
-    pub height: u32,
-    pub covers_interactive: bool,
+pub(crate) struct OverlayInfo {
+    pub(crate) selector: String,
+    pub(crate) z_index: i64,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) covers_interactive: bool,
 }
 
 /// Shadow DOM presence metadata.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ShadowDomInfo {
-    pub present: bool,
-    pub host_count: u32,
+pub(crate) struct ShadowDomInfo {
+    pub(crate) present: bool,
+    pub(crate) host_count: u32,
 }
 
 /// Summary with aggregate counts and boolean flags.
@@ -97,7 +97,7 @@ pub struct AnalyzeSummary {
 // Analysis dimension: iframe enumeration
 // =============================================================================
 
-async fn enumerate_iframes(
+pub(crate) async fn enumerate_iframes(
     managed: &mut ManagedSession,
     main_security_origin: &str,
 ) -> Vec<IframeInfo> {
@@ -128,7 +128,10 @@ async fn enumerate_iframes(
 // Analysis dimension: framework detection
 // =============================================================================
 
-async fn detect_frameworks(effective: &ManagedSession, context_id: Option<i64>) -> Vec<String> {
+pub(crate) async fn detect_frameworks(
+    effective: &ManagedSession,
+    context_id: Option<i64>,
+) -> Vec<String> {
     let js = r#"(function() {
         var detected = [];
         try { if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ !== 'undefined' || document.querySelector('[data-reactroot]') !== null) detected.push('React'); } catch(e) {}
@@ -163,9 +166,12 @@ async fn detect_frameworks(effective: &ManagedSession, context_id: Option<i64>) 
 // Analysis dimension: interactive element counting
 // =============================================================================
 
-const INTERACTIVE_SELECTOR: &str = r#"a[href], button, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [tabindex]:not([tabindex="-1"])"#;
+pub(crate) const INTERACTIVE_SELECTOR: &str = r#"a[href], button, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [tabindex]:not([tabindex="-1"])"#;
 
-async fn count_interactive_elements(effective: &ManagedSession, context_id: Option<i64>) -> u32 {
+pub(crate) async fn count_interactive_elements(
+    effective: &ManagedSession,
+    context_id: Option<i64>,
+) -> u32 {
     let js = format!(r"document.querySelectorAll('{INTERACTIVE_SELECTOR}').length");
 
     let mut params = serde_json::json!({
@@ -192,7 +198,10 @@ async fn count_interactive_elements(effective: &ManagedSession, context_id: Opti
 // Analysis dimension: media element cataloging
 // =============================================================================
 
-async fn catalog_media(effective: &ManagedSession, context_id: Option<i64>) -> Vec<MediaInfo> {
+pub(crate) async fn catalog_media(
+    effective: &ManagedSession,
+    context_id: Option<i64>,
+) -> Vec<MediaInfo> {
     let js = r"(function() {
         var media = [];
         var els = document.querySelectorAll('video, audio, embed');
@@ -254,7 +263,10 @@ async fn catalog_media(effective: &ManagedSession, context_id: Option<i64>) -> V
 // Analysis dimension: overlay detection
 // =============================================================================
 
-async fn detect_overlays(effective: &ManagedSession, context_id: Option<i64>) -> Vec<OverlayInfo> {
+pub(crate) async fn detect_overlays(
+    effective: &ManagedSession,
+    context_id: Option<i64>,
+) -> Vec<OverlayInfo> {
     let js = format!(
         r"(function() {{
         var vpW = window.innerWidth;
@@ -338,7 +350,10 @@ async fn detect_overlays(effective: &ManagedSession, context_id: Option<i64>) ->
 // Analysis dimension: shadow DOM detection
 // =============================================================================
 
-async fn detect_shadow_dom(effective: &ManagedSession, context_id: Option<i64>) -> ShadowDomInfo {
+pub(crate) async fn detect_shadow_dom(
+    effective: &ManagedSession,
+    context_id: Option<i64>,
+) -> ShadowDomInfo {
     let js = r"(function() {
         var count = 0;
         var all = document.querySelectorAll('*');

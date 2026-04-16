@@ -18,12 +18,23 @@ pub const DEFAULT_NAVIGATE_TIMEOUT_MS: u64 = 30_000;
 /// Network idle threshold in milliseconds.
 pub const NETWORK_IDLE_MS: u64 = 500;
 
+/// Result of a navigation operation.
+pub(crate) struct NavigateResult {
+    /// Final URL after any redirects.
+    #[allow(dead_code)]
+    pub url: String,
+    /// Page title after navigation.
+    #[allow(dead_code)]
+    pub title: String,
+    pub status: Option<u16>,
+}
+
 // =============================================================================
 // Output types
 // =============================================================================
 
 #[derive(Serialize)]
-struct NavigateResult {
+struct NavigateOutput {
     url: String,
     title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,13 +185,99 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
     // Get final page info
     let (page_url, page_title) = get_page_info(&managed).await?;
 
-    let output = NavigateResult {
+    let output = NavigateOutput {
         url: page_url,
         title: page_title,
         status,
     };
 
     print_output(&output, &global.output)
+}
+
+// =============================================================================
+// Shared navigation helper (used by `navigate <url>` and `diagnose <url>`)
+// =============================================================================
+
+/// Navigate to `url`, wait according to `wait_until`, and return the resulting
+/// URL, title, and HTTP status. The session must already be set up; this
+/// function enables the Page and Network domains itself.
+///
+/// This helper is shared by `navigate <url>` and `diagnose <url>` so both
+/// commands produce identical navigation behaviour and error classifications.
+///
+/// # Errors
+///
+/// Returns `AppError` (with `ExitCode::TimeoutError` or `ExitCode::ProtocolError`)
+/// on navigation failure, matching the error contract of `navigate <url>`.
+pub(crate) async fn navigate_and_wait(
+    managed: &mut ManagedSession,
+    url: &str,
+    wait_until: WaitUntil,
+    timeout_ms: u64,
+) -> Result<NavigateResult, AppError> {
+    // Enable required domains
+    managed.ensure_domain("Page").await?;
+    managed.ensure_domain("Network").await?;
+
+    // Subscribe to events BEFORE navigating
+    let response_rx = managed.subscribe("Network.responseReceived").await?;
+
+    // Subscribe for wait strategy
+    let wait_rx = match wait_until {
+        WaitUntil::Load => Some(managed.subscribe("Page.loadEventFired").await?),
+        WaitUntil::Domcontentloaded => Some(managed.subscribe("Page.domContentEventFired").await?),
+        WaitUntil::Networkidle | WaitUntil::None => None,
+    };
+
+    // For network idle, we need request tracking subscriptions
+    let network_subs = if wait_until == WaitUntil::Networkidle {
+        let req_rx = managed.subscribe("Network.requestWillBeSent").await?;
+        let fin_rx = managed.subscribe("Network.loadingFinished").await?;
+        let fail_rx = managed.subscribe("Network.loadingFailed").await?;
+        Some((req_rx, fin_rx, fail_rx))
+    } else {
+        None
+    };
+
+    // Navigate
+    let params = serde_json::json!({ "url": url });
+    let result = managed.send_command("Page.navigate", Some(params)).await?;
+
+    // Check for navigation errors (e.g., DNS failure)
+    if let Some(error_text) = result["errorText"].as_str() {
+        if !error_text.is_empty() {
+            return Err(AppError::navigation_failed(error_text));
+        }
+    }
+
+    let frame_id = result["frameId"].as_str().unwrap_or_default().to_string();
+
+    // Wait according to strategy
+    match wait_until {
+        WaitUntil::Load | WaitUntil::Domcontentloaded => {
+            if let Some(rx) = wait_rx {
+                wait_for_event(rx, timeout_ms, &format!("{wait_until:?}")).await?;
+            }
+        }
+        WaitUntil::Networkidle => {
+            if let Some((req_rx, fin_rx, fail_rx)) = network_subs {
+                wait_for_network_idle(req_rx, fin_rx, fail_rx, timeout_ms).await?;
+            }
+        }
+        WaitUntil::None => {}
+    }
+
+    // Extract HTTP status from responseReceived events
+    let status = extract_http_status(response_rx, &frame_id);
+
+    // Get final page info
+    let (page_url, page_title) = get_page_info(managed).await?;
+
+    Ok(NavigateResult {
+        url: page_url,
+        title: page_title,
+        status,
+    })
 }
 
 // =============================================================================
@@ -535,7 +632,7 @@ mod tests {
 
     #[test]
     fn navigate_result_serialization() {
-        let result = NavigateResult {
+        let result = NavigateOutput {
             url: "https://example.com".to_string(),
             title: "Example".to_string(),
             status: Some(200),
@@ -548,7 +645,7 @@ mod tests {
 
     #[test]
     fn navigate_result_without_status() {
-        let result = NavigateResult {
+        let result = NavigateOutput {
             url: "https://example.com".to_string(),
             title: "Example".to_string(),
             status: None,

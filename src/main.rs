@@ -3,6 +3,7 @@ mod capabilities;
 mod cli;
 mod console;
 mod cookie;
+mod diagnose;
 mod dialog;
 mod dom;
 mod emulate;
@@ -106,6 +107,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Cookie(args) => cookie::execute_cookie(&global, args).await,
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
         Command::Audit(args) => audit::execute_audit(&global, args).await,
+        Command::Diagnose(args) => diagnose::execute_diagnose(&global, args).await,
         Command::Skill(args) => skill::execute_skill(&global, args),
         Command::Examples(args) => examples::execute_examples(&global, args),
         Command::Capabilities(args) => capabilities::execute_capabilities(&global, args),

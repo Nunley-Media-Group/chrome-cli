@@ -1,4 +1,4 @@
-mod analyze;
+pub(crate) mod analyze;
 mod element;
 mod find;
 mod hittest;
