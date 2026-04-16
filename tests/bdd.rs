@@ -4188,7 +4188,7 @@ fn skill_stdout_has_tools_array(world: &mut SkillWorld) {
 }
 
 #[then(
-    "the \"tools\" array contains entries for \"claude-code\", \"windsurf\", \"aider\", \"continue\", \"copilot-jb\", and \"cursor\""
+    "the \"tools\" array contains entries for \"claude-code\", \"windsurf\", \"aider\", \"continue\", \"copilot-jb\", \"cursor\", and \"gemini\""
 )]
 fn skill_tools_contains_all(world: &mut SkillWorld) {
     let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
@@ -4202,6 +4202,7 @@ fn skill_tools_contains_all(world: &mut SkillWorld) {
         "continue",
         "copilot-jb",
         "cursor",
+        "gemini",
     ] {
         assert!(
             names.contains(expected),

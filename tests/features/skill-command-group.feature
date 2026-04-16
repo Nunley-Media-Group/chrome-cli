@@ -32,7 +32,7 @@ Feature: Skill command group for agentic tool integration
     When I run "agentchrome skill list"
     Then the exit code is 0
     And stdout contains valid JSON with a "tools" array
-    And the "tools" array contains entries for "claude-code", "windsurf", "aider", "continue", "copilot-jb", and "cursor"
+    And the "tools" array contains entries for "claude-code", "windsurf", "aider", "continue", "copilot-jb", "cursor", and "gemini"
     And each tool entry has "name", "detection", "path", and "installed" fields
 
   Scenario: Uninstall skill (AC4)
