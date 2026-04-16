@@ -177,6 +177,17 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     description: "List service workers, shared workers, and web workers".into(),
                     flags: None,
                 },
+                ExampleEntry {
+                    cmd: "agentchrome page hittest 100 200".into(),
+                    description: "Hit test at viewport coordinates to identify click targets"
+                        .into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome page hittest 50 50 --frame 1".into(),
+                    description: "Hit test within a specific iframe".into(),
+                    flags: Some(vec!["--frame".into()]),
+                },
             ],
         },
         CommandGroupSummary {

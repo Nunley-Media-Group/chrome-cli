@@ -4368,6 +4368,13 @@ const DOM_EVENTS_TESTABLE_SCENARIOS: &[&str] = &[
     "Examples include dom events",
 ];
 
+/// Page hittest BDD scenarios that can be tested without a running Chrome instance.
+/// Only the documentation/examples and no-connection scenarios are CLI-only.
+const PAGE_HITTEST_TESTABLE_SCENARIOS: &[&str] = &[
+    "Documentation includes page hittest examples",
+    "No connection returns error",
+];
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -4824,6 +4831,17 @@ async fn main() {
             "tests/features/dom-events.feature",
             |_feature, _rule, scenario| {
                 DOM_EVENTS_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Page hittest command (issue #191) — only CLI-testable scenarios (examples, no-connection).
+    // Chrome-dependent scenarios verified via manual smoke test.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/page-hittest.feature",
+            |_feature, _rule, scenario| {
+                PAGE_HITTEST_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

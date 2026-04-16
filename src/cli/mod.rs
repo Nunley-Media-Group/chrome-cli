@@ -1024,6 +1024,23 @@ EXAMPLES:
   agentchrome page workers"
     )]
     Workers,
+
+    /// Hit test at viewport coordinates to identify click targets and overlays
+    #[command(
+        name = "hittest",
+        long_about = "Hit test at the given viewport coordinates to identify which element \
+            receives a click event. Returns the actual hit target, any intercepting overlay \
+            elements, and the full z-index stack at those coordinates. Useful for debugging \
+            failed click interactions caused by invisible overlays.",
+        after_long_help = "\
+EXAMPLES:
+  # Hit test at viewport coordinates
+  agentchrome page hittest 100 200
+
+  # Hit test within a specific iframe
+  agentchrome page hittest 50 50 --frame 1"
+    )]
+    HitTest(PageHitTestArgs),
 }
 
 /// Image format for screenshots.
@@ -2449,6 +2466,16 @@ pub struct PageResizeArgs {
 pub struct PageElementArgs {
     /// Element target: UID (s1, s2, ...) or CSS selector (css:#id, css:.class)
     pub target: String,
+}
+
+/// Arguments for `page hittest`.
+#[derive(Args)]
+pub struct PageHitTestArgs {
+    /// X viewport coordinate
+    pub x: u32,
+
+    /// Y viewport coordinate
+    pub y: u32,
 }
 
 /// Arguments for `page wait`.
