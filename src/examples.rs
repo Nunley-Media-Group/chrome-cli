@@ -5,6 +5,7 @@ use serde::Serialize;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{ExamplesArgs, GlobalOpts};
+use crate::output::print_output;
 
 // =============================================================================
 // Output types
@@ -540,21 +541,6 @@ fn all_examples() -> Vec<CommandGroupSummary> {
 // =============================================================================
 // Output formatting
 // =============================================================================
-
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
 
 fn format_plain_summary(groups: &[CommandGroupSummary]) -> String {
     let mut out = String::new();

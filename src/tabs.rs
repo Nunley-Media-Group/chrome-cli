@@ -6,10 +6,11 @@ use serde::Serialize;
 use agentchrome::cdp::{CdpClient, CdpConfig};
 use agentchrome::chrome::{TargetInfo, activate_target, query_targets};
 use agentchrome::connection::{resolve_connection, select_target};
-use agentchrome::error::{AppError, ExitCode};
+use agentchrome::error::AppError;
 use agentchrome::session;
 
 use crate::cli::{GlobalOpts, TabsArgs, TabsCommand};
+use crate::output::{cdp_config, print_output};
 
 /// Execute the `tabs` subcommand group.
 ///
@@ -64,21 +65,6 @@ struct ActivateResult {
 // =============================================================================
 // Output formatting
 // =============================================================================
-
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
 
 fn format_plain_table(tabs: &[TabInfo]) -> String {
     let mut out = String::new();
@@ -345,14 +331,6 @@ async fn execute_activate(
 // =============================================================================
 // Helpers
 // =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
 
 /// Check whether a target's `document.visibilityState` is `"visible"` via a
 /// CDP session on the given client.

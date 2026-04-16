@@ -5,14 +5,13 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     GlobalOpts, NetworkArgs, NetworkCommand, NetworkFollowArgs, NetworkGetArgs, NetworkListArgs,
 };
-use crate::emulate::apply_emulate_state;
+use crate::output::setup_session;
 
 // =============================================================================
 // Output types
@@ -213,41 +212,6 @@ fn format_detail_plain(detail: &NetworkRequestDetail) -> String {
 #[cfg(test)]
 fn print_detail_plain(detail: &NetworkRequestDetail) {
     print!("{}", format_detail_plain(detail));
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-
-    Ok((client, managed))
 }
 
 // =============================================================================

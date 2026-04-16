@@ -13,6 +13,20 @@ use agentchrome::error::AppError;
 /// Maximum number of nodes before truncation.
 pub const MAX_NODES: usize = 10_000;
 
+/// Check if a target string is a snapshot UID (matches pattern: 's' + digits).
+pub fn is_uid(target: &str) -> bool {
+    if !target.starts_with('s') {
+        return false;
+    }
+    let rest = &target[1..];
+    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Check if a target string is a CSS selector (starts with `css:`).
+pub fn is_css_selector(target: &str) -> bool {
+    target.starts_with("css:")
+}
+
 /// Roles that receive a UID for interaction commands.
 const INTERACTIVE_ROLES: &[&str] = &[
     "link",

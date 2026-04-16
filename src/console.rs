@@ -3,12 +3,10 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{ConsoleArgs, ConsoleCommand, ConsoleFollowArgs, ConsoleReadArgs, GlobalOpts};
-use crate::emulate::apply_emulate_state;
+use crate::output::{print_output, setup_session};
 
 // =============================================================================
 // Output types
@@ -66,21 +64,6 @@ struct StreamMessage {
 // Output formatting
 // =============================================================================
 
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
 fn print_read_plain(messages: &[ConsoleMessage]) {
     for msg in messages {
         let prefix = match msg.msg_type.as_str() {
@@ -121,40 +104,6 @@ fn print_detail_plain(detail: &ConsoleMessageDetail) {
     }
 }
 
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-
-    Ok((client, managed))
-}
 
 // =============================================================================
 // Helpers

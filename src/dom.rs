@@ -1,18 +1,16 @@
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     DomArgs, DomCommand, DomGetAttributeArgs, DomGetStyleArgs, DomNodeIdArgs, DomSelectArgs,
     DomSetAttributeArgs, DomSetStyleArgs, DomSetTextArgs, DomTreeArgs, GlobalOpts,
 };
-use crate::emulate::apply_emulate_state;
+use crate::output::{print_output, setup_session_with_interceptors as setup_session};
 use crate::snapshot;
 
 // =============================================================================
@@ -102,60 +100,6 @@ struct TreeOutput {
     tree: String,
 }
 
-// =============================================================================
-// Output formatting
-// =============================================================================
-
-fn print_output(value: &impl Serialize, output: &crate::cli::OutputFormat) -> Result<(), AppError> {
-    let json = if output.pretty {
-        serde_json::to_string_pretty(value)
-    } else {
-        serde_json::to_string(value)
-    };
-    let json = json.map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
-    Ok(())
-}
-
-// =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
-// Session setup
-// =============================================================================
-
-async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-    let target = resolve_target(
-        &conn.host,
-        conn.port,
-        global.tab.as_deref(),
-        global.page_id.as_deref(),
-    )
-    .await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
-    let mut managed = ManagedSession::new(session);
-    apply_emulate_state(&mut managed).await?;
-    managed.install_dialog_interceptors().await;
-
-    Ok((client, managed))
-}
 
 // =============================================================================
 // Core helpers
@@ -176,19 +120,6 @@ async fn get_document_root(session: &ManagedSession) -> Result<i64, AppError> {
         .ok_or_else(|| AppError::node_not_found("root"))
 }
 
-/// Check if a target string is a UID (matches pattern: 's' + digits).
-fn is_uid(target: &str) -> bool {
-    if !target.starts_with('s') {
-        return false;
-    }
-    let rest = &target[1..];
-    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
-}
-
-/// Check if a target string is a CSS selector (starts with 'css:').
-fn is_css_selector(target: &str) -> bool {
-    target.starts_with("css:")
-}
 
 /// Resolved node with both session-scoped `nodeId` and stable `backendNodeId`.
 struct ResolvedNode {
@@ -212,7 +143,7 @@ async fn resolve_node(session: &ManagedSession, target: &str) -> Result<Resolved
     }
 
     // UID resolution
-    if is_uid(target) {
+    if snapshot::is_uid(target) {
         let state = snapshot::read_snapshot_state()?.ok_or_else(AppError::no_snapshot_state)?;
         let backend_node_id = state
             .uid_map
@@ -230,7 +161,7 @@ async fn resolve_node(session: &ManagedSession, target: &str) -> Result<Resolved
     }
 
     // CSS selector resolution
-    if is_css_selector(target) {
+    if snapshot::is_css_selector(target) {
         let selector = &target[4..];
         let root_id = get_document_root(session).await?;
 
@@ -520,38 +451,6 @@ pub async fn execute_dom(global: &GlobalOpts, args: &DomArgs) -> Result<(), AppE
     }
 }
 
-/// Resolve the optional frame argument and return a `FrameContext`.
-///
-/// Enables the DOM domain on the effective session.
-///
-/// `uid` is the target element identifier; it is required when `frame` is
-/// `"auto"` so that `resolve_frame_auto` can locate the correct frame.
-async fn resolve_dom_frame(
-    client: &CdpClient,
-    managed: &mut ManagedSession,
-    frame: Option<&str>,
-    uid: Option<&str>,
-) -> Result<Option<agentchrome::frame::FrameContext>, AppError> {
-    if let Some(frame_str) = frame {
-        let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
-        if matches!(arg, agentchrome::frame::FrameArg::Auto) {
-            let target_uid = uid.unwrap_or_default();
-            // Read persisted snapshot state for the fast path hint.
-            let state = snapshot::read_snapshot_state().ok().flatten();
-            let hint = state
-                .as_ref()
-                .and_then(|s| s.frame_index.map(|idx| (idx, &s.uid_map)));
-            let (ctx, _frame_idx) =
-                agentchrome::frame::resolve_frame_auto(client, managed, target_uid, hint).await?;
-            Ok(Some(ctx))
-        } else {
-            let ctx = agentchrome::frame::resolve_frame(client, managed, &arg).await?;
-            Ok(Some(ctx))
-        }
-    } else {
-        Ok(None)
-    }
-}
 
 // =============================================================================
 // dom select
@@ -569,7 +468,7 @@ async fn execute_select(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -716,7 +615,7 @@ async fn execute_get_attribute(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -791,7 +690,7 @@ async fn execute_get_text(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -835,7 +734,7 @@ async fn execute_get_html(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -891,7 +790,7 @@ async fn execute_set_attribute(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -958,7 +857,7 @@ async fn execute_set_text(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -1035,7 +934,7 @@ async fn execute_remove(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -1094,7 +993,7 @@ async fn execute_get_style(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -1196,7 +1095,7 @@ async fn execute_set_style(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -1259,7 +1158,7 @@ async fn execute_parent(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -1366,7 +1265,7 @@ async fn execute_children(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -1451,7 +1350,7 @@ async fn execute_siblings(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx = resolve_dom_frame(&client, &mut managed, frame, None).await?;
+    let mut frame_ctx = crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -1737,30 +1636,30 @@ mod tests {
 
     #[test]
     fn is_uid_valid() {
-        assert!(is_uid("s1"));
-        assert!(is_uid("s42"));
-        assert!(is_uid("s999"));
+        assert!(snapshot::is_uid("s1"));
+        assert!(snapshot::is_uid("s42"));
+        assert!(snapshot::is_uid("s999"));
     }
 
     #[test]
     fn is_uid_invalid() {
-        assert!(!is_uid("s"));
-        assert!(!is_uid("s0a"));
-        assert!(!is_uid("css:button"));
-        assert!(!is_uid("button"));
-        assert!(!is_uid("42"));
+        assert!(!snapshot::is_uid("s"));
+        assert!(!snapshot::is_uid("s0a"));
+        assert!(!snapshot::is_uid("css:button"));
+        assert!(!snapshot::is_uid("button"));
+        assert!(!snapshot::is_uid("42"));
     }
 
     #[test]
     fn is_css_selector_valid() {
-        assert!(is_css_selector("css:#button"));
-        assert!(is_css_selector("css:.class"));
+        assert!(snapshot::is_css_selector("css:#button"));
+        assert!(snapshot::is_css_selector("css:.class"));
     }
 
     #[test]
     fn is_css_selector_invalid() {
-        assert!(!is_css_selector("#button"));
-        assert!(!is_css_selector("s1"));
+        assert!(!snapshot::is_css_selector("#button"));
+        assert!(!snapshot::is_css_selector("s1"));
     }
 
     #[test]

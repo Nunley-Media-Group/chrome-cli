@@ -42,15 +42,11 @@ struct JsExecError {
 // =============================================================================
 
 fn cdp_config(global: &GlobalOpts, exec_args: &JsExecArgs) -> CdpConfig {
-    let mut config = CdpConfig::default();
+    let mut config = crate::output::cdp_config(global);
     // Execution-specific --timeout overrides global --timeout
-    #[allow(clippy::cast_possible_truncation)]
-    let default_timeout = config.command_timeout.as_millis() as u64;
-    let timeout_ms = exec_args
-        .timeout
-        .or(global.timeout)
-        .unwrap_or(default_timeout);
-    config.command_timeout = Duration::from_millis(timeout_ms);
+    if let Some(timeout_ms) = exec_args.timeout {
+        config.command_timeout = Duration::from_millis(timeout_ms);
+    }
     config
 }
 
@@ -105,11 +101,13 @@ fn resolve_code(args: &JsExecArgs) -> Result<String, AppError> {
     if let Some(ref path) = args.file {
         // --file <PATH>
         let path_str = path.display().to_string();
-        if !path.exists() {
-            return Err(AppError::script_file_not_found(&path_str));
-        }
-        std::fs::read_to_string(path)
-            .map_err(|e| AppError::script_file_read_failed(&path_str, &e.to_string()))
+        std::fs::read_to_string(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                AppError::script_file_not_found(&path_str)
+            } else {
+                AppError::script_file_read_failed(&path_str, &e.to_string())
+            }
+        })
     } else if let Some(ref code) = args.code {
         if code == "-" {
             // Read from stdin
