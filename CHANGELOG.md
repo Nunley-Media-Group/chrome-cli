@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-04-16
+
+### Added
+
+- Add `page analyze` command for page structure discovery that reveals iframes (with URLs, visibility, dimensions, cross-origin detection), frontend framework detection (React, Angular, Vue, Svelte, Storyline, SCORM), interactive element counts per frame, media element cataloging with playback state, overlay/blocker detection, and accessibility shadow DOM presence — all in a single structured JSON call. Supports frame-scoped analysis via `--frame` and includes built-in examples (#190)
+
 ## [1.19.0] - 2026-04-16
 
 ### Added

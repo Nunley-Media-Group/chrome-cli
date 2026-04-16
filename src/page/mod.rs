@@ -1,3 +1,4 @@
+mod analyze;
 mod element;
 mod find;
 mod hittest;
@@ -105,6 +106,7 @@ pub async fn execute_page(global: &GlobalOpts, args: &PageArgs) -> Result<(), Ap
         PageCommand::Frames => execute_frames(global).await,
         PageCommand::Workers => execute_workers(global).await,
         PageCommand::HitTest(ht_args) => hittest::execute_hittest(global, ht_args, frame).await,
+        PageCommand::Analyze => analyze::execute_analyze(global, frame).await,
     }
 }
 

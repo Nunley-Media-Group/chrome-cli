@@ -188,6 +188,17 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     description: "Hit test within a specific iframe".into(),
                     flags: Some(vec!["--frame".into()]),
                 },
+                ExampleEntry {
+                    cmd: "agentchrome page analyze".into(),
+                    description: "Analyze page structure: iframes, frameworks, overlays, media"
+                        .into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome page analyze --frame 1".into(),
+                    description: "Analyze structure within a specific iframe".into(),
+                    flags: Some(vec!["--frame".into()]),
+                },
             ],
         },
         CommandGroupSummary {

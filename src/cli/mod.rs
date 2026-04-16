@@ -1041,6 +1041,22 @@ EXAMPLES:
   agentchrome page hittest 50 50 --frame 1"
     )]
     HitTest(PageHitTestArgs),
+
+    /// Analyze page structure: iframes, frameworks, overlays, media, shadow DOM
+    #[command(
+        long_about = "Analyze the structural composition of the current page. Returns a JSON \
+            report covering iframe hierarchy, detected frontend frameworks, interactive element \
+            counts, media elements, overlay blockers, and shadow DOM presence. Useful for \
+            understanding an unfamiliar page before choosing an automation strategy.",
+        after_long_help = "\
+EXAMPLES:
+  # Analyze current page
+  agentchrome page analyze
+
+  # Analyze within a specific iframe
+  agentchrome page analyze --frame 1"
+    )]
+    Analyze,
 }
 
 /// Image format for screenshots.

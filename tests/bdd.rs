@@ -4375,6 +4375,10 @@ const PAGE_HITTEST_TESTABLE_SCENARIOS: &[&str] = &[
     "No connection returns error",
 ];
 
+/// Page analyze BDD scenarios that can be tested without a running Chrome instance.
+/// AC4 (documentation) is the only scenario testable via CLI alone.
+const PAGE_ANALYZE_TESTABLE_SCENARIOS: &[&str] = &["AC4 - Documentation updated"];
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -4842,6 +4846,17 @@ async fn main() {
             "tests/features/page-hittest.feature",
             |_feature, _rule, scenario| {
                 PAGE_HITTEST_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Page analyze command (issue #190) — only CLI-testable scenarios (documentation/examples).
+    // Chrome-dependent scenarios (AC1-AC3, AC5-AC7) verified via manual smoke test.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/page-analyze.feature",
+            |_feature, _rule, scenario| {
+                PAGE_ANALYZE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

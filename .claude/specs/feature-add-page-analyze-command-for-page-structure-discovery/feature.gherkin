@@ -1,0 +1,74 @@
+# File: tests/features/page-analyze.feature
+#
+# Generated from: .claude/specs/feature-add-page-analyze-command-for-page-structure-discovery/requirements.md
+# Issue: #190
+
+Feature: Page Analyze Command
+  As a browser automation engineer starting work on an unfamiliar page
+  I want a single command that reveals the page's structure, frameworks, and potential automation challenges
+  So that I can choose the right interaction strategy immediately instead of spending 30+ minutes probing the DOM manually
+
+  # --- Happy Path ---
+
+  Scenario: AC1 - Structural summary output
+    Given a loaded page with iframes, media elements, overlays, and a known frontend framework
+    When I run "agentchrome page analyze"
+    Then the JSON output contains an "iframes" array with frame URLs, visibility, and dimensions
+    And the JSON output contains a "frameworks" array with detected framework names
+    And the JSON output contains an "interactiveElements" object with counts per frame
+    And the JSON output contains a "media" array with tag type, source, and playback state
+    And the JSON output contains an "overlays" array with selector, dimensions, and z-index
+    And the JSON output contains a "shadowDom" object with "present" boolean and "hostCount" number
+    And the JSON output contains a "summary" object with aggregate counts and boolean flags
+
+  # --- Alternative Paths ---
+
+  Scenario: AC2 - Frame-scoped analysis
+    Given a loaded page with an iframe at index 1 containing interactive elements
+    When I run "agentchrome page analyze --frame 1"
+    Then the JSON output "scope" field is "frame:1"
+    And all element counts and detection results are scoped to frame 1 only
+    And the command exits with code 0
+
+  Scenario: AC5 - Cross-origin iframe enumeration
+    Given a loaded page with a cross-origin iframe
+    When I run "agentchrome page analyze"
+    Then the "iframes" array includes an entry with "crossOrigin" set to true
+    And the cross-origin iframe entry contains "url", "width", and "height"
+    And the interactive element count for the cross-origin iframe is null if inaccessible
+
+  # --- Edge Cases ---
+
+  Scenario: AC3 - Simple page handling
+    Given a loaded page with no iframes, overlays, frameworks, media, or shadow DOM
+    When I run "agentchrome page analyze"
+    Then the JSON output "iframes" is an empty array
+    And the JSON output "frameworks" is an empty array
+    And the JSON output "media" is an empty array
+    And the JSON output "overlays" is an empty array
+    And the JSON output "shadowDom" has "present" set to false
+    And the JSON output "summary" has "iframeCount" set to 0
+    And the JSON output "summary" has "hasOverlays" set to false
+    And the command exits with code 0
+
+  Scenario: AC7 - Undetermined output fields use null
+    Given a loaded page where some analysis dimensions cannot be determined
+    When I run "agentchrome page analyze"
+    Then fields that cannot be determined appear as null in the JSON output
+    And fields that cannot be determined are not omitted or set to zero
+    And the command exits with code 0
+
+  # --- Error Handling ---
+
+  Scenario: AC6 - Invalid frame index error
+    Given a loaded page with no iframes
+    When I run "agentchrome page analyze --frame 99"
+    Then a JSON error is written to stderr with a message about invalid frame index
+    And the command exits with a non-zero exit code
+
+  # --- Documentation ---
+
+  Scenario: AC4 - Documentation updated
+    When I run "agentchrome examples page"
+    Then the output includes an example for "agentchrome page analyze"
+    And the output includes an example for "agentchrome page analyze --frame 1"
