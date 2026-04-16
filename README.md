@@ -4,7 +4,7 @@
 
 ![CI](https://github.com/Nunley-Media-Group/AgentChrome/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)
-<!-- ![Crates.io](https://img.shields.io/crates/v/agentchrome) TODO: uncomment when published -->
+![Crates.io](https://img.shields.io/crates/v/agentchrome)
 
 AgentChrome is a native CLI tool for browser automation via the Chrome DevTools Protocol, designed for AI coding agents — especially [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Every command outputs structured JSON, uses accessibility-tree UIDs for element targeting, and returns typed exit codes for programmatic error handling. No Node.js, no Python, no MCP server — just a fast Rust binary your agent calls from the shell.
 
@@ -68,12 +68,18 @@ See the full [Claude Code Integration Guide](docs/claude-code.md) for workflows,
 - **Page inspection** — accessibility trees, text extraction, element search
 - **Screenshots** — full-page, viewport, element, or region captures
 - **JavaScript execution** — run scripts in page context, return results as JSON
-- **User interactions** — click, hover, drag, type, press keys, scroll
-- **Form filling** — fill inputs, select options, upload files, batch fill with `fill-many`
+- **User interactions** — click, hover, drag, type, press keys, scroll, coordinate-based drag and decomposed mouse actions
+- **Form filling** — fill inputs, select options, upload files, batch fill with `fill-many`, ARIA combobox support
+- **Iframe/frame targeting** — list frames, target specific iframes with `--frame` on all commands, cross-origin OOPIF support
+- **Media control** — list, play, pause, seek audio/video elements with CSS selector or bulk targeting
+- **Page analysis** — structure discovery with iframe detection, framework identification, overlay/blocker detection, and hit testing for click debugging
+- **DOM event introspection** — inspect event listeners on any element via CDP
+- **Cookie management** — list, set, delete, and clear browser cookies
 - **Network monitoring** — list, inspect, and follow requests in real time
 - **Console capture** — read and follow console messages with type filtering
 - **Device emulation** — mobile devices, network/CPU throttling, geolocation, color scheme
 - **Performance tracing** — record traces, analyze insights, measure Core Web Vitals
+- **Lighthouse auditing** — run audits returning structured category scores with filtering
 - **Dialog handling** — accept, dismiss, or respond to alert/confirm/prompt dialogs
 
 </details>
@@ -201,19 +207,24 @@ agentchrome page snapshot
 | `connect` | Connect to or launch a Chrome instance |
 | `tabs` | Tab management (list, create, close, activate) |
 | `navigate` | URL navigation and history |
-| `page` | Page inspection (screenshot, text, accessibility tree, find) |
-| `dom` | DOM inspection and manipulation |
+| `page` | Page inspection (screenshot, text, accessibility tree, find, analyze, hittest, frames, workers) |
+| `dom` | DOM inspection, manipulation, and event listener introspection |
 | `js` | JavaScript execution in page context |
 | `console` | Console message reading and monitoring |
 | `network` | Network request monitoring and interception |
-| `interact` | Mouse, keyboard, and scroll interactions |
-| `form` | Form input and submission |
+| `interact` | Mouse, keyboard, scroll, and coordinate-based drag interactions |
+| `form` | Form input, submission, and ARIA combobox support |
 | `emulate` | Device and network emulation |
 | `perf` | Performance tracing and metrics |
+| `cookie` | Browser cookie management (list, set, delete, clear) |
 | `dialog` | Browser dialog handling (alert, confirm, prompt, beforeunload) |
+| `media` | Media element control (list, play, pause, seek) |
+| `audit` | Run audits against the current page (Lighthouse) |
 | `skill` | Agentic tool skill installation and management |
 | `config` | Configuration file management (show, init, path) |
 | `completions` | Generate shell completion scripts |
+| `examples` | Show usage examples for commands |
+| `capabilities` | Output a machine-readable manifest of all CLI capabilities |
 | `man` | Display man pages for AgentChrome commands |
 
 Run `agentchrome <command> --help` for detailed usage, `agentchrome examples <command>` for practical examples, or `agentchrome capabilities` for the full machine-readable command manifest.
