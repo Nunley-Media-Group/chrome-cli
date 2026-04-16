@@ -10,6 +10,7 @@ mod examples;
 mod form;
 mod interact;
 mod js;
+mod media;
 mod navigate;
 mod network;
 mod output;
@@ -99,6 +100,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Network(args) => network::execute_network(&global, args).await,
         Command::Interact(args) => interact::execute_interact(&global, args).await,
         Command::Form(args) => form::execute_form(&global, args).await,
+        Command::Media(args) => media::execute_media(&global, args).await,
         Command::Emulate(args) => emulate::execute_emulate(&global, args).await,
         Command::Perf(args) => perf::execute_perf(&global, args).await,
         Command::Cookie(args) => cookie::execute_cookie(&global, args).await,

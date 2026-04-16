@@ -537,6 +537,47 @@ fn all_examples() -> Vec<CommandGroupSummary> {
             ],
         },
         CommandGroupSummary {
+            command: "media".into(),
+            description: "Media element control (list, play, pause, seek audio/video)".into(),
+            examples: vec![
+                ExampleEntry {
+                    cmd: "agentchrome media list".into(),
+                    description: "List all audio and video elements on the page".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome media play 0".into(),
+                    description: "Play the first media element".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome media pause 0".into(),
+                    description: "Pause the first media element".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome media seek 0 15.5".into(),
+                    description: "Seek a media element to 15.5 seconds".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome media seek-end --all".into(),
+                    description: "Seek all media elements to end (skip narration gates)".into(),
+                    flags: Some(vec!["--all".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome media --frame 0 list".into(),
+                    description: "List media elements inside a specific iframe".into(),
+                    flags: Some(vec!["--frame".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome media play css:audio.narration".into(),
+                    description: "Play a media element by CSS selector".into(),
+                    flags: None,
+                },
+            ],
+        },
+        CommandGroupSummary {
             command: "config".into(),
             description: "Configuration file management (show, init, path)".into(),
             examples: vec![
@@ -660,6 +701,7 @@ mod tests {
         assert!(names.contains(&"emulate"));
         assert!(names.contains(&"perf"));
         assert!(names.contains(&"dialog"));
+        assert!(names.contains(&"media"));
         assert!(names.contains(&"skill"));
         assert!(names.contains(&"config"));
     }

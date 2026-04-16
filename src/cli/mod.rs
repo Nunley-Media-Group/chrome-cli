@@ -481,6 +481,37 @@ EXAMPLES:
     )]
     Dialog(DialogArgs),
 
+    /// Media element control (list, play, pause, seek)
+    #[command(
+        long_about = "Discover and control HTML5 audio and video elements on the current page. \
+            List all media elements with playback state, play/pause individual elements, seek to \
+            a specific time or to the end of the media. Supports targeting by index or CSS \
+            selector, bulk operations with --all, and frame-scoped media control with --frame.",
+        after_long_help = "\
+EXAMPLES:
+  # List all media elements on the page
+  agentchrome media list
+
+  # Play a media element by index
+  agentchrome media play 0
+
+  # Pause a media element
+  agentchrome media pause 0
+
+  # Seek to 15.5 seconds
+  agentchrome media seek 0 15.5
+
+  # Seek all media elements to end (skip narration gates)
+  agentchrome media seek-end --all
+
+  # List media elements inside an iframe
+  agentchrome media --frame 0 list
+
+  # Play a media element by CSS selector
+  agentchrome media play css:audio.narration"
+    )]
+    Media(MediaArgs),
+
     /// Run audits against the current page (Lighthouse)
     #[command(
         long_about = "Run external audits against the current browser page. Currently supports \
@@ -1515,6 +1546,130 @@ pub enum DialogAction {
     Accept,
     /// Dismiss (Cancel) the dialog
     Dismiss,
+}
+
+/// Arguments for the `media` subcommand group.
+#[derive(Args)]
+pub struct MediaArgs {
+    /// Target frame by index, path (1/0), or 'auto'
+    #[arg(long)]
+    pub frame: Option<String>,
+
+    #[command(subcommand)]
+    pub command: MediaCommand,
+}
+
+/// Media subcommands.
+#[derive(Subcommand)]
+pub enum MediaCommand {
+    /// List all audio and video elements on the page
+    #[command(
+        long_about = "Enumerate all HTML5 <audio> and <video> elements on the page and return \
+            their playback state. Each element includes its index (for targeting), tag type, \
+            source URLs, duration, current time, playback state, mute/volume status, and \
+            readyState. Returns an empty array if no media elements exist.",
+        after_long_help = "\
+EXAMPLES:
+  # List all media elements
+  agentchrome media list
+
+  # List media in a specific iframe
+  agentchrome media --frame 0 list"
+    )]
+    List,
+
+    /// Play a media element
+    #[command(
+        long_about = "Start playback of a media element identified by index (from 'media list') \
+            or CSS selector (prefixed with 'css:'). Returns the updated playback state as JSON. \
+            Use --all to play all media elements on the page.",
+        after_long_help = "\
+EXAMPLES:
+  # Play by index
+  agentchrome media play 0
+
+  # Play by CSS selector
+  agentchrome media play css:audio.narration
+
+  # Play all media elements
+  agentchrome media play --all"
+    )]
+    Play(MediaTargetArgs),
+
+    /// Pause a media element
+    #[command(
+        long_about = "Pause playback of a media element identified by index or CSS selector. \
+            Returns the updated playback state as JSON. Use --all to pause all media elements.",
+        after_long_help = "\
+EXAMPLES:
+  # Pause by index
+  agentchrome media pause 0
+
+  # Pause all media elements
+  agentchrome media pause --all"
+    )]
+    Pause(MediaTargetArgs),
+
+    /// Seek a media element to a specific time
+    #[command(
+        long_about = "Set the current playback position of a media element to a specific time \
+            in seconds. The time is clamped to the element's duration by the browser. Returns \
+            the updated playback state as JSON. Use --all with --time to seek all elements.",
+        after_long_help = "\
+EXAMPLES:
+  # Seek to 15.5 seconds
+  agentchrome media seek 0 15.5
+
+  # Seek all elements to 10 seconds
+  agentchrome media seek --all --time 10.0"
+    )]
+    Seek(MediaSeekArgs),
+
+    /// Seek a media element to its end (duration)
+    #[command(
+        long_about = "Set the current playback position of a media element to its total duration, \
+            effectively ending playback. This is the primary use case for skipping audio narration \
+            gates in SCORM courses. Returns the updated playback state as JSON. Use --all to seek \
+            all media elements to their end.",
+        after_long_help = "\
+EXAMPLES:
+  # Seek a specific element to end
+  agentchrome media seek-end 0
+
+  # Seek all media elements to end
+  agentchrome media seek-end --all"
+    )]
+    SeekEnd(MediaTargetArgs),
+}
+
+/// Arguments for media commands that target a single element or all elements.
+#[derive(Args)]
+pub struct MediaTargetArgs {
+    /// Media element index (from 'media list') or CSS selector (prefixed with 'css:')
+    pub target: Option<String>,
+
+    /// Apply to all media elements on the page
+    #[arg(long, conflicts_with = "target")]
+    pub all: bool,
+}
+
+/// Arguments for `media seek`.
+#[derive(Args)]
+pub struct MediaSeekArgs {
+    /// Media element index or CSS selector (not required with --all)
+    pub target: Option<String>,
+
+    /// Time in seconds to seek to (positional for single target, --time for --all)
+    #[arg(conflicts_with = "time")]
+    pub time_pos: Option<f64>,
+
+    /// Apply to all media elements on the page
+    #[arg(long, conflicts_with = "target")]
+    pub all: bool,
+
+    /// Time in seconds to seek to (use with --all)
+    #[arg(long, conflicts_with = "time_pos")]
+    pub time: Option<f64>,
 }
 
 /// Arguments for the `audit` subcommand group.
