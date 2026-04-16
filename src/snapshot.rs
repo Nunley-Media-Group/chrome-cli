@@ -1571,7 +1571,7 @@ mod tests {
     // compact_tree tests
     // =========================================================================
 
-    /// Helper to build a SnapshotNode literal for compact tests.
+    /// Helper to build a `SnapshotNode` literal for compact tests.
     fn sn(role: &str, name: &str, uid: Option<&str>, children: Vec<SnapshotNode>) -> SnapshotNode {
         SnapshotNode {
             role: role.to_string(),
@@ -1725,6 +1725,15 @@ mod tests {
 
     #[test]
     fn compact_tree_uid_preservation() {
+        fn collect_uids(node: &SnapshotNode, uids: &mut Vec<String>) {
+            if let Some(ref uid) = node.uid {
+                uids.push(uid.clone());
+            }
+            for child in &node.children {
+                collect_uids(child, uids);
+            }
+        }
+
         let root = sn(
             "document",
             "Page",
@@ -1747,16 +1756,8 @@ mod tests {
                 sn("link", "C", Some("s3"), vec![]),
             ],
         );
+
         let result = compact_tree(&root);
-        // Collect all UIDs from compacted tree
-        fn collect_uids(node: &SnapshotNode, uids: &mut Vec<String>) {
-            if let Some(ref uid) = node.uid {
-                uids.push(uid.clone());
-            }
-            for child in &node.children {
-                collect_uids(child, uids);
-            }
-        }
         let mut uids = vec![];
         collect_uids(&result, &mut uids);
         uids.sort();
