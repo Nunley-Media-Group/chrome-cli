@@ -1714,6 +1714,7 @@ async fn execute_siblings(
 // dom events
 // =============================================================================
 
+#[allow(clippy::too_many_lines)]
 async fn execute_events(
     global: &GlobalOpts,
     args: &DomNodeIdArgs,
@@ -1771,25 +1772,116 @@ async fn execute_events(
             custom_json: None,
         })?;
 
-    // Map CDP response to our output types
-    let listeners: Vec<EventListenerInfo> = response["listeners"]
+    // Map CDP response to our output types.
+    // Chrome 147+ omits the `handler` RemoteObject from getEventListeners
+    // responses.  When descriptions are missing, resolve them by calling
+    // getEventListeners() via Runtime.evaluate with the command-line API
+    // (which exposes the DevTools-only getEventListeners function).
+    let raw_listeners = response["listeners"]
         .as_array()
-        .unwrap_or(&vec![])
+        .cloned()
+        .unwrap_or_default();
+
+    // If any listener lacks a handler description, resolve all descriptions
+    // in one shot via the console API `getEventListeners()`.
+    let mut handler_descriptions: HashMap<String, String> = HashMap::new();
+    let has_missing = raw_listeners.iter().any(|l| {
+        l["handler"]["description"]
+            .as_str()
+            .unwrap_or("")
+            .is_empty()
+    });
+    if has_missing {
+        // Stash the element in a temp global so Runtime.evaluate can access it.
+        let _ = effective
+            .send_command(
+                "Runtime.callFunctionOn",
+                Some(serde_json::json!({
+                    "objectId": object_id,
+                    "functionDeclaration": "function() { window.__ac_tmp = this; }",
+                })),
+            )
+            .await;
+
+        // Use Runtime.evaluate with includeCommandLineAPI to access the
+        // DevTools-only getEventListeners() function.
+        let js = r"
+            (function() {
+                var result = {};
+                try {
+                    var listeners = getEventListeners(window.__ac_tmp);
+                    for (var type in listeners) {
+                        var arr = listeners[type];
+                        for (var i = 0; i < arr.length; i++) {
+                            var key = type + ':' + arr[i].useCapture + ':' + arr[i].once + ':' + arr[i].passive;
+                            result[key] = arr[i].listener.toString();
+                        }
+                    }
+                } catch(e) {}
+                delete window.__ac_tmp;
+                return JSON.stringify(result);
+            })()
+        ";
+
+        let mut eval_params = serde_json::json!({
+            "expression": js,
+            "returnByValue": true,
+            "includeCommandLineAPI": true,
+        });
+
+        // For same-origin frames, pass the frame's execution context.
+        if let Some(ctx_id) = frame_ctx
+            .as_ref()
+            .and_then(agentchrome::frame::execution_context_id)
+        {
+            eval_params["contextId"] = serde_json::json!(ctx_id);
+        }
+
+        if let Ok(eval) = effective
+            .send_command("Runtime.evaluate", Some(eval_params))
+            .await
+        {
+            if let Some(json_str) = eval["result"]["value"].as_str() {
+                if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(json_str) {
+                    handler_descriptions = map;
+                }
+            }
+        }
+    }
+
+    let listeners: Vec<EventListenerInfo> = raw_listeners
         .iter()
-        .map(|l| EventListenerInfo {
-            event_type: l["type"].as_str().unwrap_or("").to_string(),
-            use_capture: l["useCapture"].as_bool().unwrap_or(false),
-            once: l["once"].as_bool().unwrap_or(false),
-            passive: l["passive"].as_bool().unwrap_or(false),
-            handler: EventHandler {
-                description: l["handler"]["description"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
-                script_id: l["scriptId"].as_str().map(String::from),
-                line_number: l["lineNumber"].as_i64(),
-                column_number: l["columnNumber"].as_i64(),
-            },
+        .map(|l| {
+            let event_type = l["type"].as_str().unwrap_or("").to_string();
+            let use_capture = l["useCapture"].as_bool().unwrap_or(false);
+            let once = l["once"].as_bool().unwrap_or(false);
+            let passive = l["passive"].as_bool().unwrap_or(false);
+
+            let mut description = l["handler"]["description"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+
+            // Look up from console API results
+            if description.is_empty() {
+                let key = format!("{event_type}:{use_capture}:{once}:{passive}");
+                if let Some(desc) = handler_descriptions.get(&key) {
+                    description.clone_from(desc);
+                }
+            }
+
+            EventListenerInfo {
+                event_type,
+                use_capture,
+                once,
+                passive,
+                handler: EventHandler {
+                    description,
+                    script_id: l["scriptId"].as_str().map(String::from),
+                    line_number: l["lineNumber"].as_i64(),
+                    column_number: l["columnNumber"].as_i64(),
+                },
+            }
         })
         .collect();
 

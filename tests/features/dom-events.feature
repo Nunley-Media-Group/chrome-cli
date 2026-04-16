@@ -40,7 +40,7 @@ Feature: DOM Events Command
   # AC3: Frame-scoped event introspection
   Scenario: Event introspection within a frame
     Given a connected Chrome session on a page with an iframe containing event listeners
-    When I run "agentchrome dom --frame 0 events css:#framed-btn"
+    When I run "agentchrome dom --frame 1 events css:#framed-btn"
     Then the output JSON contains a "listeners" array
     And the listeners reflect the handlers attached in the frame context
     And the exit code should be 0
