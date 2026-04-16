@@ -1056,6 +1056,10 @@ pub struct PageSnapshotArgs {
     /// Save snapshot to file instead of stdout
     #[arg(long)]
     pub file: Option<PathBuf>,
+
+    /// Return only interactive and semantically meaningful elements (reduces token usage for AI agents)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `page find`.
@@ -1767,6 +1771,7 @@ EXAMPLES:
 }
 
 /// Arguments for `interact click`.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Args)]
 pub struct ClickArgs {
     /// Target element (UID like 's1' or CSS selector like 'css:#button')
@@ -1784,6 +1789,10 @@ pub struct ClickArgs {
     #[arg(long)]
     pub include_snapshot: bool,
 
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
+
     /// Wait strategy after click (e.g., for SPA navigation).
     /// If omitted, click returns immediately with a brief navigation check.
     #[arg(long, value_enum)]
@@ -1791,6 +1800,7 @@ pub struct ClickArgs {
 }
 
 /// Arguments for `interact click-at`.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Args)]
 pub struct ClickAtArgs {
     /// X coordinate in viewport pixels
@@ -1811,6 +1821,10 @@ pub struct ClickAtArgs {
     #[arg(long)]
     pub include_snapshot: bool,
 
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
+
     /// Wait strategy after click (e.g., for SPA navigation).
     /// If omitted, click returns immediately after dispatching.
     #[arg(long, value_enum)]
@@ -1826,6 +1840,10 @@ pub struct HoverArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `interact drag`.
@@ -1840,6 +1858,10 @@ pub struct DragArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `interact type`.
@@ -1856,6 +1878,10 @@ pub struct TypeArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `interact key`.
@@ -1872,6 +1898,10 @@ pub struct KeyArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Scroll direction for `interact scroll`.
@@ -1924,6 +1954,10 @@ pub struct ScrollArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for the `form` subcommand group.
@@ -2034,6 +2068,10 @@ pub struct FormFillArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `form fill-many`.
@@ -2050,6 +2088,10 @@ pub struct FormFillManyArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `form clear`.
@@ -2061,6 +2103,10 @@ pub struct FormClearArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `form upload`.
@@ -2076,6 +2122,10 @@ pub struct FormUploadArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for `form submit`.
@@ -2088,6 +2138,10 @@ pub struct FormSubmitArgs {
     /// Include updated accessibility snapshot in output
     #[arg(long)]
     pub include_snapshot: bool,
+
+    /// Use compact mode for the included snapshot (only interactive and landmark elements)
+    #[arg(long)]
+    pub compact: bool,
 }
 
 /// Arguments for the `console` subcommand group.

@@ -142,13 +142,11 @@ snapshot → identify target → interact → snapshot (verify)
 ```
 
 ```sh
-# Step 1: Get the current page state
-agentchrome page snapshot
+# Step 1: Get the current page state (use --compact to save tokens)
+agentchrome page snapshot --compact
 # Step 2: Identify the target element UID from the snapshot output
-# Step 3: Interact with the element
-agentchrome interact click s5
-# Step 4: Verify the action took effect
-agentchrome page snapshot
+# Step 3: Interact with the element (--include-snapshot --compact returns updated tree)
+agentchrome interact click s5 --include-snapshot --compact
 ```
 
 Always snapshot before interacting — UIDs are assigned dynamically and change when the page updates.
@@ -182,6 +180,7 @@ agentchrome page snapshot
 - **Minimize round-trips.** Combine related operations rather than making many small calls. For example, use `form fill-many` instead of multiple `form fill` calls.
 - **Use `--timeout` to prevent hangs.** Set a timeout on long-running commands so they fail fast instead of blocking indefinitely.
 - **Use `--include-snapshot` on interaction commands.** Commands like `interact click`, `form fill`, and `form fill-many` support `--include-snapshot` to return the updated accessibility tree in the same response, saving a separate `page snapshot` call.
+- **Use `--compact` to reduce token usage.** The `page snapshot --compact` flag filters the tree to only interactive and semantically meaningful elements, typically reducing output size by 50% or more. Add `--compact` to `--include-snapshot` on interaction commands too (e.g., `interact click s1 --include-snapshot --compact`).
 
 ## Error Handling for AI Agents
 
@@ -242,6 +241,7 @@ Errors are written to stderr. In JSON output mode (`--json`), error details are 
 - **Use `console follow` and `network follow` for debugging.** These commands stream real-time console messages and network requests, which is invaluable for diagnosing runtime errors and failed API calls. Use `--timeout` to auto-exit after a set duration.
 - **Use `--include-snapshot` to reduce round-trips.** Interaction commands (`interact click`, `form fill`, etc.) support `--include-snapshot` to return the updated accessibility tree, saving a separate `page snapshot` call.
 - **Use `page find` to locate elements by text or role.** Instead of scanning the full snapshot manually, use `page find "Submit" --role button` to locate specific elements quickly.
+- **Use `--compact` for token-efficient snapshots.** When context window space is limited, `page snapshot --compact` filters out decorative noise (InlineTextBox, LineBreak, empty containers) while preserving all interactive UIDs and landmark structure.
 
 ## Example Conversation
 

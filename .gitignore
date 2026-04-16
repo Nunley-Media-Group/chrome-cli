@@ -9,6 +9,10 @@ man/
 *~
 .idea/
 .vscode/
+.cursor/
+
+# Test fixtures
+tests/fixtures/
 
 # Claude local settings
 .claude/settings.local.json

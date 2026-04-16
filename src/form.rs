@@ -227,6 +227,7 @@ async fn resolve_target_to_backend_node_id(
 async fn take_snapshot(
     session: &mut ManagedSession,
     url: &str,
+    compact: bool,
 ) -> Result<serde_json::Value, AppError> {
     session.ensure_domain("Accessibility").await?;
 
@@ -247,7 +248,14 @@ async fn take_snapshot(
     };
     snapshot::write_snapshot_state(&state)?;
 
-    let snapshot_json = serde_json::to_value(&build_result.root)
+    // Apply compact filtering if requested
+    let root = if compact {
+        snapshot::compact_tree(&build_result.root)
+    } else {
+        build_result.root
+    };
+
+    let snapshot_json = serde_json::to_value(&root)
         .map_err(|e| AppError::snapshot_failed(&format!("failed to serialize snapshot: {e}")))?;
 
     Ok(snapshot_json)
@@ -600,7 +608,7 @@ async fn execute_fill(global: &GlobalOpts, args: &FormFillArgs) -> Result<(), Ap
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
         let url = get_current_url(&mut managed).await?;
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -663,7 +671,7 @@ async fn execute_fill_many(global: &GlobalOpts, args: &FormFillManyArgs) -> Resu
     // Take snapshot once after all fills if requested
     if args.include_snapshot {
         let url = get_current_url(&mut managed).await?;
-        let snapshot = take_snapshot(&mut managed, &url).await?;
+        let snapshot = take_snapshot(&mut managed, &url, args.compact).await?;
         let output = FillManyOutput::WithSnapshot { results, snapshot };
         if global.output.plain {
             if let FillManyOutput::WithSnapshot { results, .. } = &output {
@@ -703,7 +711,7 @@ async fn execute_clear(global: &GlobalOpts, args: &FormClearArgs) -> Result<(), 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
         let url = get_current_url(&mut managed).await?;
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -831,7 +839,7 @@ async fn execute_upload(global: &GlobalOpts, args: &FormUploadArgs) -> Result<()
     // --- Optionally take snapshot ---
     let snapshot = if args.include_snapshot {
         let url = get_current_url(&mut managed).await?;
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -956,7 +964,7 @@ async fn execute_submit(global: &GlobalOpts, args: &FormSubmitArgs) -> Result<()
         } else {
             pre_url
         };
-        Some(take_snapshot(&mut managed, &current_url).await?)
+        Some(take_snapshot(&mut managed, &current_url, args.compact).await?)
     } else {
         None
     };

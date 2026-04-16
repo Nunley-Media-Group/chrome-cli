@@ -1,0 +1,74 @@
+# File: tests/features/compact-snapshot-mode.feature
+#
+# Generated from: .claude/specs/feature-add-compact-snapshot-mode-ai-agent-token-efficiency/requirements.md
+# Issue: #162
+
+Feature: Compact Snapshot Mode
+  As an AI agent consuming agentchrome output
+  I want a compact snapshot mode that shows only interactive and semantically meaningful elements
+  So that I can understand page structure without consuming excessive context window tokens
+
+  # --- Happy Path ---
+
+  Scenario: Compact snapshot returns only interactive and landmark elements
+    Given a Chrome session connected to a page with mixed interactive and decorative elements
+    When I run page snapshot with the compact flag
+    Then the output includes interactive elements with UIDs
+    And the output includes landmark elements like headings and navigation
+    And the output does not include InlineTextBox nodes
+    And the output does not include LineBreak nodes
+    And the output does not include purely decorative generic containers
+
+  Scenario: Compact snapshot preserves hierarchy context
+    Given a Chrome session connected to a page with nested interactive elements inside landmarks
+    When I run page snapshot with the compact flag
+    Then interactive elements show correct indentation under their landmark ancestors
+    And intermediate generic containers between landmarks and interactive elements are collapsed
+
+  # --- Size Reduction ---
+
+  Scenario: Compact snapshot reduces output size significantly
+    Given a Chrome session connected to the SauceDemo inventory page
+    When I run page snapshot without the compact flag and count the lines
+    And I run page snapshot with the compact flag and count the lines
+    Then the compact output has at least 50% fewer lines than the full output
+    And all UIDs from the full output are present in the compact output
+
+  # --- Backward Compatibility ---
+
+  Scenario: Full snapshot remains default
+    Given a Chrome session connected to a page
+    When I run page snapshot without the compact flag
+    Then the output is the full accessibility tree with all nodes
+    And the output matches the pre-existing snapshot behavior
+
+  # --- Cross-Command Integration ---
+
+  Scenario: Compact mode with include-snapshot on form commands
+    Given a Chrome session connected to a page with form fields
+    When I run form fill with include-snapshot and compact flags
+    Then the response JSON contains a snapshot field
+    And the snapshot field contains only interactive and landmark elements
+
+  # --- UID Preservation ---
+
+  Scenario: Compact mode preserves all interactive UIDs
+    Given a Chrome session connected to a page with interactive elements
+    When I run page snapshot without the compact flag and collect all UIDs
+    And I run page snapshot with the compact flag and collect all UIDs
+    Then both UID sets are identical
+
+  # --- Flag Combinations ---
+
+  Scenario: Compact mode with verbose flag
+    Given a Chrome session connected to a page with interactive elements that have properties
+    When I run page snapshot with compact and verbose flags
+    Then the output includes compact-filtered nodes
+    And kept nodes include additional properties like checked or disabled or level
+
+  Scenario: Compact mode with JSON output
+    Given a Chrome session connected to a page
+    When I run page snapshot with compact and json flags
+    Then the output is valid JSON
+    And the JSON tree contains only interactive and landmark elements
+    And the JSON structure uses the standard SnapshotNode schema

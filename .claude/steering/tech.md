@@ -184,24 +184,11 @@ agentchrome form fill <uid> <value>
 
 1. Build in debug mode: `cargo build`
 2. Launch headless Chrome: `./target/debug/agentchrome connect --launch --headless`
-3. Exercise the feature/fix using the reproduction steps from `requirements.md` or the acceptance criteria
-4. Verify each AC produces the expected output against the real browser
-5. **Run the SauceDemo smoke test** (see below)
+3. Create a feature-specific test site (see Verification Gates below)
+4. Exercise the feature/fix against the test site using the acceptance criteria
+5. Verify each AC produces the expected output against the real browser
 6. Disconnect: `./target/debug/agentchrome connect disconnect`
 7. Kill any orphaned Chrome processes: `pkill -f 'chrome.*--remote-debugging' || true`
-
-#### SauceDemo Smoke Test (Required)
-
-**Every `/verifying-specs` run MUST include a smoke test against https://www.saucedemo.com/.** This validates the debug build against a real-world web application with login forms, navigation, and dynamic content.
-
-Minimum steps:
-
-1. Navigate to the site: `./target/debug/agentchrome navigate https://www.saucedemo.com/`
-2. Take a snapshot: `./target/debug/agentchrome page snapshot`
-3. Exercise the feature/fix against the site where applicable (e.g., form fill on the login page, screenshot, element finding, dialog handling)
-4. Verify the command output is correct and the page responds as expected
-
-If the feature under test is not directly exercisable against SauceDemo (e.g., a pure config or shell-completion change), the SauceDemo test still runs the navigate + snapshot steps as a baseline integration check.
 
 #### Requirements
 
@@ -209,8 +196,75 @@ If the feature under test is not directly exercisable against SauceDemo (e.g., a
 - During `/verifying-specs`, execute the smoke test task and record pass/fail results in the verification report
 - If the smoke test fails, treat it as a Critical finding — the implementation does not meet acceptance criteria
 - For defect fixes, the smoke test MUST reproduce the exact steps from the issue's reproduction section and confirm the bug no longer occurs
-- The SauceDemo smoke test results MUST be recorded in the verification report alongside the feature-specific smoke test results
 - **Spec sync after smoke-test fixes**: If the smoke test reveals new findings that require code changes beyond the original spec (e.g., a deeper root cause, an additional affected code path, or a different fix mechanism), the spec documents (`requirements.md`, `design.md`, `tasks.md`, `feature.gherkin`) MUST be updated to reflect the actual implementation before completing verification. The spec is the single source of truth — it must never diverge from what was shipped.
+
+---
+
+## Verification Gates
+
+Every `/verifying-specs` run MUST execute these gates. Gate results act as a ceiling on the overall verification status — a failing gate caps the status at "Partial" or lower.
+
+| Gate | Condition | Action | Pass Criteria |
+|------|-----------|--------|---------------|
+| Debug Build | Always | `cargo build 2>&1` | Exit code 0 |
+| Unit Tests | Always | `cargo test --lib 2>&1` | Exit code 0 |
+| Clippy | Always | `cargo clippy --all-targets 2>&1` | Exit code 0 |
+| Format Check | Always | `cargo fmt --check 2>&1` | Exit code 0 |
+| Feature Exercise | Always | See **Feature Exercise Gate** below | Exit code 0 AND all ACs verified |
+
+### Feature Exercise Gate
+
+This gate replaces generic third-party site testing with a **purpose-built test site** that targets the exact behavior under verification. It ensures the implementation works end-to-end against a real Chrome instance with controlled, deterministic content.
+
+#### Procedure
+
+1. **Create a test site.** Write a self-contained HTML file at `tests/fixtures/<feature-name>.html` that contains the exact DOM structure needed to exercise the feature's acceptance criteria. The file must:
+   - Be deterministic — no external dependencies, CDNs, or network requests
+   - Include all element types, roles, and structures referenced in the ACs
+   - Be minimal — only what's needed to verify the feature, not a full application
+   - Include an HTML comment at the top documenting which ACs it covers
+
+2. **Build from source.** Run `cargo build` to produce a fresh debug binary. Do NOT use a cached or pre-existing build.
+
+3. **Launch headless Chrome.** `./target/debug/agentchrome connect --launch --headless`
+
+4. **Navigate to the test site.** `./target/debug/agentchrome navigate file://<absolute-path-to-fixture>`
+
+5. **Exercise each AC.** Run the agentchrome commands that correspond to each acceptance criterion and verify the output matches expectations. Record pass/fail per AC.
+
+6. **Cleanup.** Disconnect and kill any orphaned Chrome processes.
+
+#### Test Fixture Guidelines
+
+- **One fixture per feature.** Each feature gets its own HTML file tailored to its ACs. Bug fixes reuse the fixture from the feature they affect, or create a minimal reproduction fixture.
+- **Name matches feature.** Use the same slug as the spec directory (e.g., `tests/fixtures/compact-snapshot-mode.html` for `feature-add-compact-snapshot-mode-*`).
+- **Committed to the repo.** Test fixtures are checked in alongside the feature code — they serve as living documentation of what the feature handles.
+- **No JavaScript required** unless the feature explicitly tests JS-dependent behavior (e.g., SPA navigation, dynamic content). Static HTML exercises most agentchrome features.
+
+#### Example
+
+For a compact snapshot feature, the fixture might include:
+```html
+<!-- AC1: mixed interactive/decorative elements -->
+<!-- AC2: nested interactive elements inside landmarks -->
+<!-- AC3: enough nodes to verify 50% reduction -->
+<!-- AC6: all interactive roles with UIDs -->
+<html>
+<body>
+  <nav><a href="#">Home</a><a href="#">About</a></nav>
+  <main>
+    <h1>Test Page</h1>
+    <div><div><div><button>Click Me</button></div></div></div>
+    <form>
+      <input type="text" placeholder="Name">
+      <select><option>A</option><option>B</option></select>
+      <input type="checkbox">
+      <button type="submit">Submit</button>
+    </form>
+  </main>
+</body>
+</html>
+```
 
 ### BDD Testing (Required for nmg-sdlc)
 

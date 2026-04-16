@@ -4321,6 +4321,50 @@ fn skill_output_conforms(_world: &mut SkillWorld) {
     // Validated by prior "stdout or stderr contains valid JSON" step
 }
 
+// =============================================================================
+// CompactSnapshotWorld — compact snapshot source-level tests (issue #162)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct CompactSnapshotWorld {
+    source_content: String,
+}
+
+#[given("the snapshot source file exists")]
+fn compact_snapshot_source_exists(world: &mut CompactSnapshotWorld) {
+    let path = project_root().join("src/snapshot.rs");
+    assert!(path.exists(), "snapshot.rs not found at {}", path.display());
+    world.source_content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to read snapshot.rs: {e}"));
+}
+
+#[when("I read the snapshot source")]
+fn compact_read_snapshot_source(_world: &mut CompactSnapshotWorld) {
+    // Source already loaded in Given step
+}
+
+#[then(expr = "the source contains {string}")]
+fn compact_source_contains(world: &mut CompactSnapshotWorld, expected: String) {
+    assert!(
+        world.source_content.contains(&expected),
+        "snapshot.rs does not contain '{expected}'"
+    );
+}
+
+const COMPACT_SNAPSHOT_CLI_TESTABLE: &[&str] = &[
+    "Compact flag is accepted on page snapshot",
+    "Compact flag is accepted on interact click",
+    "Compact flag is accepted on form fill",
+    "Compact flag is accepted on form clear",
+    "Compact flag is accepted on interact scroll",
+];
+
+const COMPACT_SNAPSHOT_SOURCE_TESTABLE: &[&str] = &[
+    "compact_tree source contains COMPACT_KEPT_ROLES constant",
+    "compact_tree source contains COMPACT_EXCLUDED_ROLES constant",
+    "compact_tree source contains the compact_tree function",
+];
+
 #[tokio::main]
 async fn main() {
     WorkflowWorld::run("tests/features/release-pipeline.feature").await;
@@ -4745,6 +4789,27 @@ async fn main() {
         .filter_run_and_exit(
             "tests/features/audit-lighthouse.feature",
             |_feature, _rule, scenario| AUDIT_TESTABLE_SCENARIOS.contains(&scenario.name.as_str()),
+        )
+        .await;
+
+    // Compact snapshot mode (issue #162) — CLI-testable scenarios (help text validation)
+    // and source-level scenarios (constant/function presence). Chrome-dependent scenarios
+    // are validated by unit tests in snapshot.rs and by manual smoke test.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/compact-snapshot-mode.feature",
+            |_feature, _rule, scenario| {
+                COMPACT_SNAPSHOT_CLI_TESTABLE.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    CompactSnapshotWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/compact-snapshot-mode.feature",
+            |_feature, _rule, scenario| {
+                COMPACT_SNAPSHOT_SOURCE_TESTABLE.contains(&scenario.name.as_str())
+            },
         )
         .await;
 }

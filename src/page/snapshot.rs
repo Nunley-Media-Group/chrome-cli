@@ -43,9 +43,16 @@ pub async fn execute_snapshot(
         eprintln!("warning: could not save snapshot state: {e}");
     }
 
+    // Apply compact filtering if requested
+    let root = if args.compact {
+        crate::snapshot::compact_tree(&build.root)
+    } else {
+        build.root
+    };
+
     // Plain/text output path
     if !global.output.json && !global.output.pretty {
-        let mut text = crate::snapshot::format_text(&build.root, args.verbose);
+        let mut text = crate::snapshot::format_text(&root, args.verbose);
         if build.truncated {
             text.push_str(&format!(
                 "[... truncated: {} nodes, showing first {}]\n",
@@ -65,7 +72,7 @@ pub async fn execute_snapshot(
     }
 
     // JSON output — add truncation info to root if applicable
-    let mut json_value = serde_json::to_value(&build.root).map_err(|e| AppError {
+    let mut json_value = serde_json::to_value(&root).map_err(|e| AppError {
         message: format!("serialization error: {e}"),
         code: ExitCode::GeneralError,
         custom_json: None,
