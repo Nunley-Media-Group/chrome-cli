@@ -31,6 +31,31 @@ const INTERACTIVE_ROLES: &[&str] = &[
     "treeitem",
 ];
 
+/// Roles preserved in compact mode because they carry semantic meaning.
+const COMPACT_KEPT_ROLES: &[&str] = &[
+    "banner",
+    "complementary",
+    "contentinfo",
+    "form",
+    "main",
+    "navigation",
+    "region",
+    "search",
+    "heading",
+    "list",
+    "listitem",
+    "table",
+    "row",
+    "cell",
+    "columnheader",
+    "rowheader",
+    "RootWebArea",
+    "document",
+];
+
+/// Roles unconditionally removed in compact mode (noise nodes).
+const COMPACT_EXCLUDED_ROLES: &[&str] = &["InlineTextBox", "LineBreak"];
+
 // =============================================================================
 // Internal CDP node representation
 // =============================================================================
@@ -463,6 +488,88 @@ fn collect_roles(value: &serde_json::Value, counts: &mut HashMap<String, usize>)
             collect_roles(child, counts);
         }
     }
+}
+
+// =============================================================================
+// Compact tree (token-efficient mode)
+// =============================================================================
+
+/// Produce a pruned copy of the snapshot tree that keeps only interactive
+/// elements (those with a UID) and semantically meaningful landmark/structure
+/// nodes, while collapsing decorative noise like `InlineTextBox`, `LineBreak`,
+/// and empty `generic` wrappers.
+pub fn compact_tree(root: &SnapshotNode) -> SnapshotNode {
+    // Root is always kept (it's RootWebArea/document, both in COMPACT_KEPT_ROLES).
+    compact_node(root).unwrap_or_else(|| SnapshotNode {
+        role: root.role.clone(),
+        name: root.name.clone(),
+        uid: root.uid.clone(),
+        properties: root.properties.clone(),
+        backend_dom_node_id: root.backend_dom_node_id,
+        children: vec![],
+    })
+}
+
+/// Recursively decide whether to keep a node and compact its children.
+///
+/// Returns `None` when the node (and entire subtree) should be removed.
+fn compact_node(node: &SnapshotNode) -> Option<SnapshotNode> {
+    // Rule 1: Always exclude noise roles.
+    if COMPACT_EXCLUDED_ROLES.contains(&node.role.as_str()) {
+        return None;
+    }
+
+    let has_uid = node.uid.is_some();
+    let is_kept_role = COMPACT_KEPT_ROLES.contains(&node.role.as_str());
+    let is_interactive = INTERACTIVE_ROLES.contains(&node.role.as_str());
+
+    // Rule 2: Always keep nodes with a UID or in COMPACT_KEPT_ROLES.
+    // Rule 3: Other nodes kept only if they have interactive descendants.
+    let keep = has_uid || is_kept_role || is_interactive || has_interactive_in_subtree(node);
+
+    if !keep {
+        return None;
+    }
+
+    // Rule 4: Text inlining — if a kept node with an empty name has a single
+    // StaticText child (before compacting), absorb the text into the parent's name.
+    // This must be checked before recursive compacting since StaticText nodes
+    // would otherwise be filtered out.
+    if node.name.is_empty() && node.children.len() == 1 && node.children[0].role == "StaticText" {
+        return Some(SnapshotNode {
+            role: node.role.clone(),
+            name: node.children[0].name.clone(),
+            uid: node.uid.clone(),
+            properties: node.properties.clone(),
+            backend_dom_node_id: node.backend_dom_node_id,
+            children: vec![],
+        });
+    }
+
+    // Recursively compact children.
+    let children: Vec<SnapshotNode> = node.children.iter().filter_map(compact_node).collect();
+
+    Some(SnapshotNode {
+        role: node.role.clone(),
+        name: node.name.clone(),
+        uid: node.uid.clone(),
+        properties: node.properties.clone(),
+        backend_dom_node_id: node.backend_dom_node_id,
+        children,
+    })
+}
+
+/// Returns `true` if any node in the subtree (excluding the node itself) has a UID.
+fn has_interactive_in_subtree(node: &SnapshotNode) -> bool {
+    for child in &node.children {
+        if child.uid.is_some() || INTERACTIVE_ROLES.contains(&child.role.as_str()) {
+            return true;
+        }
+        if has_interactive_in_subtree(child) {
+            return true;
+        }
+    }
+    false
 }
 
 // =============================================================================
@@ -1458,5 +1565,262 @@ mod tests {
         // button appears twice, others once
         assert_eq!(roles[0], "button");
         assert!(roles.len() <= 3);
+    }
+
+    // =========================================================================
+    // compact_tree tests
+    // =========================================================================
+
+    /// Helper to build a SnapshotNode literal for compact tests.
+    fn sn(role: &str, name: &str, uid: Option<&str>, children: Vec<SnapshotNode>) -> SnapshotNode {
+        SnapshotNode {
+            role: role.to_string(),
+            name: name.to_string(),
+            uid: uid.map(String::from),
+            properties: None,
+            backend_dom_node_id: None,
+            children,
+        }
+    }
+
+    #[test]
+    fn compact_tree_empty_tree() {
+        let root = sn("document", "", None, vec![]);
+        let result = compact_tree(&root);
+        assert_eq!(result.role, "document");
+        assert!(result.children.is_empty());
+    }
+
+    #[test]
+    fn compact_tree_interactive_only_kept() {
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![
+                sn("button", "Submit", Some("s1"), vec![]),
+                sn("link", "Home", Some("s2"), vec![]),
+            ],
+        );
+        let result = compact_tree(&root);
+        assert_eq!(result.children.len(), 2);
+        assert_eq!(result.children[0].uid.as_deref(), Some("s1"));
+        assert_eq!(result.children[1].uid.as_deref(), Some("s2"));
+    }
+
+    #[test]
+    fn compact_tree_excluded_roles_removed() {
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![
+                sn("InlineTextBox", "text", None, vec![]),
+                sn("LineBreak", "", None, vec![]),
+                sn("button", "OK", Some("s1"), vec![]),
+            ],
+        );
+        let result = compact_tree(&root);
+        assert_eq!(result.children.len(), 1);
+        assert_eq!(result.children[0].role, "button");
+    }
+
+    #[test]
+    fn compact_tree_kept_roles_preserved() {
+        let root = sn(
+            "RootWebArea",
+            "Page",
+            None,
+            vec![
+                sn(
+                    "navigation",
+                    "Nav",
+                    None,
+                    vec![sn("link", "Home", Some("s1"), vec![])],
+                ),
+                sn("heading", "Title", None, vec![]),
+                sn("main", "Content", None, vec![]),
+            ],
+        );
+        let result = compact_tree(&root);
+        assert_eq!(result.children.len(), 3);
+        assert_eq!(result.children[0].role, "navigation");
+        assert_eq!(result.children[1].role, "heading");
+        assert_eq!(result.children[2].role, "main");
+    }
+
+    #[test]
+    fn compact_tree_generic_with_interactive_descendants_kept() {
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![sn(
+                "generic",
+                "",
+                None,
+                vec![sn("button", "Click", Some("s1"), vec![])],
+            )],
+        );
+        let result = compact_tree(&root);
+        assert_eq!(result.children.len(), 1);
+        assert_eq!(result.children[0].role, "generic");
+        assert_eq!(result.children[0].children[0].role, "button");
+    }
+
+    #[test]
+    fn compact_tree_generic_without_interactive_descendants_removed() {
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![sn(
+                "generic",
+                "",
+                None,
+                vec![sn("StaticText", "Just text", None, vec![])],
+            )],
+        );
+        let result = compact_tree(&root);
+        assert!(result.children.is_empty());
+    }
+
+    #[test]
+    fn compact_tree_text_inlining() {
+        // A heading with empty name and a single StaticText child should absorb the text.
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![sn(
+                "heading",
+                "",
+                None,
+                vec![sn("StaticText", "Welcome", None, vec![])],
+            )],
+        );
+        let result = compact_tree(&root);
+        assert_eq!(result.children.len(), 1);
+        assert_eq!(result.children[0].role, "heading");
+        assert_eq!(result.children[0].name, "Welcome");
+        assert!(result.children[0].children.is_empty());
+    }
+
+    #[test]
+    fn compact_tree_text_inlining_skipped_when_name_present() {
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![sn(
+                "heading",
+                "Already Named",
+                None,
+                vec![sn("StaticText", "Ignored", None, vec![])],
+            )],
+        );
+        let result = compact_tree(&root);
+        assert_eq!(result.children[0].name, "Already Named");
+    }
+
+    #[test]
+    fn compact_tree_uid_preservation() {
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![
+                sn(
+                    "generic",
+                    "",
+                    None,
+                    vec![
+                        sn("button", "A", Some("s1"), vec![]),
+                        sn(
+                            "generic",
+                            "",
+                            None,
+                            vec![sn("textbox", "B", Some("s2"), vec![])],
+                        ),
+                    ],
+                ),
+                sn("link", "C", Some("s3"), vec![]),
+            ],
+        );
+        let result = compact_tree(&root);
+        // Collect all UIDs from compacted tree
+        fn collect_uids(node: &SnapshotNode, uids: &mut Vec<String>) {
+            if let Some(ref uid) = node.uid {
+                uids.push(uid.clone());
+            }
+            for child in &node.children {
+                collect_uids(child, uids);
+            }
+        }
+        let mut uids = vec![];
+        collect_uids(&result, &mut uids);
+        uids.sort();
+        assert_eq!(uids, vec!["s1", "s2", "s3"]);
+    }
+
+    #[test]
+    fn compact_tree_hierarchy_context_preserved() {
+        // navigation > generic > button should keep the generic as hierarchy context
+        let root = sn(
+            "RootWebArea",
+            "Page",
+            None,
+            vec![sn(
+                "navigation",
+                "Nav",
+                None,
+                vec![sn(
+                    "list",
+                    "",
+                    None,
+                    vec![sn(
+                        "listitem",
+                        "",
+                        None,
+                        vec![sn("link", "Home", Some("s1"), vec![])],
+                    )],
+                )],
+            )],
+        );
+        let result = compact_tree(&root);
+        // navigation > list > listitem > link hierarchy should be preserved
+        assert_eq!(result.children[0].role, "navigation");
+        assert_eq!(result.children[0].children[0].role, "list");
+        assert_eq!(result.children[0].children[0].children[0].role, "listitem");
+        assert_eq!(
+            result.children[0].children[0].children[0].children[0].role,
+            "link"
+        );
+    }
+
+    #[test]
+    fn compact_tree_deeply_nested_interactive_preserves_path() {
+        let root = sn(
+            "document",
+            "Page",
+            None,
+            vec![sn(
+                "generic",
+                "",
+                None,
+                vec![sn(
+                    "generic",
+                    "",
+                    None,
+                    vec![sn("checkbox", "Agree", Some("s1"), vec![])],
+                )],
+            )],
+        );
+        let result = compact_tree(&root);
+        // Both generic containers should be kept because they lead to an interactive node
+        assert_eq!(result.children.len(), 1);
+        assert_eq!(result.children[0].role, "generic");
+        assert_eq!(result.children[0].children[0].role, "generic");
+        assert_eq!(result.children[0].children[0].children[0].role, "checkbox");
     }
 }

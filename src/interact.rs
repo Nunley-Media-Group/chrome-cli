@@ -1011,6 +1011,7 @@ async fn get_current_url(managed: &mut ManagedSession) -> Result<String, AppErro
 async fn take_snapshot(
     session: &mut ManagedSession,
     url: &str,
+    compact: bool,
 ) -> Result<serde_json::Value, AppError> {
     // Enable Accessibility domain
     session.ensure_domain("Accessibility").await?;
@@ -1035,8 +1036,15 @@ async fn take_snapshot(
     };
     snapshot::write_snapshot_state(&state)?;
 
+    // Apply compact filtering if requested
+    let root = if compact {
+        snapshot::compact_tree(&build_result.root)
+    } else {
+        build_result.root
+    };
+
     // Serialize root node as JSON
-    let snapshot_json = serde_json::to_value(&build_result.root)
+    let snapshot_json = serde_json::to_value(&root)
         .map_err(|e| AppError::snapshot_failed(&format!("failed to serialize snapshot: {e}")))?;
 
     Ok(snapshot_json)
@@ -1333,7 +1341,7 @@ async fn execute_scroll(global: &GlobalOpts, args: &ScrollArgs) -> Result<(), Ap
             .as_str()
             .unwrap_or("")
             .to_string();
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -1441,7 +1449,7 @@ async fn execute_click(global: &GlobalOpts, args: &ClickArgs) -> Result<(), AppE
 
     // Take snapshot if requested
     let snapshot = if args.include_snapshot {
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -1529,7 +1537,7 @@ async fn execute_click_at(global: &GlobalOpts, args: &ClickAtArgs) -> Result<(),
         } else {
             get_current_url(&mut managed).await?
         };
-        Some(take_snapshot(&mut managed, &snap_url).await?)
+        Some(take_snapshot(&mut managed, &snap_url, args.compact).await?)
     } else {
         None
     };
@@ -1585,7 +1593,7 @@ async fn execute_hover(global: &GlobalOpts, args: &HoverArgs) -> Result<(), AppE
             .as_str()
             .unwrap_or("")
             .to_string();
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -1639,7 +1647,7 @@ async fn execute_drag(global: &GlobalOpts, args: &DragArgs) -> Result<(), AppErr
             .as_str()
             .unwrap_or("")
             .to_string();
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -1693,7 +1701,7 @@ async fn execute_type(global: &GlobalOpts, args: &TypeArgs) -> Result<(), AppErr
             .as_str()
             .unwrap_or("")
             .to_string();
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };
@@ -1744,7 +1752,7 @@ async fn execute_key(global: &GlobalOpts, args: &KeyArgs) -> Result<(), AppError
             .as_str()
             .unwrap_or("")
             .to_string();
-        Some(take_snapshot(&mut managed, &url).await?)
+        Some(take_snapshot(&mut managed, &url, args.compact).await?)
     } else {
         None
     };

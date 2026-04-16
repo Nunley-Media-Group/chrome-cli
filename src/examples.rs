@@ -136,6 +136,12 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: None,
                 },
                 ExampleEntry {
+                    cmd: "agentchrome page snapshot --compact".into(),
+                    description: "Compact snapshot with only interactive and landmark elements"
+                        .into(),
+                    flags: Some(vec!["--compact".into()]),
+                },
+                ExampleEntry {
                     cmd: "agentchrome page screenshot --full-page --file page.png".into(),
                     description: "Take a full-page screenshot".into(),
                     flags: Some(vec!["--full-page".into(), "--file".into()]),
