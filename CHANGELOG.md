@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-04-16
+
+### Added
+
+- Add `page hittest` command for click debugging that reveals the actual hit target, intercepting overlays, and stacked elements at viewport coordinates via CDP `DOM.getNodeForLocation` and `elementsFromPoint()`. Includes overlay detection with workaround suggestions, z-index stack enumeration, frame-scoped hit testing with `--frame`, and built-in examples (#191)
+
 ## [1.18.0] - 2026-04-16
 
 ### Added

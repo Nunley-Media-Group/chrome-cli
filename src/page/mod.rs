@@ -1,5 +1,6 @@
 mod element;
 mod find;
+mod hittest;
 mod screenshot;
 mod snapshot;
 mod text;
@@ -103,6 +104,7 @@ pub async fn execute_page(global: &GlobalOpts, args: &PageArgs) -> Result<(), Ap
         PageCommand::Wait(wait_args) => wait::execute_wait(global, wait_args, frame).await,
         PageCommand::Frames => execute_frames(global).await,
         PageCommand::Workers => execute_workers(global).await,
+        PageCommand::HitTest(ht_args) => hittest::execute_hittest(global, ht_args, frame).await,
     }
 }
 
