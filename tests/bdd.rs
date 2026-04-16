@@ -4363,6 +4363,11 @@ const COMPACT_SNAPSHOT_SOURCE_TESTABLE: &[&str] = &[
     "compact_tree source contains the compact_tree function",
 ];
 
+const DOM_EVENTS_TESTABLE_SCENARIOS: &[&str] = &[
+    "Help text includes event listener description",
+    "Examples include dom events",
+];
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -4808,6 +4813,17 @@ async fn main() {
             "tests/features/compact-snapshot-mode.feature",
             |_feature, _rule, scenario| {
                 COMPACT_SNAPSHOT_SOURCE_TESTABLE.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // DOM events command (issue #192) — only CLI-testable scenarios (help text, examples).
+    // Chrome-dependent scenarios verified via manual smoke test.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/dom-events.feature",
+            |_feature, _rule, scenario| {
+                DOM_EVENTS_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

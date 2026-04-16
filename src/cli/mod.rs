@@ -2695,6 +2695,25 @@ EXAMPLES:
   agentchrome dom tree --root css:div.content"
     )]
     Tree(DomTreeArgs),
+
+    /// List event listeners attached to an element
+    #[command(
+        long_about = "List all event listeners attached to a DOM element. Shows listeners \
+            registered via addEventListener and inline handlers (e.g., onclick). Output \
+            includes event type, capture/bubble phase, once/passive flags, and handler \
+            source location.",
+        after_long_help = "\
+EXAMPLES:
+  # List listeners by UID
+  agentchrome dom events s3
+
+  # List listeners by CSS selector
+  agentchrome dom events css:button
+
+  # List listeners in a frame
+  agentchrome dom --frame 0 events css:button"
+    )]
+    Events(DomNodeIdArgs),
 }
 
 /// Arguments for `dom select`.

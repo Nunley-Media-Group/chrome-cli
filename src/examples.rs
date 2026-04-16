@@ -218,6 +218,11 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     description: "Query elements inside shadow DOM".into(),
                     flags: Some(vec!["--pierce-shadow".into()]),
                 },
+                ExampleEntry {
+                    cmd: "agentchrome dom events css:button".into(),
+                    description: "List event listeners on an element".into(),
+                    flags: None,
+                },
             ],
         },
         CommandGroupSummary {
