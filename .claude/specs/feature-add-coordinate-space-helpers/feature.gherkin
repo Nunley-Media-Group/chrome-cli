@@ -1,0 +1,188 @@
+# File: tests/features/coordinate-space-helpers.feature
+#
+# Generated from: .claude/specs/feature-add-coordinate-space-helpers/requirements.md
+# Issue: #198
+
+Feature: Coordinate Space Helpers for Frame-Aware Coordinate Resolution
+  As a browser automation engineer working with coordinate-based interactions across frames
+  I want coordinate resolution helpers that translate between frame-local and page-level coordinates plus element-relative and percentage-based coordinate options
+  So that I can reliably target elements without manually recalculating coordinates when viewport dimensions shift between the main page and iframes
+
+  Background:
+    Given headless Chrome is running and a session is connected
+    And the test fixture "tests/fixtures/coordinate-space-helpers.html" is loaded
+
+  # --- Happy Path: page coords ---
+
+  Scenario: AC1 — Resolve coordinates for a selector in the main frame
+    Given the main-frame element "#submit" has bounding client rect {x: 100, y: 200, width: 80, height: 32}
+    When I run "page coords --selector css:#submit"
+    Then the exit code is 0
+    And stdout is JSON containing:
+      | path                         | value                                 |
+      | frame.index                  | 0                                     |
+      | frameLocal.boundingBox.x     | 100                                   |
+      | frameLocal.boundingBox.y     | 200                                   |
+      | frameLocal.boundingBox.width | 80                                    |
+      | frameLocal.boundingBox.height| 32                                    |
+      | frameLocal.center.x          | 140                                   |
+      | frameLocal.center.y          | 216                                   |
+      | page.boundingBox.x           | 100                                   |
+      | page.boundingBox.y           | 200                                   |
+      | page.center.x                | 140                                   |
+      | page.center.y                | 216                                   |
+      | frameOffset.x                | 0                                     |
+      | frameOffset.y                | 0                                     |
+
+  Scenario: AC2 — Resolve coordinates for a selector in a nested iframe
+    Given the iframe at index 1 is offset (50, 100) in the page
+    And the element "#inner" inside frame 1 has bounding client rect {x: 10, y: 20, width: 80, height: 32}
+    When I run "page coords --frame 1 --selector css:#inner"
+    Then the exit code is 0
+    And stdout is JSON containing:
+      | path                         | value |
+      | frame.index                  | 1     |
+      | frameLocal.boundingBox.x     | 10    |
+      | frameLocal.boundingBox.y     | 20    |
+      | page.boundingBox.x           | 60    |
+      | page.boundingBox.y           | 120   |
+      | frameLocal.center.x          | 50    |
+      | frameLocal.center.y          | 36    |
+      | page.center.x                | 100   |
+      | page.center.y                | 136   |
+      | frameOffset.x                | 50    |
+      | frameOffset.y                | 100   |
+
+  Scenario: AC3 — Resolve coordinates for a UID target
+    Given a prior "page snapshot" assigned UID "s7" to an element with bounding client rect {x: 200, y: 300, width: 120, height: 40}
+    When I run "page coords --selector s7"
+    Then the exit code is 0
+    And "frameLocal.boundingBox" matches {x: 200, y: 300, width: 120, height: 40}
+    And "page.boundingBox" matches {x: 200, y: 300, width: 120, height: 40}
+
+  # --- Happy Path: --relative-to on coord-dispatching commands ---
+
+  Scenario: AC4 — Click at an absolute offset within an element
+    Given a "<button>" with bounding client rect {x: 100, y: 200, width: 80, height: 32}
+    When I run "interact click-at 10 5 --relative-to css:button"
+    Then the exit code is 0
+    And the click was dispatched at page coordinates (110, 205)
+    And stdout "clicked_at" is {x: 110, y: 205}
+
+  Scenario: AC5 — Click at a percentage position within an element
+    Given a "<div id='target'>" with bounding client rect {x: 100, y: 200, width: 200, height: 100}
+    When I run "interact click-at 50% 50% --relative-to css:#target"
+    Then the exit code is 0
+    And the click was dispatched at page coordinates (200, 250)
+    And stdout "clicked_at" is {x: 200, y: 250}
+
+  Scenario Outline: AC5 — 0% and 100% boundary percentages resolve to element edges
+    Given a "<div id='box'>" with bounding client rect {x: 100, y: 200, width: 200, height: 100}
+    When I run "interact click-at <x> <y> --relative-to css:#box"
+    Then the click was dispatched at page coordinates (<px>, <py>)
+
+    Examples:
+      | x    | y    | px  | py  |
+      | 0%   | 0%   | 100 | 200 |
+      | 100% | 100% | 299 | 299 |
+      | 50%  | 0%   | 200 | 200 |
+      | 0%   | 50%  | 100 | 250 |
+
+  Scenario: AC6 — Mixed absolute and percentage coordinates on the same command
+    Given a "<div>" with bounding client rect {x: 100, y: 200, width: 200, height: 100}
+    When I run "interact click-at 50% 10 --relative-to css:div"
+    Then the exit code is 0
+    And the click was dispatched at page coordinates (200, 210)
+
+  Scenario: AC7 — --relative-to applies to drag-at, mousedown-at, and mouseup-at
+    Given a "<div>" with bounding client rect {x: 100, y: 200, width: 200, height: 100}
+    When I run "interact drag-at 0 0 100% 100% --relative-to css:div"
+    Then the exit code is 0
+    And the drag started at page coordinates (100, 200) and ended at (299, 299)
+    And stdout "dragged_at.from" is {x: 100, y: 200} and "dragged_at.to" is {x: 299, y: 299}
+
+  Scenario: AC7 — mousedown-at with --relative-to dispatches at resolved coordinates
+    Given a "<div>" with bounding client rect {x: 100, y: 200, width: 200, height: 100}
+    When I run "interact mousedown-at 50% 50% --relative-to css:div"
+    Then the exit code is 0
+    And stdout "mousedown_at" is {x: 200, y: 250}
+
+  Scenario: AC7 — mouseup-at with --relative-to dispatches at resolved coordinates
+    Given a "<div>" with bounding client rect {x: 100, y: 200, width: 200, height: 100}
+    When I run "interact mouseup-at 50% 50% --relative-to css:div"
+    Then the exit code is 0
+    And stdout "mouseup_at" is {x: 200, y: 250}
+
+  Scenario: AC8 — --relative-to combined with --frame resolves in the frame's space then applies offset
+    Given the iframe at index 1 is offset (50, 100) in the page
+    And a "<button>" inside frame 1 has bounding client rect {x: 10, y: 20, width: 80, height: 32}
+    When I run "interact click-at 50% 50% --frame 1 --relative-to css:button"
+    Then the exit code is 0
+    And the click was dispatched at page-global coordinates (100, 136)
+    And stdout "clicked_at" is {x: 100, y: 136}
+
+  # --- Error Handling ---
+
+  Scenario: AC9 — Missing selector on page coords produces structured error
+    Given no element on the page matches "css:#does-not-exist"
+    When I run "page coords --selector css:#does-not-exist"
+    Then the exit code is 3
+    And stderr is a single JSON object with fields "error" and "code"
+    And stdout is empty
+
+  Scenario: AC10 — Invalid percentage value produces a single structured error
+    Given the page is loaded
+    When I run "interact click-at 150% 50% --relative-to css:button"
+    Then the exit code is 1
+    And stderr contains exactly one JSON error object
+    And no mouse event was dispatched to Chrome
+
+  Scenario: AC11 — --relative-to with missing element errors before dispatch
+    Given no element on the page matches "css:#missing"
+    When I run "interact click-at 50% 50% --relative-to css:#missing"
+    Then the exit code is 3
+    And stderr contains exactly one JSON error object
+    And no mouse event was dispatched to Chrome
+
+  Scenario: Percentage coordinates without --relative-to are rejected
+    Given the page is loaded
+    When I run "interact click-at 50% 50%"
+    Then the exit code is 1
+    And stderr contains exactly one JSON error object mentioning "--relative-to"
+    And no mouse event was dispatched to Chrome
+
+  # --- Documentation discoverability ---
+
+  Scenario: AC12 — examples interact includes --relative-to coordinate helper examples
+    When I run "examples interact"
+    Then the output contains a line invoking "click-at" with "--relative-to"
+    And the output contains a line using percentage coordinates like "50%"
+
+  Scenario: AC12 — examples page includes page coords examples
+    When I run "examples page"
+    Then the output contains a line invoking "page coords --selector"
+    And the output contains a line invoking "page coords --frame"
+
+  # --- Regression guard (FR10) ---
+
+  Scenario: Absolute-coordinate click-at continues to work unchanged
+    Given a "<button>" at absolute page coordinates (150, 250)
+    When I run "interact click-at 150 250"
+    Then the exit code is 0
+    And the click was dispatched at page coordinates (150, 250)
+    And stdout "clicked_at" is {x: 150, y: 250}
+
+  Scenario: Negative pixel values continue to parse as Pixels (regression)
+    Given the page is loaded
+    When I run "interact click-at -10 -10"
+    Then the command parses without error
+    And the click was dispatched at page coordinates (-10, -10)
+
+  # --- Cross-check: page coords and click-at --relative-to agree ---
+
+  Scenario: page coords center matches click-at 50% 50% dispatch coordinates
+    Given a "<button>" with bounding client rect {x: 100, y: 200, width: 80, height: 32}
+    When I run "page coords --selector css:button"
+    And I capture "page.center" as (cx, cy)
+    And I run "interact click-at 50% 50% --relative-to css:button"
+    Then "clicked_at" equals (cx, cy)

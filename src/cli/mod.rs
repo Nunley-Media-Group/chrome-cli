@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 
+use crate::coords::CoordValue;
+
 #[derive(Parser)]
 #[command(
     name = "agentchrome",
@@ -1132,6 +1134,30 @@ EXAMPLES:
   agentchrome page analyze --frame 1"
     )]
     Analyze,
+
+    /// Resolve a selector to frame-local and page-global coordinates
+    #[command(
+        long_about = "Resolve a CSS selector or snapshot UID to frame-local and page-global \
+            bounding-box and center coordinates. Returns a JSON object with 'frame', \
+            'frameLocal', 'page', and 'frameOffset' fields. Useful for verifying what \
+            coordinates a subsequent 'interact click-at --relative-to' would dispatch, \
+            and for diagnosing coordinate mismatches when working with iframes.\n\n\
+            Selector forms:\n  \
+              css:#submit     — standard CSS selector (prefix 'css:')\n  \
+              s7              — snapshot UID from a prior 'page snapshot' run\n\n\
+            Use --frame to resolve in a specific iframe's coordinate space.",
+        after_long_help = "\
+EXAMPLES:
+  # Resolve coordinates for a main-frame element
+  agentchrome page coords --selector \"css:#submit\"
+
+  # Resolve coordinates for an element inside frame 1
+  agentchrome page coords --frame 1 --selector \"css:#inner\"
+
+  # Resolve by snapshot UID
+  agentchrome page coords --selector s7"
+    )]
+    Coords(PageCoordsArgs),
 }
 
 /// Image format for screenshots.
@@ -2203,11 +2229,18 @@ pub struct ClickArgs {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Args)]
 pub struct ClickAtArgs {
-    /// X coordinate in viewport pixels
-    pub x: f64,
+    /// X coordinate: absolute pixels (e.g., 100) or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub x: CoordValue,
 
-    /// Y coordinate in viewport pixels
-    pub y: f64,
+    /// Y coordinate: absolute pixels (e.g., 200) or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub y: CoordValue,
+
+    /// Resolve X/Y as offsets or percentages relative to this element's top-left corner.
+    /// Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit).
+    #[arg(long = "relative-to")]
+    pub relative_to: Option<String>,
 
     /// Perform a double-click instead of single click (conflicts with --right)
     #[arg(long, conflicts_with = "right")]
@@ -2267,17 +2300,26 @@ pub struct DragArgs {
 /// Arguments for `interact drag-at`.
 #[derive(Args)]
 pub struct DragAtArgs {
-    /// Source X coordinate in viewport pixels
-    pub from_x: f64,
+    /// Source X coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub from_x: CoordValue,
 
-    /// Source Y coordinate in viewport pixels
-    pub from_y: f64,
+    /// Source Y coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub from_y: CoordValue,
 
-    /// Target X coordinate in viewport pixels
-    pub to_x: f64,
+    /// Target X coordinate: absolute pixels or percentage (e.g., 100%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub to_x: CoordValue,
 
-    /// Target Y coordinate in viewport pixels
-    pub to_y: f64,
+    /// Target Y coordinate: absolute pixels or percentage (e.g., 100%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub to_y: CoordValue,
+
+    /// Resolve from/to coordinates as offsets or percentages relative to this element.
+    /// Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit).
+    #[arg(long = "relative-to")]
+    pub relative_to: Option<String>,
 
     /// Number of intermediate mousemove steps for interpolated drag movement
     #[arg(long)]
@@ -2295,11 +2337,18 @@ pub struct DragAtArgs {
 /// Arguments for `interact mousedown-at`.
 #[derive(Args)]
 pub struct MouseDownAtArgs {
-    /// X coordinate in viewport pixels
-    pub x: f64,
+    /// X coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub x: CoordValue,
 
-    /// Y coordinate in viewport pixels
-    pub y: f64,
+    /// Y coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub y: CoordValue,
+
+    /// Resolve X/Y as offsets or percentages relative to this element's top-left corner.
+    /// Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit).
+    #[arg(long = "relative-to")]
+    pub relative_to: Option<String>,
 
     /// Mouse button to press
     #[arg(long, value_enum)]
@@ -2317,11 +2366,18 @@ pub struct MouseDownAtArgs {
 /// Arguments for `interact mouseup-at`.
 #[derive(Args)]
 pub struct MouseUpAtArgs {
-    /// X coordinate in viewport pixels
-    pub x: f64,
+    /// X coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub x: CoordValue,
 
-    /// Y coordinate in viewport pixels
-    pub y: f64,
+    /// Y coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+    #[arg(value_parser = clap::value_parser!(CoordValue), allow_hyphen_values = true)]
+    pub y: CoordValue,
+
+    /// Resolve X/Y as offsets or percentages relative to this element's top-left corner.
+    /// Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit).
+    #[arg(long = "relative-to")]
+    pub relative_to: Option<String>,
 
     /// Mouse button to release
     #[arg(long, value_enum)]
@@ -2903,6 +2959,14 @@ pub struct PageHitTestArgs {
 
     /// Y viewport coordinate
     pub y: u32,
+}
+
+/// Arguments for `page coords`.
+#[derive(Args)]
+pub struct PageCoordsArgs {
+    /// Element target: UID from 'page snapshot' (e.g., s7) or CSS selector (e.g., css:#submit)
+    #[arg(long)]
+    pub selector: String,
 }
 
 /// Arguments for `page wait`.

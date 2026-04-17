@@ -10,60 +10,11 @@ use crate::cli::{
     InteractCommand, KeyArgs, MouseButton, MouseDownAtArgs, MouseUpAtArgs, ScrollArgs,
     ScrollDirection, TypeArgs, WaitUntil,
 };
+use crate::coord_helpers::{frame_viewport_offset, resolve_element_box};
 use crate::navigate::{DEFAULT_NAVIGATE_TIMEOUT_MS, wait_for_event, wait_for_network_idle};
 use crate::output::{print_output, setup_session};
 use crate::snapshot;
-
-// =============================================================================
-// Frame helpers
-// =============================================================================
-
-/// Get the top-left offset of a frame's viewport in page coordinates.
-///
-/// Used by `click-at --frame N` to translate frame-local coordinates to page-global ones.
-/// Returns `(0.0, 0.0)` for the main frame.
-async fn get_frame_viewport_offset(
-    managed: &mut ManagedSession,
-    frame_ctx: &agentchrome::frame::FrameContext,
-) -> Result<(f64, f64), AppError> {
-    let Some(frame_id) = agentchrome::frame::frame_id(frame_ctx) else {
-        return Ok((0.0, 0.0)); // main frame — no offset
-    };
-
-    // Use DOM.getFrameOwner to get the backendNodeId of the <iframe> element
-    let owner = managed
-        .send_command(
-            "DOM.getFrameOwner",
-            Some(serde_json::json!({ "frameId": frame_id })),
-        )
-        .await
-        .map_err(|e| AppError::interaction_failed("get_frame_owner", &e.to_string()))?;
-
-    let backend_node_id = owner["backendNodeId"].as_i64().unwrap_or(0);
-    if backend_node_id == 0 {
-        return Ok((0.0, 0.0));
-    }
-
-    // Get the box model of the <iframe> element in page coordinates
-    let box_model = managed
-        .send_command(
-            "DOM.getBoxModel",
-            Some(serde_json::json!({ "backendNodeId": backend_node_id })),
-        )
-        .await
-        .map_err(|e| AppError::interaction_failed("get_frame_box_model", &e.to_string()))?;
-
-    let content = box_model["model"]["content"].as_array();
-    let (frame_x, frame_y) = if let Some(c) = content {
-        let x = c.first().and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-        let y = c.get(1).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-        (x, y)
-    } else {
-        (0.0, 0.0)
-    };
-
-    Ok((frame_x, frame_y))
-}
+use agentchrome::coords::{CoordValue, resolve_relative_coords};
 
 // =============================================================================
 // Output types
@@ -1698,29 +1649,72 @@ async fn execute_click(
     }
 }
 
+/// Extract a pixel value from a `CoordValue`, returning an error if it is a percentage
+/// and no `--relative-to` was provided.
+fn extract_pixels_no_relative_to(v: CoordValue, axis: &str) -> Result<f64, AppError> {
+    match v {
+        CoordValue::Pixels(px) => Ok(px),
+        CoordValue::Percent(_) => Err(AppError {
+            message: format!("percentage coordinates require --relative-to (axis: {axis})"),
+            code: agentchrome::error::ExitCode::GeneralError,
+            custom_json: None,
+        }),
+    }
+}
+
 /// Execute the `interact click-at` command.
+#[allow(clippy::too_many_lines)]
 async fn execute_click_at(
     global: &GlobalOpts,
     args: &ClickAtArgs,
     frame: Option<&str>,
 ) -> Result<(), AppError> {
+    // Validate percentage coordinates before establishing a session so that the error message
+    // references --relative-to even when Chrome is not reachable.
+    if args.relative_to.is_none() {
+        extract_pixels_no_relative_to(args.x, "x")?;
+        extract_pixels_no_relative_to(args.y, "y")?;
+    }
+
     let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
     // Resolve frame context for coordinate translation
-    let frame_ctx =
+    let mut frame_ctx =
         crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    // Translate frame-local coordinates to page-global coordinates
-    let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
-        get_frame_viewport_offset(&mut managed, ctx).await?
+    let (click_x, click_y, output_x, output_y) = if let Some(ref selector) = args.relative_to {
+        // Ensure DOM domain is available
+        {
+            let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+                agentchrome::frame::frame_session_mut(ctx, &mut managed)
+            } else {
+                &mut managed
+            };
+            eff_mut.ensure_domain("DOM").await?;
+        }
+        // Resolve element bounding box and frame offset
+        let element_box = resolve_element_box(&managed, frame_ctx.as_ref(), selector).await?;
+        let frame_offset = if let Some(ref ctx) = frame_ctx {
+            frame_viewport_offset(&managed, ctx).await?
+        } else {
+            (0.0, 0.0)
+        };
+        let (rx, ry) = resolve_relative_coords(args.x, args.y, element_box, frame_offset);
+        (rx, ry, rx, ry)
     } else {
-        (0.0, 0.0)
+        // Existing absolute-coordinate path — unchanged behaviour
+        let px = extract_pixels_no_relative_to(args.x, "x")?;
+        let py = extract_pixels_no_relative_to(args.y, "y")?;
+        let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
+            frame_viewport_offset(&managed, ctx).await?
+        } else {
+            (0.0, 0.0)
+        };
+        (px + offset_x, py + offset_y, px, py)
     };
-    let click_x = args.x + offset_x;
-    let click_y = args.y + offset_y;
 
     // Determine button and click count
     let button = if args.right { "right" } else { "left" };
@@ -1785,11 +1779,12 @@ async fn execute_click_at(
         None
     };
 
-    // Build result
+    // Build result — `clicked_at` reports resolved page-global coords when --relative-to is
+    // present; otherwise it echoes the raw input (existing behavior).
     let result = ClickAtResult {
         clicked_at: Coords {
-            x: args.x,
-            y: args.y,
+            x: output_x,
+            y: output_y,
         },
         url,
         navigated,
@@ -1951,30 +1946,71 @@ fn mouse_button_for_output(button: Option<&MouseButton>) -> Option<String> {
 }
 
 /// Execute the `interact drag-at` command.
+#[allow(clippy::similar_names)]
 async fn execute_drag_at(
     global: &GlobalOpts,
     args: &DragAtArgs,
     frame: Option<&str>,
 ) -> Result<(), AppError> {
+    // Validate percentage coordinates before establishing a session.
+    if args.relative_to.is_none() {
+        extract_pixels_no_relative_to(args.from_x, "from_x")?;
+        extract_pixels_no_relative_to(args.from_y, "from_y")?;
+        extract_pixels_no_relative_to(args.to_x, "to_x")?;
+        extract_pixels_no_relative_to(args.to_y, "to_y")?;
+    }
+
     let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
     // Resolve frame context for coordinate translation
-    let frame_ctx =
+    let mut frame_ctx =
         crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    // Translate frame-local coordinates to page-global coordinates
-    let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
-        get_frame_viewport_offset(&mut managed, ctx).await?
-    } else {
-        (0.0, 0.0)
-    };
-    let from_x = args.from_x + offset_x;
-    let from_y = args.from_y + offset_y;
-    let to_x = args.to_x + offset_x;
-    let to_y = args.to_y + offset_y;
+    let (from_x, from_y, to_x, to_y, out_from_x, out_from_y, out_to_x, out_to_y) =
+        if let Some(ref selector) = args.relative_to {
+            // Ensure DOM domain is available
+            {
+                let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+                    agentchrome::frame::frame_session_mut(ctx, &mut managed)
+                } else {
+                    &mut managed
+                };
+                eff_mut.ensure_domain("DOM").await?;
+            }
+            let element_box = resolve_element_box(&managed, frame_ctx.as_ref(), selector).await?;
+            let frame_offset = if let Some(ref ctx) = frame_ctx {
+                frame_viewport_offset(&managed, ctx).await?
+            } else {
+                (0.0, 0.0)
+            };
+            let (fx, fy) =
+                resolve_relative_coords(args.from_x, args.from_y, element_box, frame_offset);
+            let (tx, ty) = resolve_relative_coords(args.to_x, args.to_y, element_box, frame_offset);
+            (fx, fy, tx, ty, fx, fy, tx, ty)
+        } else {
+            let from_px = extract_pixels_no_relative_to(args.from_x, "from_x")?;
+            let from_py = extract_pixels_no_relative_to(args.from_y, "from_y")?;
+            let to_px = extract_pixels_no_relative_to(args.to_x, "to_x")?;
+            let to_py = extract_pixels_no_relative_to(args.to_y, "to_y")?;
+            let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
+                frame_viewport_offset(&managed, ctx).await?
+            } else {
+                (0.0, 0.0)
+            };
+            (
+                from_px + offset_x,
+                from_py + offset_y,
+                to_px + offset_x,
+                to_py + offset_y,
+                from_px,
+                from_py,
+                to_px,
+                to_py,
+            )
+        };
 
     // Dispatch the drag
     let steps = args.steps.unwrap_or(1);
@@ -1988,16 +2024,16 @@ async fn execute_drag_at(
         None
     };
 
-    // Build result
+    // Build result — from/to report resolved page-global coords when --relative-to is present
     let result = DragAtResult {
         dragged_at: DragAtCoords {
             from: Coords {
-                x: args.from_x,
-                y: args.from_y,
+                x: out_from_x,
+                y: out_from_y,
             },
             to: Coords {
-                x: args.to_x,
-                y: args.to_y,
+                x: out_to_x,
+                y: out_to_y,
             },
         },
         steps: if steps > 1 { Some(steps) } else { None },
@@ -2018,23 +2054,48 @@ async fn execute_mousedown_at(
     args: &MouseDownAtArgs,
     frame: Option<&str>,
 ) -> Result<(), AppError> {
+    // Validate percentage coordinates before establishing a session.
+    if args.relative_to.is_none() {
+        extract_pixels_no_relative_to(args.x, "x")?;
+        extract_pixels_no_relative_to(args.y, "y")?;
+    }
+
     let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
     // Resolve frame context for coordinate translation
-    let frame_ctx =
+    let mut frame_ctx =
         crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    // Translate frame-local coordinates to page-global coordinates
-    let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
-        get_frame_viewport_offset(&mut managed, ctx).await?
+    let (x, y, out_x, out_y) = if let Some(ref selector) = args.relative_to {
+        {
+            let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+                agentchrome::frame::frame_session_mut(ctx, &mut managed)
+            } else {
+                &mut managed
+            };
+            eff_mut.ensure_domain("DOM").await?;
+        }
+        let element_box = resolve_element_box(&managed, frame_ctx.as_ref(), selector).await?;
+        let frame_offset = if let Some(ref ctx) = frame_ctx {
+            frame_viewport_offset(&managed, ctx).await?
+        } else {
+            (0.0, 0.0)
+        };
+        let (rx, ry) = resolve_relative_coords(args.x, args.y, element_box, frame_offset);
+        (rx, ry, rx, ry)
     } else {
-        (0.0, 0.0)
+        let px = extract_pixels_no_relative_to(args.x, "x")?;
+        let py = extract_pixels_no_relative_to(args.y, "y")?;
+        let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
+            frame_viewport_offset(&managed, ctx).await?
+        } else {
+            (0.0, 0.0)
+        };
+        (px + offset_x, py + offset_y, px, py)
     };
-    let x = args.x + offset_x;
-    let y = args.y + offset_y;
 
     let button = mouse_button_to_cdp(args.button.as_ref());
     dispatch_mousedown(&mut managed, x, y, button).await?;
@@ -2047,12 +2108,9 @@ async fn execute_mousedown_at(
         None
     };
 
-    // Build result
+    // Build result — mousedown_at reports resolved page-global coords when --relative-to is used
     let result = MouseDownAtResult {
-        mousedown_at: Coords {
-            x: args.x,
-            y: args.y,
-        },
+        mousedown_at: Coords { x: out_x, y: out_y },
         button: mouse_button_for_output(args.button.as_ref()),
         snapshot,
     };
@@ -2071,23 +2129,48 @@ async fn execute_mouseup_at(
     args: &MouseUpAtArgs,
     frame: Option<&str>,
 ) -> Result<(), AppError> {
+    // Validate percentage coordinates before establishing a session.
+    if args.relative_to.is_none() {
+        extract_pixels_no_relative_to(args.x, "x")?;
+        extract_pixels_no_relative_to(args.y, "y")?;
+    }
+
     let (client, mut managed) = setup_session(global).await?;
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
     // Resolve frame context for coordinate translation
-    let frame_ctx =
+    let mut frame_ctx =
         crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
 
-    // Translate frame-local coordinates to page-global coordinates
-    let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
-        get_frame_viewport_offset(&mut managed, ctx).await?
+    let (x, y, out_x, out_y) = if let Some(ref selector) = args.relative_to {
+        {
+            let eff_mut = if let Some(ref mut ctx) = frame_ctx {
+                agentchrome::frame::frame_session_mut(ctx, &mut managed)
+            } else {
+                &mut managed
+            };
+            eff_mut.ensure_domain("DOM").await?;
+        }
+        let element_box = resolve_element_box(&managed, frame_ctx.as_ref(), selector).await?;
+        let frame_offset = if let Some(ref ctx) = frame_ctx {
+            frame_viewport_offset(&managed, ctx).await?
+        } else {
+            (0.0, 0.0)
+        };
+        let (rx, ry) = resolve_relative_coords(args.x, args.y, element_box, frame_offset);
+        (rx, ry, rx, ry)
     } else {
-        (0.0, 0.0)
+        let px = extract_pixels_no_relative_to(args.x, "x")?;
+        let py = extract_pixels_no_relative_to(args.y, "y")?;
+        let (offset_x, offset_y) = if let Some(ref ctx) = frame_ctx {
+            frame_viewport_offset(&managed, ctx).await?
+        } else {
+            (0.0, 0.0)
+        };
+        (px + offset_x, py + offset_y, px, py)
     };
-    let x = args.x + offset_x;
-    let y = args.y + offset_y;
 
     let button = mouse_button_to_cdp(args.button.as_ref());
     dispatch_mouseup(&mut managed, x, y, button).await?;
@@ -2100,12 +2183,9 @@ async fn execute_mouseup_at(
         None
     };
 
-    // Build result
+    // Build result — mouseup_at reports resolved page-global coords when --relative-to is used
     let result = MouseUpAtResult {
-        mouseup_at: Coords {
-            x: args.x,
-            y: args.y,
-        },
+        mouseup_at: Coords { x: out_x, y: out_y },
         button: mouse_button_for_output(args.button.as_ref()),
         snapshot,
     };

@@ -189,6 +189,22 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: Some(vec!["--frame".into()]),
                 },
                 ExampleEntry {
+                    cmd: "agentchrome page coords --selector css:#submit".into(),
+                    description: "Get frame-local and page-global bounding box for a CSS selector"
+                        .into(),
+                    flags: Some(vec!["--selector".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome page coords --selector s7".into(),
+                    description: "Get bounding box for a snapshot UID".into(),
+                    flags: Some(vec!["--selector".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome page --frame 1 coords --selector css:#inner".into(),
+                    description: "Get bounding box for an element inside an iframe, reporting both frame-local and page-global coordinates".into(),
+                    flags: Some(vec!["--frame".into(), "--selector".into()]),
+                },
+                ExampleEntry {
                     cmd: "agentchrome page analyze".into(),
                     description: "Analyze page structure: iframes, frameworks, overlays, media"
                         .into(),
@@ -434,6 +450,28 @@ fn all_examples() -> Vec<CommandGroupSummary> {
                     cmd: "agentchrome interact mouseup-at 300 400".into(),
                     description: "Release mouse button at coordinates".into(),
                     flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome interact click-at 50% 50% --relative-to css:#submit".into(),
+                    description: "Click the center of an element using percentage coordinates"
+                        .into(),
+                    flags: Some(vec!["--relative-to".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome interact click-at 0% 0% --relative-to css:#submit".into(),
+                    description: "Click the top-left corner of an element".into(),
+                    flags: Some(vec!["--relative-to".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome interact click-at 100% 100% --relative-to s7".into(),
+                    description: "Click the bottom-right pixel of an element by UID".into(),
+                    flags: Some(vec!["--relative-to".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome interact drag-at 10% 50% 90% 50% --relative-to css:#track"
+                        .into(),
+                    description: "Drag a slider from 10% to 90% across an element".into(),
+                    flags: Some(vec!["--relative-to".into()]),
                 },
             ],
         },

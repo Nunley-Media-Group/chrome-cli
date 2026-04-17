@@ -3,6 +3,11 @@ mod capabilities;
 mod cli;
 mod console;
 mod cookie;
+mod coord_helpers;
+// Re-export the library's coords module so `crate::coords` works in shared code (cli/mod.rs).
+mod coords {
+    pub use agentchrome::coords::*;
+}
 mod diagnose;
 mod dialog;
 mod dom;

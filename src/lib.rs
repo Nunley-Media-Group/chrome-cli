@@ -8,6 +8,7 @@ pub mod cdp;
 pub mod chrome;
 pub mod config;
 pub mod connection;
+pub mod coords;
 pub mod error;
 pub mod frame;
 pub mod session;

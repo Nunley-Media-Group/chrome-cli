@@ -3529,6 +3529,18 @@ fn diagnose_stdout_contains(world: &mut DiagnoseWorld, expected: String) {
 // Main — run all worlds
 // =============================================================================
 
+/// Coordinate space helpers BDD scenarios testable without a running Chrome instance.
+/// Chrome-dependent scenarios (AC1-AC9, AC11, regression Chrome scenarios) are commented out in
+/// the feature file and verified via manual smoke test.
+const COORD_SPACE_TESTABLE_SCENARIOS: &[&str] = &[
+    "AC10 — Invalid percentage value rejected by clap before dispatch",
+    "Percentage coordinates without --relative-to are rejected",
+    "page coords with no connection returns error",
+    "Absolute-coordinate click-at with no connection returns error",
+    "AC12 — examples interact includes --relative-to coordinate helper examples",
+    "AC12 — examples page includes page coords examples",
+];
+
 /// Diagnose command BDD scenarios testable without a running Chrome instance.
 /// All 5 scenarios use only argument parsing and help output — no Chrome needed.
 const DIAGNOSE_TESTABLE_SCENARIOS: &[&str] = &[
@@ -5168,6 +5180,19 @@ async fn main() {
             "tests/features/diagnose.feature",
             |_feature, _rule, scenario| {
                 DIAGNOSE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Coordinate space helpers (issue #198) — only CLI argument validation and examples/docs
+    // scenarios can be tested without Chrome. Chrome-dependent scenarios (AC1-AC9, AC11,
+    // regression Chrome scenarios) are commented out in the feature file and verified via
+    // manual smoke test.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/coordinate-space-helpers.feature",
+            |_feature, _rule, scenario| {
+                COORD_SPACE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;
