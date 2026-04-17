@@ -1,0 +1,199 @@
+# File: tests/features/examples-strategies.feature
+#
+# Generated from: .claude/specs/feature-add-interaction-strategy-guide-to-examples-command/requirements.md
+# Issue: #201
+
+Feature: Interaction Strategy Guide in Examples Command
+  As a browser automation engineer starting complex automation work
+  I want scenario-based interaction strategy guides in the examples command
+  So that I can choose the right approach for common enterprise automation patterns upfront
+
+  Background:
+    Given the agentchrome binary is available
+
+  # --- Happy Path: Listing (progressive disclosure) ---
+
+  Scenario: AC1 - List all strategy guides in plain text
+    When I run "agentchrome examples strategies"
+    Then stdout should contain "iframes"
+    And stdout should contain "overlays"
+    And stdout should contain "scorm"
+    And stdout should contain "drag-and-drop"
+    And stdout should contain "shadow-dom"
+    And stdout should contain "spa-navigation-waits"
+    And stdout should contain "react-controlled-inputs"
+    And stdout should contain "debugging-failed-interactions"
+    And stdout should contain "authentication-cookie-reuse"
+    And stdout should contain "multi-tab-workflows"
+    And stdout should not start with "["
+    And stdout should not start with "{"
+    And stdout should not contain "CURRENT CAPABILITIES"
+    And stdout should not contain "RECOMMENDED SEQUENCE"
+    And the exit code should be 0
+
+  # --- Happy Path: Detail ("reveal") ---
+
+  Scenario: AC2 - Show individual iframe strategy guide in plain text
+    When I run "agentchrome examples strategies iframes"
+    Then stdout should contain "iframes"
+    And stdout should contain "SCENARIOS"
+    And stdout should contain "CURRENT CAPABILITIES"
+    And stdout should contain "LIMITATIONS"
+    And stdout should contain "WORKAROUNDS"
+    And stdout should contain "RECOMMENDED SEQUENCE"
+    And stdout should contain "agentchrome"
+    And the exit code should be 0
+
+  # --- Top-Level Listing Integration ---
+
+  Scenario: AC3 - Bare examples listing includes a strategies entry
+    When I run "agentchrome examples"
+    Then stdout should contain "strategies"
+    And stdout should contain "connect"
+    And stdout should contain "tabs"
+    And stdout should contain "navigate"
+    And stdout should contain "page"
+    And stdout should contain "interact"
+    And the exit code should be 0
+
+  # --- JSON Output ---
+
+  Scenario: AC4 - JSON listing is progressive (summaries only)
+    When I run "agentchrome examples strategies --json"
+    Then stdout should be a valid JSON array
+    And the JSON array should have at least 10 entries
+    And each JSON entry should have a "name" field
+    And each JSON entry should have a "title" field
+    And each JSON entry should have a "summary" field
+    And no JSON entry should have a "scenarios" field
+    And no JSON entry should have a "capabilities" field
+    And no JSON entry should have a "limitations" field
+    And no JSON entry should have a "workarounds" field
+    And no JSON entry should have a "recommended_sequence" field
+    And the JSON payload size should be less than 4096 bytes
+    And stderr should be empty
+    And the exit code should be 0
+
+  Scenario: AC5 - JSON detail returns full strategy body
+    When I run "agentchrome examples strategies iframes --json"
+    Then stdout should be a valid JSON object
+    And the JSON "name" field should be "iframes"
+    And the JSON object should have a "title" field
+    And the JSON object should have a "summary" field
+    And the JSON object should have a "scenarios" field
+    And the JSON object should have a "capabilities" field
+    And the JSON object should have a "limitations" field
+    And the JSON object should have a "workarounds" field
+    And the JSON object should have a "recommended_sequence" field
+    And the JSON "recommended_sequence" array should have at least 1 entry
+    And the exit code should be 0
+
+  Scenario: AC6 - Pretty-printed JSON listing is multi-line
+    When I run "agentchrome examples strategies --pretty"
+    Then stdout should be a valid JSON array
+    And stdout should be multi-line
+    And the exit code should be 0
+
+  # --- Error Handling ---
+
+  Scenario: AC7 - Unknown strategy name is an error
+    When I run "agentchrome examples strategies nonexistent-strategy"
+    Then stderr should contain "Unknown strategy"
+    And stderr should contain "nonexistent-strategy"
+    And stderr should contain "iframes"
+    And stderr should contain "overlays"
+    And stdout should be empty
+    And the exit code should be 1
+
+  # --- Required Launch Set Coverage ---
+
+  Scenario Outline: AC8 - Required launch strategies are all present with full detail
+    When I run "agentchrome examples strategies <name> --json"
+    Then stdout should be a valid JSON object
+    And the JSON "name" field should be "<name>"
+    And the JSON "recommended_sequence" array should have at least 1 entry
+    And the exit code should be 0
+
+    Examples:
+      | name                            |
+      | iframes                         |
+      | overlays                        |
+      | scorm                           |
+      | drag-and-drop                   |
+      | shadow-dom                      |
+      | spa-navigation-waits            |
+      | react-controlled-inputs         |
+      | debugging-failed-interactions   |
+      | authentication-cookie-reuse     |
+      | multi-tab-workflows             |
+
+  # --- Help Documentation (Clap Help Entries steering principle) ---
+
+  Scenario: AC9 - examples --help documents the strategies path
+    When I run "agentchrome examples --help"
+    Then stdout should contain "strategies"
+    And stdout should contain "examples strategies"
+    And the exit code should be 0
+
+  # --- Regression Guards (AC11) ---
+
+  Scenario: AC11a - Existing bare examples listing still works
+    When I run "agentchrome examples"
+    Then stdout should contain "connect"
+    And stdout should contain "tabs"
+    And stdout should contain "navigate"
+    And stdout should contain "page"
+    And stdout should contain "js"
+    And stdout should contain "console"
+    And stdout should contain "network"
+    And stdout should contain "interact"
+    And stdout should contain "form"
+    And stdout should contain "emulate"
+    And stdout should contain "perf"
+    And stdout should contain "dialog"
+    And stdout should contain "config"
+    And the exit code should be 0
+
+  Scenario: AC11b - Existing examples <group> still resolves
+    When I run "agentchrome examples navigate"
+    Then stdout should contain "agentchrome navigate"
+    And the output should have at least 3 example commands
+    And the exit code should be 0
+
+  Scenario: AC11c - Existing unknown-group error is preserved
+    When I run "agentchrome examples nonexistent"
+    Then stderr should contain "Unknown command group"
+    And the exit code should be 1
+
+  Scenario: AC11d - Existing examples --json shape is preserved
+    When I run "agentchrome examples --json"
+    Then stdout should be a valid JSON array
+    And each JSON entry should have a "command" field
+    And each JSON entry should have a "description" field
+    And each JSON entry should have an "examples" array
+    And the exit code should be 0
+
+  # --- Progressive Disclosure Contract Guard ---
+
+  Scenario: Progressive disclosure is not leaked from listing to detail fields
+    When I run "agentchrome examples strategies --json"
+    Then stdout should not contain "\"scenarios\""
+    And stdout should not contain "\"capabilities\""
+    And stdout should not contain "\"limitations\""
+    And stdout should not contain "\"workarounds\""
+    And stdout should not contain "\"recommended_sequence\""
+    And the exit code should be 0
+
+  # --- Cross-Platform Determinism (AC12) ---
+  #
+  # Note: AC12 asserts byte-identical output across macOS/Linux/Windows. This cannot
+  # be verified from a single host in BDD; instead, CI runs this feature on all three
+  # platforms and a follow-up check compares the JSON output files. This scenario
+  # documents the expectation so CI can snapshot and compare.
+
+  Scenario: AC12 - Strategy listing JSON is deterministic and self-contained
+    When I run "agentchrome examples strategies --json"
+    Then stdout should be a valid JSON array
+    And the output should be deterministic across invocations
+    And stderr should be empty
+    And the exit code should be 0

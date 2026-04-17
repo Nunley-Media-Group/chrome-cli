@@ -164,6 +164,102 @@ agentchrome form fill <uid> <value>
 | `AGENTCHROME_CONFIG` | Path to configuration file |
 | `NO_COLOR` | Disable colored output (standard convention) |
 
+### Progressive Disclosure for Listings (Required for New Commands)
+
+**Every command that returns a collection of items MUST support progressive disclosure.** AI agents are a primary user (see `product.md`), and flooding agent context with full item bodies on every discovery call wastes tokens and money.
+
+#### The rule
+
+| Call shape | Payload |
+|------------|---------|
+| **Listing** — `<cmd> list` or `<cmd> <collection>` (no item selected) | ONLY identifying fields: `name` / `id`, a short `title`, and a one-line `summary`. Nothing else. Aim for \u2264 4 KB JSON and \u2264 1 KB plain text for a typical listing of ~10 items. |
+| **Detail** — `<cmd> <collection> <item-name>` (item selected) | Full body: all fields, nested objects, long-form text. No size cap. |
+
+#### When it applies
+
+- New CLI features that emit collections of items (examples: strategy guides, capability entries, tabs, network requests, media elements, cookies, frames)
+- Whenever an item's full representation exceeds ~500 bytes of JSON
+
+Rule of thumb: if an agent might call the listing just to decide which item to read next, the listing must stay cheap.
+
+#### When it does NOT apply
+
+- Commands that return a single object per invocation (e.g., `navigate`, `page screenshot`, `emulate status`)
+- Commands where the "full" representation is already small (e.g., `tabs list` returns minimal per-tab data already)
+
+#### Spec + test obligations for new features
+
+New feature specs MUST include:
+
+1. An AC that explicitly verifies the listing path returns only the lightweight fields (no full bodies) \u2014 e.g., "AC: `<cmd> list --json` output contains `name`/`title`/`summary` only; detailed fields X, Y, Z are absent."
+2. An AC that verifies the detail path (`<cmd> <item-name> --json`) returns the full body.
+3. A unit or BDD test that fails if a detail-only field leaks into the listing.
+
+#### In-tree example
+
+`agentchrome examples strategies` (feature #201) is the reference implementation:
+
+- `agentchrome examples strategies --json` \u2192 `[{ name, title, summary }, \u2026]` \u2014 tight listing
+- `agentchrome examples strategies iframes --json` \u2192 full `{ name, title, summary, scenarios, capabilities, limitations, workarounds, recommended_sequence }` \u2014 detail only when asked
+
+### Clap Help Entries (Required for New Commands and Flags)
+
+**Every new CLI surface MUST carry first-class `clap` help metadata.** The `capabilities` manifest, generated man pages, and shell completions all derive from clap attributes \u2014 if the clap definition is bare, every downstream documentation surface is degraded for free.
+
+#### What each new surface must include
+
+| Surface | Required clap attributes |
+|---------|-------------------------|
+| New subcommand (top-level or nested) | `#[command(about = "\u2026")]` one-line \u2022 `long_about = "\u2026"` multi-paragraph \u2022 `after_long_help = "\u2026"` with 3\u20135 worked **EXAMPLES** (including at least one `--json` invocation if the command supports it) |
+| New positional argument | doc comment describing purpose, valid values, and interaction with sibling args (e.g., mutual exclusion). Optional positionals document what happens when absent. |
+| New flag (`--foo`) | doc comment explaining effect and default \u2022 `conflicts_with_all = [\u2026]` when mutually exclusive with other flags \u2022 `value_parser` or `value_enum` for constrained values (no free-form strings when an enum fits) |
+| New enum arg value | `#[derive(ValueEnum)]` with per-variant doc comments so they appear in `--help` and completions |
+| Positional that acts as a discriminator (e.g., `examples strategies <name>`) | doc comment enumerating valid names, or a pointer to the listing command (`see \`<cmd> list\` for valid names`) |
+
+#### Spec + test obligations for new features
+
+New feature specs MUST include:
+
+1. An AC that `<cmd> --help` prints a short description of the new surface and mentions its canonical invocation shape.
+2. An AC that `<cmd> --help` (long form, triggered by clap `long_about` / `after_long_help`) includes at least one worked example, and, when the command emits JSON, at least one `--json` example.
+3. Verification that `agentchrome capabilities` output reflects the new clap surface. The capabilities manifest is clap-driven \u2014 missing clap metadata shows up here first.
+4. Verification that `cargo xtask man <cmd>` (or the aggregated `agentchrome man` flow) renders a man page with the new content. Man pages are also clap-driven.
+5. When a new flag is added to an existing command: update the command's `after_long_help` examples to cover the flag with at least one realistic invocation.
+
+#### Why this is non-negotiable
+
+- **Shell completions** depend on clap metadata. Flags without `value_parser` / `value_enum` become free-form strings in completions.
+- **Man pages** are auto-generated via `clap_mangen`. A subcommand without `long_about` produces a sparse, unhelpful man section.
+- **Capabilities manifest** (a machine-readable contract for AI agents, per `/capabilities`) is clap-driven. Missing doc comments mean agents cannot discover what the surface does.
+- **`examples` subcommand** also references clap for its command listing. Missing examples in `after_long_help` is a silent degradation of the discovery story.
+
+#### In-tree example
+
+The `Examples` variant in `src/cli/mod.rs` demonstrates the expected shape:
+
+```rust
+/// Show usage examples for commands
+#[command(
+    long_about = "Show usage examples for agentchrome commands\u2026 (paragraph explaining behavior)",
+    after_long_help = "\
+EXAMPLES:
+  # List all command groups with summary examples
+  agentchrome examples
+
+  # Show detailed examples for the navigate command
+  agentchrome examples navigate
+
+  # Get all examples as JSON (for programmatic use)
+  agentchrome examples --json
+
+  # Pretty-printed JSON output
+  agentchrome examples --pretty"
+)]
+Examples(ExamplesArgs),
+```
+
+Every new subcommand should look like this. If adding a flag or positional to an existing command, append a matching `EXAMPLES` entry.
+
 ---
 
 ## Testing Standards

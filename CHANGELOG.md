@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-04-17
+
+### Added
+
+- Add `examples strategies` subcommand with scenario-based interaction strategy guides (`iframes`, `overlays`, `scorm`, `drag-and-drop`, `shadow-dom`, `spa-navigation-waits`, `react-controlled-inputs`, `debugging-failed-interactions`, `authentication-cookie-reuse`, `multi-tab-workflows`), accessible via `examples strategies` for listings and `examples strategies <name>` for full guide detail, with progressive-disclosure JSON output (lightweight summaries for listings, full bodies only on explicit selection) (#201)
+- Add "strategies" entry to the top-level `examples` listing alongside existing command groups (#201)
+- Update `examples --help` long-help and `after_long_help` EXAMPLES to cover the new strategies path (#201)
+
 ## [1.30.0] - 2026-04-16
 
 ### Added

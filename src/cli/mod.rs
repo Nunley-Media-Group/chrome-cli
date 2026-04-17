@@ -645,7 +645,10 @@ EXAMPLES:
     #[command(
         long_about = "Show usage examples for agentchrome commands. Without arguments, lists all \
             command groups with a brief description and one example each. With a command name, \
-            shows detailed examples for that specific command group.",
+            shows detailed examples for that specific command group. With \"strategies\" as the \
+            first positional, shows scenario-based interaction strategy guides — use \
+            `agentchrome examples strategies` to list all guides, or \
+            `agentchrome examples strategies <name>` to see the full guide for one strategy.",
         after_long_help = "\
 EXAMPLES:
   # List all command groups with summary examples
@@ -654,8 +657,17 @@ EXAMPLES:
   # Show detailed examples for the navigate command
   agentchrome examples navigate
 
-  # Get all examples as JSON (for programmatic use)
-  agentchrome examples --json
+  # List all interaction strategy guides
+  agentchrome examples strategies
+
+  # Show the iframe strategy guide
+  agentchrome examples strategies iframes
+
+  # Get all strategies as JSON (for programmatic use)
+  agentchrome examples strategies --json
+
+  # Get a single strategy as JSON
+  agentchrome examples strategies iframes --json
 
   # Pretty-printed JSON output
   agentchrome examples --pretty"
@@ -3544,8 +3556,17 @@ pub struct ManArgs {
 /// Arguments for the `examples` subcommand.
 #[derive(Args)]
 pub struct ExamplesArgs {
-    /// Command group to show examples for (e.g., navigate, tabs, page)
+    /// Command group to show examples for (e.g., navigate, tabs, page),
+    /// or the literal "strategies" to access scenario-based interaction guides.
     pub command: Option<String>,
+
+    /// When `command` is "strategies", the strategy name to show in detail.
+    /// Run `agentchrome examples strategies` to see valid strategy names
+    /// (e.g., iframes, overlays, scorm, drag-and-drop, shadow-dom,
+    /// spa-navigation-waits, react-controlled-inputs,
+    /// debugging-failed-interactions, authentication-cookie-reuse,
+    /// multi-tab-workflows).
+    pub name: Option<String>,
 }
 
 /// Arguments for the `capabilities` subcommand.
@@ -3619,6 +3640,77 @@ mod tests {
         assert!(
             try_parse("diagnose --current https://example.com").is_err(),
             "Expected a clap error when --current appears before the URL"
+        );
+    }
+
+    // T003: ExamplesArgs parse tests
+    #[test]
+    fn examples_strategies_no_name_parses() {
+        let cli = try_parse("examples strategies").expect("examples strategies should parse");
+        let super::Command::Examples(args) = cli.command else {
+            panic!("Expected Examples command variant");
+        };
+        assert_eq!(args.command.as_deref(), Some("strategies"));
+        assert!(args.name.is_none());
+    }
+
+    #[test]
+    fn examples_strategies_with_name_parses() {
+        let cli = try_parse("examples strategies iframes")
+            .expect("examples strategies iframes should parse");
+        let super::Command::Examples(args) = cli.command else {
+            panic!("Expected Examples command variant");
+        };
+        assert_eq!(args.command.as_deref(), Some("strategies"));
+        assert_eq!(args.name.as_deref(), Some("iframes"));
+    }
+
+    #[test]
+    fn examples_navigate_still_parses() {
+        let cli = try_parse("examples navigate").expect("examples navigate should still parse");
+        let super::Command::Examples(args) = cli.command else {
+            panic!("Expected Examples command variant");
+        };
+        assert_eq!(args.command.as_deref(), Some("navigate"));
+        assert!(args.name.is_none());
+    }
+
+    // T015: Clap help metadata steering compliance test
+    #[test]
+    fn examples_subcommand_carries_clap_help_metadata() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        let examples_subcmd = cmd
+            .get_subcommands()
+            .find(|s| s.get_name() == "examples")
+            .expect("examples subcommand must exist");
+
+        // long_about must be non-empty and mention "strategies"
+        let long_about = examples_subcmd
+            .get_long_about()
+            .expect("examples must have long_about");
+        let long_about_str = long_about.to_string();
+        assert!(
+            !long_about_str.is_empty(),
+            "examples long_about must not be empty"
+        );
+        assert!(
+            long_about_str.contains("strategies"),
+            "examples long_about must mention 'strategies'\ngot: {long_about_str}"
+        );
+
+        // after_long_help must mention "examples strategies" and "--json"
+        let after_long_help = examples_subcmd
+            .get_after_long_help()
+            .expect("examples must have after_long_help");
+        let after_str = after_long_help.to_string();
+        assert!(
+            after_str.contains("examples strategies"),
+            "examples after_long_help must contain 'examples strategies'\ngot: {after_str}"
+        );
+        assert!(
+            after_str.contains("--json"),
+            "examples after_long_help must contain at least one --json example\ngot: {after_str}"
         );
     }
 }

@@ -2,28 +2,23 @@ use std::fmt::Write;
 
 use serde::Serialize;
 
-use agentchrome::error::{AppError, ExitCode};
-
-use crate::cli::{ExamplesArgs, GlobalOpts};
-use crate::output::print_output;
-
 // =============================================================================
 // Output types
 // =============================================================================
 
 #[derive(Serialize)]
-struct CommandGroupSummary {
-    command: String,
-    description: String,
-    examples: Vec<ExampleEntry>,
+pub struct CommandGroupSummary {
+    pub command: String,
+    pub description: String,
+    pub examples: Vec<ExampleEntry>,
 }
 
 #[derive(Serialize)]
-struct ExampleEntry {
-    cmd: String,
-    description: String,
+pub struct ExampleEntry {
+    pub cmd: String,
+    pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    flags: Option<Vec<String>>,
+    pub flags: Option<Vec<String>>,
 }
 
 // =============================================================================
@@ -31,7 +26,7 @@ struct ExampleEntry {
 // =============================================================================
 
 #[allow(clippy::too_many_lines)]
-fn all_examples() -> Vec<CommandGroupSummary> {
+pub fn all_examples() -> Vec<CommandGroupSummary> {
     vec![
         CommandGroupSummary {
             command: "connect".into(),
@@ -709,13 +704,13 @@ fn all_examples() -> Vec<CommandGroupSummary> {
 // Output formatting
 // =============================================================================
 
-fn format_plain_summary(groups: &[CommandGroupSummary]) -> String {
+pub(super) fn format_plain_summary(groups: &[CommandGroupSummary]) -> String {
     let mut out = String::new();
     for (i, group) in groups.iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        let _ = writeln!(out, "{} \u{2014} {}", group.command, group.description);
+        super::write_em_dash_line(&mut out, &group.command, &group.description);
         if let Some(first) = group.examples.first() {
             let _ = writeln!(out, "  {}", first.cmd);
         }
@@ -723,56 +718,15 @@ fn format_plain_summary(groups: &[CommandGroupSummary]) -> String {
     out
 }
 
-fn format_plain_detail(group: &CommandGroupSummary) -> String {
+pub(super) fn format_plain_detail(group: &CommandGroupSummary) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "{} \u{2014} {}", group.command, group.description);
+    super::write_em_dash_line(&mut out, &group.command, &group.description);
     for example in &group.examples {
         out.push('\n');
         let _ = writeln!(out, "  # {}", example.description);
         let _ = writeln!(out, "  {}", example.cmd);
     }
     out
-}
-
-// =============================================================================
-// Dispatcher
-// =============================================================================
-
-pub fn execute_examples(global: &GlobalOpts, args: &ExamplesArgs) -> Result<(), AppError> {
-    let groups = all_examples();
-    let is_plain = !global.output.json && !global.output.pretty;
-
-    match &args.command {
-        None => {
-            if is_plain {
-                print!("{}", format_plain_summary(&groups));
-            } else {
-                print_output(&groups, &global.output)?;
-            }
-        }
-        Some(name) => {
-            if let Some(g) = groups.into_iter().find(|g| g.command == *name) {
-                if is_plain {
-                    print!("{}", format_plain_detail(&g));
-                } else {
-                    print_output(&g, &global.output)?;
-                }
-            } else {
-                let all = all_examples();
-                let available: Vec<&str> = all.iter().map(|g| g.command.as_str()).collect();
-                return Err(AppError {
-                    message: format!(
-                        "Unknown command group: '{name}'. Available: {}",
-                        available.join(", ")
-                    ),
-                    code: ExitCode::GeneralError,
-                    custom_json: None,
-                });
-            }
-        }
-    }
-
-    Ok(())
 }
 
 // =============================================================================
@@ -879,34 +833,6 @@ mod tests {
     }
 
     #[test]
-    fn execute_examples_unknown_command_returns_error() {
-        let global = GlobalOpts {
-            port: None,
-            host: "127.0.0.1".into(),
-            ws_url: None,
-            timeout: None,
-            tab: None,
-            page_id: None,
-            auto_dismiss_dialogs: false,
-            config: None,
-            output: crate::cli::OutputFormat {
-                json: false,
-                pretty: false,
-                plain: false,
-                large_response_threshold: None,
-            },
-        };
-        let args = ExamplesArgs {
-            command: Some("nonexistent".into()),
-        };
-        let result = execute_examples(&global, &args);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.message.contains("Unknown command group"));
-        assert!(err.message.contains("nonexistent"));
-    }
-
-    #[test]
     fn json_serialization_summary_has_expected_fields() {
         let groups = all_examples();
         let json = serde_json::to_string(&groups).unwrap();
@@ -977,36 +903,5 @@ mod tests {
             json.contains("flags"),
             "flags field should be present when Some"
         );
-    }
-
-    #[test]
-    fn error_message_lists_all_available_groups() {
-        let global = GlobalOpts {
-            port: None,
-            host: "127.0.0.1".into(),
-            ws_url: None,
-            timeout: None,
-            tab: None,
-            page_id: None,
-            auto_dismiss_dialogs: false,
-            config: None,
-            output: crate::cli::OutputFormat {
-                json: false,
-                pretty: false,
-                plain: false,
-                large_response_threshold: None,
-            },
-        };
-        let args = ExamplesArgs {
-            command: Some("bogus".into()),
-        };
-        let err = execute_examples(&global, &args).unwrap_err();
-        for group in all_examples() {
-            assert!(
-                err.message.contains(&group.command),
-                "Error message should list '{}' as available",
-                group.command
-            );
-        }
     }
 }

@@ -330,6 +330,27 @@ agentchrome diagnose --current | jq '.summary.straightforward'
 
 </details>
 
+<details>
+<summary><strong>Interaction strategy guides</strong></summary>
+
+```sh
+# List all scenario-based interaction strategy guides
+agentchrome examples strategies
+
+# Show the full guide for iframe automation
+agentchrome examples strategies iframes
+
+# Get all strategy guides as JSON (for AI agent discovery)
+agentchrome examples strategies --json
+
+# Get the full SCORM/LMS strategy as JSON
+agentchrome examples strategies scorm --json
+```
+
+Available strategies: `iframes`, `overlays`, `scorm`, `drag-and-drop`, `shadow-dom`, `spa-navigation-waits`, `react-controlled-inputs`, `debugging-failed-interactions`, `authentication-cookie-reuse`, `multi-tab-workflows`.
+
+</details>
+
 ## Related Projects
 
 - **[Chrome DevTools MCP](https://github.com/anthropics/anthropic-quickstarts/tree/main/browser-automation-mcp)** — MCP server for browser automation via the Model Context Protocol. If you need MCP-based browser control rather than a CLI tool, check it out.
