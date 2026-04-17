@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-04-16
+
+### Added
+
+- Add `page coords --selector <target>` command returning frame-local and page-level coordinates, bounding box, center, and frame offset as structured JSON, with `--frame` support for iframe-scoped resolution (#198)
+- Add `--relative-to <selector>` flag and percentage syntax (e.g., `50%`) to `interact click-at`, `drag-at`, `mousedown-at`, and `mouseup-at` for element-anchored, frame-aware coordinate dispatch that survives viewport dimension shifts (#198)
+- Update `examples interact` and `examples page` with coordinate helper examples (#198)
+
 ## [1.29.0] - 2026-04-16
 
 ### Added
