@@ -1,9 +1,18 @@
 # Requirements: Session and Connection Management
 
-**Issue**: #6
-**Date**: 2026-02-11
+**Issues**: #6, #185
+**Date**: 2026-04-18
 **Status**: Draft
 **Author**: Claude (spec-driven)
+
+---
+
+## Change History
+
+| Issue | Date | Summary |
+|-------|------|---------|
+| #6 | 2026-02-11 | Initial feature spec — session file, health check, tab targeting, CDP session mgmt |
+| #185 | 2026-04-18 | Adds auto-reconnect on stale session, WebSocket keep-alive ping, and graceful distinction between recoverable and unrecoverable connection loss |
 
 ---
 
@@ -185,6 +194,154 @@ This feature adds a lightweight session file (similar to `docker context` or `ku
 **Then** the tool reports a connection-lost error
 **And** does not panic or hang indefinitely
 
+---
+
+## Enhancement: Session Reconnection & Keep-Alive (Issue #185)
+
+The following acceptance criteria extend AC10, AC11, and AC20 with transparent auto-reconnect and a keep-alive mechanism so long-running automation sessions survive transient WebSocket drops and idle timeouts.
+
+### AC21: Auto-reconnect on stale WebSocket URL
+
+**Given** a session file exists with a `ws_url` that is no longer reachable
+**And** Chrome is still running on the stored port
+**When** I run any command that needs Chrome (e.g., `agentchrome page snapshot`)
+**Then** the tool detects the dead WebSocket via the health check
+**And** transparently re-discovers the current browser `ws_url` on the stored port
+**And** updates the session file with the new `ws_url`
+**And** retries the original command within the same CLI invocation
+**And** the command returns its normal JSON payload on stdout
+**And** the exit code is 0
+
+**Example**:
+- Given: `session.json` with `ws_url: ws://127.0.0.1:9222/devtools/browser/OLD_ID` but Chrome has rotated to `/NEW_ID`
+- When: `agentchrome page snapshot`
+- Then: session file is updated to `/NEW_ID`, snapshot is returned, exit code 0
+
+### AC22: Auto-reconnect applies uniformly across all commands
+
+**Given** a stale session file (Chrome reachable, ws_url rotated)
+**When** I run any of: `tabs list`, `navigate`, `page snapshot`, `page screenshot`, `js exec`, `form fill`, `interact click`, `network list`, `console read`, `emulate status`, `perf vitals`, `dialog info`
+**Then** each command independently exhibits the auto-reconnect behavior from AC21
+**And** no command bypasses the reconnect path by opening its own direct connection
+
+> **Retrospective note (path audit):** Every command that needs Chrome must route through the same reconnect-aware resolution layer. Commands that construct their own CDP client must not skip reconnect.
+
+### AC23: Auto-reconnect preserves session file fields
+
+**Given** a session file with `pid: 12345` (from a prior `--launch`) and a stale `ws_url`
+**When** auto-reconnect succeeds and rewrites the session file
+**Then** the new file contains the new `ws_url` and a refreshed `timestamp`
+**And** the `pid` and `port` fields are preserved unchanged
+**And** no unrelated field is reset to a default value
+
+> **Retrospective note (write-over-existing-state):** Explicitly name which fields are preserved versus rewritten, so a subsequent `connect --disconnect` can still terminate the correct Chrome process.
+
+### AC24: Per-attempt reconnect latency budget
+
+**Given** auto-reconnect is triggered
+**When** each individual probe of Chrome (health check + WebSocket handshake) is attempted
+**Then** each probe completes or is aborted within a bounded per-attempt budget (default 500 ms for local connections)
+**And** a blocking probe does not consume the entire overall reconnect window
+**And** the per-attempt budget is configurable via `reconnect.probe_timeout_ms`
+
+### AC25: Bounded reconnect attempts with backoff
+
+**Given** Chrome is transiently unreachable
+**When** auto-reconnect runs
+**Then** the tool retries the probe using the exponential backoff defined by `CdpConfig.reconnect` (initial delay, multiplier, max delay)
+**And** stops after at most `reconnect.max_attempts` attempts (default 3)
+**And** reports an error when the attempt budget is exhausted
+
+### AC26: Graceful error on unrecoverable session loss
+
+**Given** Chrome has been terminated (no process responding on the stored port and no auto-discoverable Chrome)
+**When** I run any command
+**And** auto-reconnect has exhausted its attempts
+**Then** the tool emits a structured JSON error on stderr of the shape `{"error": "<msg>", "code": 2, "kind": "chrome_terminated", "recoverable": false}`
+**And** the human-readable message suggests running `agentchrome connect --launch` to start a new session
+**And** the session file is not silently deleted (so the user can inspect it)
+**And** the exit code is 2 (connection error)
+
+### AC27: Recoverable-loss error is distinguished from unrecoverable
+
+**Given** auto-reconnect fails for a reason other than Chrome termination (e.g., port moved, permission error)
+**When** the tool reports the error
+**Then** the structured error has `"kind": "transient"` and `"recoverable": true`
+**And** the suggested remediation references `agentchrome connect` (rediscovery) rather than `--launch`
+
+### AC28: WebSocket keep-alive ping during long-running commands
+
+**Given** a command holds a CDP session open for longer than the configured keep-alive interval (e.g., `console follow`, long `interact wait`, long `perf record`)
+**When** the keep-alive interval elapses with no outbound CDP traffic
+**Then** the client sends a WebSocket `Ping` frame
+**And** Chrome's `Pong` response is received within the configured pong timeout
+**And** the connection is not closed by idle intermediaries or OS-level TCP keepalive before the command completes
+
+### AC29: Keep-alive interval is configurable
+
+**Given** the user configures the keep-alive interval through any supported channel
+**When** the CLI runs a command
+**Then** the configured interval is honored, resolved in this order (highest precedence first): `--keepalive-interval <ms>` flag, `AGENTCHROME_KEEPALIVE_INTERVAL` env var, `config.toml` `keepalive.interval_ms`, built-in default (30000 ms)
+**And** `agentchrome connect --status` includes the effective keep-alive interval in its JSON output
+
+### AC30: Keep-alive can be disabled
+
+**Given** the user passes `--no-keepalive` or sets the interval to `0`
+**When** the CLI runs any command
+**Then** no WebSocket ping frames are sent by the client
+**And** the command still succeeds under normal conditions (short commands are unaffected)
+
+### AC31: Keep-alive does not interfere with in-flight CDP requests
+
+**Given** keep-alive is active and a CDP JSON-RPC request is in flight
+**When** the keep-alive interval elapses during the request
+**Then** the ping frame is sent concurrently (via the WebSocket control frame path, not the JSON-RPC channel)
+**And** the JSON-RPC request completes successfully with its original response correlated by `id`
+**And** no ping frame is misinterpreted as a JSON-RPC message
+
+### AC32: Reconnect is silent on stdout
+
+**Given** a command succeeds after an auto-reconnect
+**When** the command produces its output
+**Then** stdout contains only the command's normal JSON payload
+**And** reconnect diagnostics (attempt counts, backoff delays) appear on stderr only when `--verbose` or an equivalent log level is enabled
+
+### AC33: Reconnect behavior is observable via `connect --status`
+
+**Given** a previous reconnect has occurred (session file `ws_url` has been rewritten)
+**When** I run `agentchrome connect --status`
+**Then** the JSON output includes a `last_reconnect_at` timestamp (ISO 8601) and a `reconnect_count` integer for the current session
+**And** these fields reflect cumulative reconnects within the life of the session file
+
+> **Retrospective note (cross-invocation state):** `last_reconnect_at` and `reconnect_count` are stored in the session file so they are visible across separate CLI invocations, not reset per-invocation.
+
+### AC34: Clap help documents the new flags
+
+**Given** the `--keepalive-interval <ms>` and `--no-keepalive` flags are added as global options (or on the `connect` subcommand, whichever applies)
+**When** I run `agentchrome --help` (short form)
+**Then** the flags appear with a one-line description
+**And** `agentchrome --help` long form (`long_about` / `after_long_help`) includes at least one worked `EXAMPLES:` invocation showing each flag, including a `--json` variant where applicable
+**And** `--keepalive-interval` uses a `value_parser` / `value_enum` for numeric validation (no free-form string)
+**And** `--no-keepalive` declares `conflicts_with = ["keepalive_interval"]`
+
+### AC35: Capabilities manifest and man pages reflect the new flags
+
+**Given** the new flags exist
+**When** I run `agentchrome capabilities`
+**Then** the JSON manifest lists `--keepalive-interval` and `--no-keepalive` under the appropriate command(s) with their descriptions
+**And** `cargo xtask man connect` (or the aggregated man flow) renders a man page section that mentions both flags and their defaults
+
+### AC36: README documents session reconnection and keep-alive
+
+**Given** the feature is shipped
+**When** a reader opens the project `README.md`
+**Then** a short section (new or under an existing session-management section) explains:
+  - That commands auto-reconnect when Chrome is still running but the WebSocket has rotated or dropped
+  - The keep-alive flag, env var, config key, and default interval
+  - How to disable keep-alive (`--no-keepalive`)
+  - How to distinguish the `chrome_terminated` error from the `transient` error in scripts (by `kind` / `recoverable` fields)
+**And** the section includes at least one copy-pasteable example command using `--keepalive-interval`
+
 ### Generated Gherkin Preview
 
 ```gherkin
@@ -297,6 +454,114 @@ Feature: Session and connection management
     Given a CDP session is active
     When Chrome crashes
     Then the tool reports a connection-lost error without panicking
+
+  # --- Reconnection & Keep-Alive (Issue #185) ---
+
+  Scenario: Auto-reconnect on stale WebSocket URL
+    Given a session file with a stale ws_url and Chrome running on the stored port
+    When I run "agentchrome page snapshot"
+    Then the tool rediscovers the current ws_url
+    And the session file is updated
+    And the command returns its normal JSON payload
+    And the exit code is 0
+
+  Scenario Outline: Auto-reconnect applies to every command
+    Given a session file with a stale ws_url and Chrome still running
+    When I run "<command>"
+    Then the tool auto-reconnects and the command succeeds
+
+    Examples:
+      | command                         |
+      | agentchrome tabs list           |
+      | agentchrome page snapshot       |
+      | agentchrome js exec "1+1"       |
+      | agentchrome network list        |
+      | agentchrome console read        |
+
+  Scenario: Auto-reconnect preserves pid
+    Given a session file with pid=12345 and a stale ws_url
+    When auto-reconnect rewrites the session file
+    Then the new session file still has pid=12345 and the new ws_url
+
+  Scenario: Per-attempt probe latency budget enforced
+    Given auto-reconnect is triggered
+    When each probe is attempted
+    Then each probe completes or aborts within the configured probe_timeout_ms
+
+  Scenario: Reconnect respects bounded attempts
+    Given Chrome is unreachable
+    When auto-reconnect runs
+    Then at most reconnect.max_attempts probes are performed
+
+  Scenario: Unrecoverable loss emits structured error
+    Given Chrome has been terminated and cannot be rediscovered
+    When I run a command
+    Then stderr contains a JSON error with kind="chrome_terminated" and recoverable=false
+    And the message suggests "agentchrome connect --launch"
+    And the exit code is 2
+
+  Scenario: Transient loss is distinguished from termination
+    Given auto-reconnect fails for a non-termination reason
+    When the tool reports the error
+    Then the JSON error has kind="transient" and recoverable=true
+    And the suggested remediation references "agentchrome connect"
+
+  Scenario: Keep-alive prevents idle disconnect
+    Given a command holds the CDP session longer than the keep-alive interval
+    When the keep-alive interval elapses
+    Then a WebSocket Ping frame is sent
+    And a Pong is received before the pong timeout
+
+  Scenario Outline: Keep-alive interval resolution precedence
+    Given <source> sets the keep-alive interval
+    When a command runs
+    Then the configured interval is honored
+
+    Examples:
+      | source                                           |
+      | the --keepalive-interval flag                    |
+      | the AGENTCHROME_KEEPALIVE_INTERVAL env var       |
+      | the config.toml keepalive.interval_ms entry      |
+
+  Scenario: Keep-alive disabled via flag
+    Given I pass "--no-keepalive"
+    When a command runs
+    Then no WebSocket Ping frames are sent
+
+  Scenario: Keep-alive does not collide with JSON-RPC
+    Given keep-alive is active and a CDP request is in flight
+    When the keep-alive interval elapses
+    Then the Ping frame is sent as a WebSocket control frame
+    And the JSON-RPC response is correctly correlated to the original request
+
+  Scenario: Reconnect is silent on stdout
+    Given a command succeeds after auto-reconnect
+    When the command emits output
+    Then stdout contains only the normal JSON payload
+    And reconnect diagnostics appear on stderr only with --verbose
+
+  Scenario: Reconnect telemetry visible via connect --status
+    Given a reconnect has occurred earlier in the session
+    When I run "agentchrome connect --status"
+    Then the JSON output includes "last_reconnect_at" and "reconnect_count"
+
+  Scenario: Clap help lists the new flags
+    When I run "agentchrome --help"
+    Then the output mentions "--keepalive-interval" and "--no-keepalive"
+    And the long help includes an EXAMPLES section with at least one worked invocation per flag
+
+  Scenario: Capabilities manifest includes keep-alive flags
+    When I run "agentchrome capabilities"
+    Then the JSON manifest lists "--keepalive-interval" and "--no-keepalive" with descriptions and defaults
+
+  Scenario: Man page covers keep-alive flags
+    When I run "cargo xtask man connect"
+    Then the rendered man page mentions "--keepalive-interval" and "--no-keepalive"
+
+  Scenario: README documents session resilience
+    When I read the project README
+    Then it contains a section covering auto-reconnect, keep-alive flag/env/config, disable mechanism, and error-kind scripting guidance
+    And the section includes at least one copy-pasteable "--keepalive-interval" example
 ```
 
 ---
@@ -318,6 +583,16 @@ Feature: Session and connection management
 | FR11 | Default to first "page" type target when no `--tab` specified | Must | Sensible default |
 | FR12 | Graceful error on Chrome process death mid-session | Must | No panics or hangs |
 | FR13 | Session file directory creation (`~/.agentchrome/`) if missing | Should | First-run experience |
+| FR14 | Auto-reconnect on detected WebSocket closure or stale `ws_url`, with bounded retry (per-attempt latency budget + exponential backoff) | Must | Added by #185 — transparent retry inside the current invocation |
+| FR15 | WebSocket keep-alive ping frames at a configurable interval (default 30 s); disabled when interval == 0 or `--no-keepalive` | Must | Added by #185 — prevents idle-timeout drop during long commands |
+| FR16 | Structured JSON error distinguishing `kind: chrome_terminated` (unrecoverable) from `kind: transient` (recoverable) connection loss, with `recoverable: bool` | Must | Added by #185 — actionable remediation guidance |
+| FR17 | Auto-reconnect preserves the `pid`, `port`, and any unrelated session-file fields when rewriting `ws_url` | Must | Added by #185 — prevents losing the handle to the launched Chrome process |
+| FR18 | All commands that need Chrome route through the same reconnect-aware resolution layer (no command constructs its own bypass connection) | Must | Added by #185 — path audit requirement |
+| FR19 | Session file records `last_reconnect_at` (ISO 8601) and `reconnect_count` (integer), visible via `connect --status` | Should | Added by #185 — cross-invocation telemetry |
+| FR20 | Reconnect diagnostics appear only on stderr, gated on `--verbose` or equivalent log level; stdout remains pure JSON payload | Must | Added by #185 — preserves AI-agent JSON contract |
+| FR21 | Clap metadata for `--keepalive-interval` and `--no-keepalive`: `about`, doc comments, `value_parser` / numeric validation, `conflicts_with`, and `after_long_help` examples (including a `--json` example where applicable) per `steering/tech.md` clap-help rules | Must | Added by #185 — non-negotiable per tech steering |
+| FR22 | `agentchrome capabilities` manifest and generated man pages include the new flags with descriptions and defaults | Must | Added by #185 — downstream surfaces are clap-driven, so FR21 must propagate |
+| FR23 | Update `README.md` with a session-resilience section covering auto-reconnect semantics, keep-alive flag/env/config, disable mechanism, and error-kind scripting guidance, including at least one worked example | Must | Added by #185 — user-facing discoverability |
 
 ---
 
@@ -363,12 +638,14 @@ Reference `structure.md` and `product.md` for project-specific design standards.
 
 ### Session File Schema
 
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `ws_url` | String | WebSocket debugger URL | Yes |
-| `port` | u16 | CDP debugging port | Yes |
-| `pid` | Option<u32> | Chrome process ID (only for launched instances) | No |
-| `timestamp` | String (ISO 8601) | When the session was created | Yes |
+| Field | Type | Description | Required | Added |
+|-------|------|-------------|----------|-------|
+| `ws_url` | String | WebSocket debugger URL | Yes | #6 |
+| `port` | u16 | CDP debugging port | Yes | #6 |
+| `pid` | Option<u32> | Chrome process ID (only for launched instances) | No | #6 |
+| `timestamp` | String (ISO 8601) | When the session was created | Yes | #6 |
+| `last_reconnect_at` | Option<String (ISO 8601)> | When auto-reconnect last rewrote this file; `null` if never | No | #185 |
+| `reconnect_count` | u32 | Cumulative successful reconnects for this session; starts at 0 | Yes (default 0) | #185 |
 
 ### Input Data
 
@@ -397,6 +674,8 @@ Reference `structure.md` and `product.md` for project-specific design standards.
 - [x] Issue #3 — CLI skeleton with global flags (complete)
 - [x] Issue #4 — CDP WebSocket client with session multiplexing (complete)
 - [x] Issue #5 — Chrome discovery and launch with connect subcommand (complete)
+- [x] Issue #87 — Fix connect auto-discover overwriting session pid (complete) — #185 must not regress pid preservation
+- [x] Issue #94 — Fix connect auto-discover reconnect (complete) — #185 extends reconnect behavior to all commands
 
 ### External Dependencies
 - `dirs` or `home` crate for cross-platform home directory resolution
@@ -415,6 +694,9 @@ Reference `structure.md` and `product.md` for project-specific design standards.
 - Remote (non-localhost) Chrome connections
 - File locking for concurrent CLI invocations (deferred — single-user CLI for now)
 - Session file encryption or obfuscation
+- **Automatic Chrome re-launch on process termination** (#185) — when Chrome is gone, the tool reports an unrecoverable error and asks the user to `connect --launch`; it does not auto-launch Chrome
+- **Page state preservation across reconnection** (#185) — navigation history, JS state, open dialogs, and network recording buffers may be lost across a reconnect. Only the CDP transport is restored.
+- **Cross-invocation keep-alive** (#185) — keep-alive frames fire only within the lifetime of a single CLI invocation. Keeping the WebSocket alive between invocations would require a daemon, which is explicitly out of scope
 
 ---
 
@@ -422,11 +704,15 @@ Reference `structure.md` and `product.md` for project-specific design standards.
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| All acceptance criteria pass | 20/20 BDD scenarios green | `cargo test --test bdd` |
+| All acceptance criteria pass | 36/36 BDD scenarios green | `cargo test --test bdd` |
 | Health check latency | < 100ms for local connections | Timing test |
 | Session file round-trip | Read + parse < 5ms | Benchmark test |
 | No panics on invalid session | 0 panics | Tests with corrupted/missing session files |
 | Cross-platform session paths | Works on macOS + Linux + Windows | CI tests |
+| Auto-reconnect probe latency | Per-attempt < 500ms for local connections (#185) | Timing test |
+| Reconnect success rate under transient drop | 100% within configured `max_attempts` when Chrome is reachable (#185) | BDD + unit test |
+| Keep-alive overhead | < 1 KB/min of CDP traffic on an idle connection (#185) | Manual observation + unit test |
+| No regression on short-lived commands | P95 latency of `tabs list` unchanged vs. pre-#185 baseline | Benchmark test |
 
 ---
 
@@ -434,6 +720,8 @@ Reference `structure.md` and `product.md` for project-specific design standards.
 
 - [ ] Should the session file location be configurable (e.g., `AGENTCHROME_SESSION` env var)? — Nice to have, can defer
 - [x] Should `connect --disconnect` require confirmation before killing Chrome? — No, CLI tools should be non-interactive; the `--disconnect` flag is explicit intent
+- [ ] (#185) Should keep-alive default interval be 30 s or match Chrome's own WebSocket idle timeout (if documented)? — Currently assumed 30 s; design phase may revise
+- [ ] (#185) Should `reconnect_count` persist across `--disconnect` / new `connect` pairs, or reset on each new session? — Currently specified to reset when the session file is recreated
 
 ---
 

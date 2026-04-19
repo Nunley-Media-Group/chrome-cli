@@ -1,9 +1,18 @@
 # Design: Session and Connection Management
 
-**Issue**: #6
-**Date**: 2026-02-11
+**Issues**: #6, #185
+**Date**: 2026-04-18
 **Status**: Draft
 **Author**: Claude (spec-driven)
+
+---
+
+## Change History
+
+| Issue | Date | Summary |
+|-------|------|---------|
+| #6 | 2026-02-11 | Initial design — session file, resolution chain, tab targeting |
+| #185 | 2026-04-18 | Adds auto-reconnect pipeline, WebSocket keep-alive, structured loss-kind errors, and reconnect telemetry in session file |
 
 ---
 
@@ -606,3 +615,633 @@ Session module tests will use temp directories to avoid touching the real `~/.ag
 - [x] Testing strategy defined
 - [x] Alternatives were considered and documented
 - [x] Risks identified with mitigations
+
+---
+
+# Enhancement Design: Session Reconnection & Keep-Alive (Issue #185)
+
+## Overview
+
+The base feature (#6) implements a one-shot resolution chain: commands probe the session file once, fail with `stale_session` if the stored `ws_url` is dead, and ask the user to reconnect. #185 replaces the hard failure with an in-band recovery path (transparent rediscover + retry) and adds a client-side WebSocket keep-alive so long-running commands don't die to idle timeout.
+
+Two cross-cutting concerns drive the design:
+
+1. **Single-path reconnect** — every Chrome-needing command MUST route through one reconnect-aware function. Today several modules (`js.rs`, `tabs.rs`, `dialog.rs`, `output.rs`, `audit.rs`) call `CdpClient::connect` after `resolve_connection` returns. Any module that bypasses the new pipeline defeats FR18. We introduce `connection::connect_for_command` as the single entry point.
+2. **Silent on stdout, observable on stderr** — reconnect is for the JSON-contract CLI; stdout must stay pure. All diagnostics go through the existing `tracing` pathway (stderr-only) gated on `--verbose`.
+
+The existing `TransportTask` in `cdp/transport.rs` already has a WebSocket-level reconnect loop that fires on `Message::Close` / socket error within a single `CdpClient` lifetime. #185 adds two orthogonal layers on top:
+
+- **Layer A (CLI-invocation reconnect)**: runs before `CdpClient::connect`. If the session file's `ws_url` is stale, rediscover Chrome on the stored port, rewrite the session file (preserving `pid`/`port`/`active_tab_id`), and return a fresh `ResolvedConnection`.
+- **Layer B (WebSocket keep-alive)**: runs inside `TransportTask`. Sends a `Message::Ping` at the configured interval when no outbound CDP traffic has flowed, and tracks the most recent Pong to detect dead peers.
+
+These two layers are independent and configurable independently.
+
+---
+
+## Architecture Additions
+
+### Component Diagram (Layer A)
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│  Command entry (main.rs dispatch)                                  │
+│       │                                                            │
+│       ▼                                                            │
+│  connection::connect_for_command(global, cmd_needs_target)  ◄──── single entry point (FR18)
+│       │                                                            │
+│       ├─► resolve_connection_with_reconnect(global)                │
+│       │      │                                                     │
+│       │      ├─ session file present? ──► health_check             │
+│       │      │      ├─ ok  ──► use stored ws_url                   │
+│       │      │      └─ fail ──► rediscover_on_stored_port          │
+│       │      │                    ├─ ok  ──► rewrite session file  │
+│       │      │                    │           (preserve pid,       │
+│       │      │                    │            bump reconnect_count)│
+│       │      │                    └─ fail ──► auto_discover        │
+│       │      │                                 ├─ ok  ──► rewrite  │
+│       │      │                                 └─ fail ──►         │
+│       │      │                                    classify_loss()  │
+│       │      │                                    ├─ terminated    │
+│       │      │                                    │   (AppError    │
+│       │      │                                    │    with        │
+│       │      │                                    │    kind=chrome_│
+│       │      │                                    │    terminated, │
+│       │      │                                    │    recoverable=│
+│       │      │                                    │    false)      │
+│       │      │                                    └─ transient     │
+│       │      │                                        (recoverable=│
+│       │      │                                         true)       │
+│       │      └─ each probe wrapped in tokio::time::timeout(        │
+│       │         probe_timeout_ms)                                  │
+│       │                                                            │
+│       └─► CdpClient::connect(ws_url, cdp_config_with_keepalive)    │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### Component Diagram (Layer B — Keep-Alive inside TransportTask)
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│  TransportTask (src/cdp/transport.rs) — existing run loop          │
+│                                                                    │
+│  tokio::select! {                                                  │
+│    ws_msg = self.ws_stream.next()           (branch 1, existing)   │
+│    cmd    = self.command_rx.recv()          (branch 2, existing)   │
+│    _      = timeout_sleep                   (branch 3, existing)   │
+│    _      = keepalive_tick   ◄── NEW        (branch 4, #185)       │
+│  }                                                                 │
+│                                                                    │
+│  On keepalive_tick:                                                │
+│    if now - last_outbound >= keepalive_interval:                   │
+│      ws_stream.send(Message::Ping(vec![]))                         │
+│      record last_ping_at                                           │
+│    if last_ping_at && now - last_ping_at > pong_timeout:           │
+│      trigger handle_disconnect() (existing reconnect path)         │
+│                                                                    │
+│  On Message::Pong (new match arm in branch 1):                     │
+│    last_pong_at = now; last_ping_at = None                         │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Data Flow
+
+### Flow A-1: Stale session, Chrome still running on stored port
+
+```
+1. User: agentchrome page snapshot
+2. main.rs → connection::connect_for_command(global)
+3. read_session() → Some(SessionData{ws_url=OLD, port=9222, pid=12345, ...})
+4. health_check(127.0.0.1, 9222) → Err (ws_url rotated, but port up)
+5. rediscover_on_stored_port(9222) → Ok(new_ws_url)
+6. session::write_session(SessionData {
+     ws_url: new_ws_url,
+     port: 9222,                 ← preserved
+     pid: Some(12345),           ← preserved (FR17)
+     active_tab_id: ... ,        ← preserved
+     timestamp: now(),
+     last_reconnect_at: Some(now()),
+     reconnect_count: prev + 1,
+   })
+7. CdpClient::connect(new_ws_url, cdp_config) → Ok
+8. Command proceeds normally. stdout = snapshot JSON. stderr = silent.
+```
+
+### Flow A-2: Chrome fully gone
+
+```
+1. User: agentchrome page snapshot
+2. read_session() → Some(SessionData{port=9222, pid=12345})
+3. health_check(9222) → Err
+4. rediscover_on_stored_port(9222) → Err (no Chrome on port)
+5. auto_discover(DEFAULT_CDP_PORT) → Err
+6. classify_loss():
+   - if pid is Some: check process liveness via platform call
+     - alive → kind="transient", recoverable=true
+     - dead  → kind="chrome_terminated", recoverable=false
+   - if pid is None: we can't tell definitively → kind="transient" (default to recoverable)
+7. AppError with structured JSON body:
+   { "error": "Chrome process has terminated. Run 'agentchrome connect --launch' to start a new session.",
+     "code": 2,
+     "kind": "chrome_terminated",
+     "recoverable": false }
+8. Session file is NOT deleted (user can inspect it).
+9. Exit code 2.
+```
+
+### Flow B: Keep-alive during long-running command
+
+```
+1. User: agentchrome console follow (runs for minutes)
+2. CdpClient::connect(...) spawns TransportTask with keepalive_interval=30s, pong_timeout=10s
+3. Every 30s (since last outbound), TransportTask sends Message::Ping
+4. Chrome responds with Message::Pong (auto-handled by tokio-tungstenite at protocol level;
+   we match the Pong arm to record last_pong_at)
+5. If a Pong doesn't arrive within 10s of a Ping, trigger handle_disconnect()
+   which runs the existing WebSocket-level reconnect with backoff.
+6. If WS-level reconnect succeeds, command continues transparently.
+   If it fails, existing ReconnectFailed error path fires.
+```
+
+---
+
+## File Structure (Delta)
+
+```
+src/
+├── connection.rs              # Modify: add connect_for_command, resolve_connection_with_reconnect,
+│                              #         rediscover_on_stored_port, classify_loss
+├── session.rs                 # Modify: extend SessionData with last_reconnect_at, reconnect_count;
+│                              #         add write_preserving helper
+├── cdp/
+│   ├── client.rs              # Modify: add KeepAliveConfig to CdpConfig
+│   └── transport.rs           # Modify: add branch 4 keepalive_tick, Pong match arm,
+│                              #         last_outbound/last_ping_at tracking
+├── cli/
+│   └── mod.rs                 # Modify: add --keepalive-interval, --no-keepalive global flags;
+│                              #         add clap metadata per steering/tech.md
+├── error.rs                   # Modify: extend AppError with optional `kind` and `recoverable`
+│                              #         fields (via custom_json for structured JSON); add
+│                              #         chrome_terminated() and transient_connection_loss()
+│                              #         constructors
+├── config.rs                  # Modify: add keepalive.interval_ms and reconnect.probe_timeout_ms
+│                              #         to TOML config
+├── js.rs, tabs.rs, dialog.rs, # Modify: replace direct CdpClient::connect calls with
+│ audit.rs, output.rs          #         connection::connect_for_command
+└── ...
+
+README.md                      # Modify: add "Session resilience" section
+tests/
+├── features/
+│   └── 185-session-reconnect-keepalive.feature  # New BDD scenarios (FR21: mirror ACs)
+└── bdd.rs                     # Modify: add steps for stale-session + keep-alive worlds
+```
+
+---
+
+## API / Interface Changes
+
+### `connection::connect_for_command` (new)
+
+```rust
+pub struct CommandConnection {
+    pub client: CdpClient,
+    pub resolved: ResolvedConnection,
+    pub reconnected: bool,           // true if Layer A rewrote the session file
+}
+
+/// Single entry point for commands that need a Chrome connection.
+/// Handles Layer A reconnect, builds a CdpConfig with keep-alive settings,
+/// and returns a live CdpClient.
+///
+/// # Errors
+///
+/// Returns AppError with `kind: "chrome_terminated"` + `recoverable: false`
+/// when Chrome is definitively gone, or `kind: "transient"` + `recoverable: true`
+/// for other transient failures.
+pub async fn connect_for_command(
+    global: &GlobalOpts,
+    keepalive: &KeepAliveConfig,
+    reconnect: &ReconnectPolicy,
+) -> Result<CommandConnection, AppError>;
+```
+
+### `connection::resolve_connection_with_reconnect` (new, internal)
+
+```rust
+async fn resolve_connection_with_reconnect(
+    host: &str,
+    port: Option<u16>,
+    ws_url: Option<&str>,
+    policy: &ReconnectPolicy,
+) -> Result<ResolvedConnection, AppError>;
+```
+
+Implements Flow A-1 / A-2.
+
+### `connection::ReconnectPolicy` (new)
+
+```rust
+pub struct ReconnectPolicy {
+    pub max_attempts: u32,           // default 3
+    pub initial_backoff: Duration,   // default 100ms
+    pub max_backoff: Duration,       // default 5s
+    pub probe_timeout_ms: u64,       // default 500ms
+    pub verbose: bool,               // emit reconnect diagnostics to stderr
+}
+```
+
+`max_attempts`, `initial_backoff`, `max_backoff` mirror `cdp::transport::ReconnectConfig` so the two layers can share a TOML section.
+
+### `connection::classify_loss` (new, internal)
+
+```rust
+/// Classify a final reconnect failure as `chrome_terminated` or `transient`.
+/// Uses the stored pid (if present) to check process liveness.
+fn classify_loss(
+    stored_pid: Option<u32>,
+    final_error: &str,
+) -> (LossKind, bool);      // (kind, recoverable)
+
+enum LossKind {
+    ChromeTerminated,
+    Transient,
+}
+```
+
+Process-liveness check uses platform-specific light probes:
+
+- Unix: `nix::sys::signal::kill(Pid::from_raw(pid), None)` → `Err(ESRCH)` means dead. If `nix` isn't already a dep, fall back to `libc::kill(pid, 0)` in an `unsafe` block, or parse `/proc/{pid}/status`.
+- Windows: `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)` + `GetExitCodeProcess` via `windows-sys`, or a `tasklist /FI "PID eq N"` subprocess shelling. Prefer the API route only if `windows-sys` is already a dep; otherwise shell out to `tasklist`.
+
+If we can't determine liveness (unknown pid, permission denied on the check), default to `Transient` / `recoverable=true` — fail conservatively so we never tell the user "unrecoverable" when we aren't sure.
+
+### `cdp::client::CdpConfig` (modified)
+
+```rust
+pub struct CdpConfig {
+    pub connect_timeout: Duration,
+    pub command_timeout: Duration,
+    pub channel_capacity: usize,
+    pub reconnect: ReconnectConfig,
+    pub keepalive: KeepAliveConfig,   // NEW
+}
+```
+
+### `cdp::transport::KeepAliveConfig` (new)
+
+```rust
+#[derive(Debug, Clone, Copy)]
+pub struct KeepAliveConfig {
+    /// Interval between keep-alive pings. `None` disables keep-alive.
+    pub interval: Option<Duration>,
+    /// Time to wait for a Pong before declaring the connection dead.
+    pub pong_timeout: Duration,
+}
+
+impl Default for KeepAliveConfig {
+    fn default() -> Self {
+        Self {
+            interval: Some(Duration::from_secs(30)),
+            pong_timeout: Duration::from_secs(10),
+        }
+    }
+}
+```
+
+### `session::SessionData` (modified)
+
+```rust
+pub struct SessionData {
+    pub ws_url: String,
+    pub port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub active_tab_id: Option<String>,
+    pub timestamp: String,
+
+    /// ISO-8601 timestamp of the most recent auto-reconnect, or `None` if never (NEW, #185).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_reconnect_at: Option<String>,
+
+    /// Cumulative auto-reconnects for this session file (NEW, #185).
+    #[serde(default)]
+    pub reconnect_count: u32,
+}
+```
+
+Serde `default`/`skip_serializing_if` ensure backwards compatibility with pre-#185 session files on disk.
+
+### New `session::rewrite_preserving` helper (new)
+
+```rust
+/// Rewrite the session file, preserving `pid`, `port`, `active_tab_id` from
+/// an existing record. Bumps `reconnect_count`, updates `last_reconnect_at`
+/// and `timestamp`. Writes atomically via temp-file + rename.
+pub fn rewrite_preserving(
+    existing: &SessionData,
+    new_ws_url: String,
+) -> Result<SessionData, SessionError>;
+```
+
+This helper enforces AC23 / FR17 at the API layer so callers can't accidentally drop `pid`.
+
+### `AppError` structured JSON (modified)
+
+The existing `AppError` has a `custom_json: Option<Value>` field. For unrecoverable errors from #185 we populate it so the rendered stderr JSON contains all required fields:
+
+```json
+{
+  "error": "Chrome process has terminated. Run 'agentchrome connect --launch' to start a new session.",
+  "code": 2,
+  "kind": "chrome_terminated",
+  "recoverable": false
+}
+```
+
+New constructors:
+
+```rust
+impl AppError {
+    pub fn chrome_terminated() -> Self {
+        Self {
+            message: "Chrome process has terminated. \
+                      Run 'agentchrome connect --launch' to start a new session.".into(),
+            code: ExitCode::ConnectionError,
+            custom_json: Some(json!({
+                "kind": "chrome_terminated",
+                "recoverable": false,
+            })),
+        }
+    }
+
+    pub fn transient_connection_loss(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        Self {
+            message: format!("Chrome connection failed: {detail}. \
+                              Run 'agentchrome connect' to rediscover."),
+            code: ExitCode::ConnectionError,
+            custom_json: Some(json!({
+                "kind": "transient",
+                "recoverable": true,
+            })),
+        }
+    }
+}
+```
+
+### CLI flags (new globals)
+
+```rust
+// src/cli/mod.rs — extend GlobalOpts
+pub struct GlobalOpts {
+    // ... existing fields ...
+
+    /// Keep-alive ping interval in ms. Default: 30000. Set to 0 or pass
+    /// `--no-keepalive` to disable.
+    #[arg(
+        long = "keepalive-interval",
+        value_name = "MS",
+        value_parser = clap::value_parser!(u64),
+        env = "AGENTCHROME_KEEPALIVE_INTERVAL",
+        global = true,
+        conflicts_with = "no_keepalive",
+        help = "WebSocket keep-alive interval in milliseconds (default 30000). 0 disables."
+    )]
+    pub keepalive_interval: Option<u64>,
+
+    /// Disable the WebSocket keep-alive ping.
+    #[arg(long = "no-keepalive", global = true, help = "Disable WebSocket keep-alive pings.")]
+    pub no_keepalive: bool,
+}
+```
+
+Per `steering/tech.md` the `connect` subcommand's `after_long_help` string will grow an `EXAMPLES:` entry showing both flags, including at least one `--json` example. The capabilities manifest and man pages pick these up automatically from clap metadata.
+
+### Config TOML additions
+
+```toml
+[keepalive]
+interval_ms = 30000     # 0 or unset to disable
+
+[reconnect]
+max_attempts = 3
+initial_backoff_ms = 100
+max_backoff_ms = 5000
+probe_timeout_ms = 500
+```
+
+Precedence: CLI flag > env var > `config.toml` > compiled-in default.
+
+---
+
+## Layer B: Keep-Alive Implementation Notes
+
+### Transport task additions
+
+Add fields to `TransportTask`:
+
+```rust
+struct TransportTask {
+    // ... existing fields ...
+
+    keepalive: KeepAliveConfig,
+    last_outbound: Instant,              // bumped on every ws_stream.send
+    last_ping_at: Option<Instant>,       // Some(_) while awaiting a Pong
+}
+```
+
+Modify the `tokio::select!` in `run()`:
+
+```rust
+let keepalive_tick = async {
+    match self.keepalive.interval {
+        None => std::future::pending::<()>().await,
+        Some(interval) => {
+            let next_tick = self.last_outbound + interval;
+            tokio::time::sleep_until(next_tick.into()).await;
+        }
+    }
+};
+
+let pong_deadline = async {
+    match self.last_ping_at {
+        None => std::future::pending::<()>().await,
+        Some(sent_at) => {
+            tokio::time::sleep_until((sent_at + self.keepalive.pong_timeout).into()).await;
+        }
+    }
+};
+
+tokio::select! {
+    // ... existing 3 branches ...
+
+    _ = keepalive_tick => {
+        let _ = self.ws_stream.send(Message::Ping(Vec::new().into())).await;
+        self.last_outbound = Instant::now();
+        self.last_ping_at = Some(Instant::now());
+    }
+
+    _ = pong_deadline => {
+        // Pong didn't arrive — treat as dead connection.
+        self.handle_disconnect().await;
+        self.last_ping_at = None;
+    }
+}
+```
+
+Add to the existing `ws_msg` branch:
+
+```rust
+Some(Ok(Message::Pong(_))) => {
+    self.last_ping_at = None;
+}
+```
+
+Update `handle_send_command` to set `self.last_outbound = Instant::now()` after `ws_stream.send` succeeds.
+
+### Why this does not collide with JSON-RPC (AC31 / FR15)
+
+`tokio-tungstenite` multiplexes `Text`, `Binary`, `Ping`, `Pong`, `Close` on the WebSocket stream as distinct `Message` variants. Our JSON-RPC path uses `Message::Text` exclusively; ping/pong use `Message::Ping`/`Message::Pong`. The `select!` is over the command channel and the WebSocket source, not over the request path — keep-alive sends and JSON-RPC sends both ultimately call `ws_stream.send`, and the underlying Tungstenite sink serializes writes. No JSON-RPC request is stalled by a ping write beyond a single WebSocket frame.
+
+### Chrome side
+
+Chrome's CDP WebSocket server handles standard WebSocket control frames per RFC 6455 — it replies to `Ping` with `Pong` at the protocol layer without surfacing the frame to the CDP session. We do NOT need a CDP-level keep-alive RPC (no `Browser.version` poll, for instance). This keeps overhead minimal: a Ping frame is 2–6 bytes over the wire.
+
+---
+
+## Error Taxonomy
+
+| Scenario | `kind` | `recoverable` | Exit | Remediation in message |
+|----------|--------|---------------|------|-----------------------|
+| Session fresh, ws_url reachable | n/a (success) | n/a | 0 | n/a |
+| Stale ws_url, rediscover succeeds on stored port | n/a (success, Layer A silent) | n/a | 0 | n/a |
+| Stale ws_url, auto-discover succeeds | n/a (success) | n/a | 0 | n/a |
+| Stored pid alive, port unreachable, all probes fail | `transient` | `true` | 2 | `agentchrome connect` |
+| No stored pid, all probes fail | `transient` | `true` | 2 | `agentchrome connect` |
+| Stored pid dead (process gone) | `chrome_terminated` | `false` | 2 | `agentchrome connect --launch` |
+| Keep-alive pong timeout → WS reconnect exhausted | bubbles as `transient` | `true` | 2 | `agentchrome connect` |
+
+---
+
+## Observability
+
+`connect --status` JSON grows two optional fields (already specified in requirements AC33 / FR19):
+
+```json
+{
+  "ws_url": "...",
+  "port": 9222,
+  "pid": 12345,
+  "timestamp": "...",
+  "reachable": true,
+  "last_reconnect_at": "2026-04-18T12:34:56Z",
+  "reconnect_count": 2,
+  "keepalive": {
+    "interval_ms": 30000,
+    "enabled": true
+  }
+}
+```
+
+Reconnect diagnostics (attempt number, per-probe latency, last error) go through `tracing::info!` / `tracing::debug!` to stderr. Activated by `--verbose` or `RUST_LOG`. Never touches stdout.
+
+---
+
+## Path Audit (FR18)
+
+Existing `CdpClient::connect` call sites to migrate onto `connection::connect_for_command`:
+
+| Module | Line location | Change |
+|--------|---------------|--------|
+| `src/output.rs` | 2 sites | Replace `resolve_connection` + `CdpClient::connect` pair with `connect_for_command` |
+| `src/tabs.rs` | 4 sites | Same |
+| `src/js.rs` | 1 site | Same |
+| `src/dialog.rs` | 1 site | Same |
+| `src/main.rs` | `connect` command itself | NOT migrated (this creates the session file; it must use the raw path) |
+
+After migration, `CdpClient::connect` is callable only from `connection::connect_for_command` + the `connect` subcommand. Add a module-level doc comment on `CdpClient::connect` noting this invariant.
+
+> **Retrospective-backed note:** Per the "path audit" learning, we don't just fix the primary call site; we enumerate every sibling path and either migrate or document why it's exempt. The `connect` subcommand is exempt because it's what creates the session file in the first place — there's nothing to reconnect *to* yet.
+
+---
+
+## Alternatives Considered (additions)
+
+| Option | Description | Pros | Cons | Decision |
+|--------|-------------|------|------|----------|
+| **F: Full daemon for persistent WS** | Run a background agentchrome daemon holding the WS open across CLI invocations | Zero cross-invocation reconnect cost; keep-alive spans invocations | Violates "single binary, no daemon" product principle; lifecycle management complexity | Rejected — explicitly out of scope per issue |
+| **G: Reuse CdpConfig.reconnect for Layer A** | Drive Layer A from the transport's existing ReconnectConfig | One knob for users | Layer A reconnect triggers *before* CdpClient exists; the transport's loop triggers *after*. Collapsing them couples unrelated lifecycles | Rejected — two policies, shared TOML section for ergonomics |
+| **H: CDP-level keep-alive (Browser.version poll)** | Poll `Browser.getVersion` every N seconds instead of WebSocket Ping | Works even if some proxy strips Ping frames | Ping frame is bytes-per-minute; RPC call is kilobytes and pollutes the command ID space; slower | Rejected — Ping is the idiomatic WS keep-alive |
+| **I: Auto-launch on chrome_terminated** | If Chrome is gone, spawn a new one and retry | Even more transparent UX | Explicitly out of scope per issue; hides the user's Chrome lifecycle; surprising for CI | Rejected — out of scope |
+| **J: Per-probe ability to abort via CancellationToken** | Use `CancellationToken` rather than `tokio::time::timeout` for probes | Caller can cancel mid-probe | `tokio::time::timeout` already does what we need; adding CT would be over-engineering | Rejected — timeout suffices |
+
+---
+
+## Security Considerations (additions)
+
+- **Process liveness check**: On Unix, `kill(pid, 0)` can leak information about process existence across UIDs but only for processes owned by the same user. Since the session file was written by the current user and stores that user's own Chrome PID, this is benign.
+- **Session file rewrite**: `rewrite_preserving` uses atomic write (temp-file + rename) so a crashed process can never leave a partial session file. File mode remains `0o600` on the rewritten file.
+- **Keep-alive frames carry no payload**: Ping frames are sent with an empty body. No identifying or secret data leaves the client during idle.
+
+---
+
+## Performance Considerations (additions)
+
+- **Reconnect overhead (happy path)**: When `ws_url` is fresh, the only additional cost vs. pre-#185 is a single field read on `SessionData` and a no-op keepalive timer (pending future). Negligible.
+- **Per-probe latency**: Bounded by `probe_timeout_ms` (default 500 ms). Worst-case Layer A reconnect is `max_attempts × (probe_timeout + max_backoff)` ≈ 3 × (0.5 + 5) = 16.5 s. This upper-bound should be documented in README.
+- **Keep-alive traffic**: At 30 s interval, 2 Ping frames + 2 Pong frames per minute. Each frame is ≤ 6 bytes framing + 0-byte payload. Well under the <1 KB/min success metric.
+- **Short-command regression guard**: `tabs list` completes in well under 30 s, so the keep-alive timer never fires for short commands. No regression on P95 latency.
+
+---
+
+## Testing Strategy (additions)
+
+| Layer | Type | Coverage |
+|-------|------|----------|
+| `connection::resolve_connection_with_reconnect` | Unit | stale + port-reachable → rewrite; stale + port-unreachable, pid alive → transient; stale + pid dead → chrome_terminated; preserves `pid` |
+| `connection::classify_loss` | Unit | pid present + alive, pid present + dead, pid absent, platform fallback |
+| `session::rewrite_preserving` | Unit | preserves pid/port/active_tab_id, bumps reconnect_count, atomic write |
+| `cdp::transport` keep-alive | Unit (mock WS) | Ping fires after idle interval; Pong clears ping timer; Pong timeout triggers reconnect; no Ping during active JSON-RPC traffic |
+| `cdp::transport` keep-alive disabled | Unit | No Ping ever sent when `interval: None` or `0` |
+| Layer A integration | BDD | Every AC21–AC33 scenario in `tests/features/185-session-reconnect-keepalive.feature` |
+| Clap help / capabilities / man | Unit + BDD | AC34/AC35 verified via `assert_cmd` invocations |
+| README check | BDD | AC36 — a simple grep over README.md content for the required headings and example |
+| Feature Exercise Gate | Manual + scripted | `tests/fixtures/session-reconnect-keepalive.html` (static page); test procedure in `tasks.md` |
+
+> **Retrospective-backed note (environment variants):** Per the learning about headed vs headless divergence, the BDD scenarios for #185 run in both headless and headed configurations where feasible. The smoke test targets the headless configuration that matches the issue's original reproduction scenario (Salesforce email-to-case workflow).
+
+---
+
+## Risks & Mitigations (additions)
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| PID reuse: pid check returns alive for a different process on the same PID | Low | Medium | `rediscover_on_stored_port` runs *first*; classify_loss runs only when no Chrome responds on the stored port. Even if PID is reused by another process, we still report chrome_terminated correctly when CDP is not reachable. |
+| Keep-alive Ping frames interpreted as noise by proxies/middleboxes | Low | Medium | CDP connections are strictly localhost per `warn_if_remote_host`; no middlebox should be in the path. Pong timeout triggers reconnect as a safety net. |
+| Race between Layer A reconnect and a concurrent `connect` command | Low | Low | Session file writes are atomic (temp + rename). Last writer wins; behavior converges to a usable session. |
+| `--keepalive-interval 0` confused with "default" | Low | Low | `0` explicitly disables (same as `--no-keepalive`). Documented in help text; value_parser + clap message highlight it. |
+| `tracing` chatter leaking to stdout if a future refactor changes subscriber setup | Low | Medium | Golden test in BDD asserts that stdout after a reconnect is exactly the expected JSON payload, no extra lines. |
+
+---
+
+## Open Questions (additions)
+
+- [ ] Should the keep-alive interval default to Chrome's own idle timeout once documented? For now, 30 s is a safe under-approximation.
+- [ ] Should `rewrite_preserving` on a file-not-found degrade to a fresh write (first-time reconnect scenario) or fail? Proposed: fall back to a fresh `write_session` — the resolution chain will handle pid/active_tab preservation on the next read. Will confirm during implementation.
+
+---
+
+## Validation Checklist (additions)
+
+- [x] Single reconnect-aware entry point (`connect_for_command`) enforces FR18 path audit
+- [x] Session file schema extended backwards-compatibly (serde defaults)
+- [x] Layer A (invocation-level) and Layer B (transport-level) reconnect are decoupled
+- [x] Keep-alive uses WebSocket control frames; does not contend with JSON-RPC channel
+- [x] Structured error JSON includes `kind` + `recoverable` fields for script consumers
+- [x] Clap metadata complete per steering/tech.md (help, long_about, value_parser, conflicts_with)
+- [x] Capabilities manifest + man pages inherit new flags via clap
+- [x] README section specified (AC36)
+- [x] Test strategy covers unit, transport integration, BDD, and smoke; environment variants covered

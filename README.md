@@ -231,6 +231,33 @@ agentchrome page snapshot
 
 Run `agentchrome <command> --help` for detailed usage, `agentchrome examples <command>` for practical examples, or `agentchrome capabilities` for the full machine-readable command manifest.
 
+## Session resilience
+
+Long-running automation sessions survive transient WebSocket drops and idle timeouts without manual intervention.
+
+**Auto-reconnect.** When a command's stored `ws_url` is no longer reachable but Chrome is still running on the recorded port, AgentChrome transparently re-discovers the current browser-level WebSocket URL, rewrites the session file (preserving `pid`, `port`, and `active_tab_id`), and retries the command within the same invocation. Diagnostics are stderr-only; stdout stays pure JSON.
+
+**Keep-alive.** While a command holds the CDP session open longer than the keep-alive interval (default `30000` ms), AgentChrome sends a WebSocket Ping frame to prevent idle-timeout disconnects. A missing Pong within 10 s triggers the existing reconnect path.
+
+**Configuration precedence:** `--keepalive-interval <ms>` flag > `AGENTCHROME_KEEPALIVE_INTERVAL` env var > `[keepalive] interval_ms` in `config.toml` > built-in default (30000 ms).
+
+```sh
+# Run a long command with a 60-second keep-alive
+agentchrome --keepalive-interval 60000 console follow
+
+# Disable keep-alive (--no-keepalive or interval 0)
+agentchrome --no-keepalive page snapshot --json
+```
+
+**Scripting against connection-loss errors.** When auto-reconnect cannot recover the session, the CLI emits a structured JSON error on stderr with a `kind` discriminator and a `recoverable` boolean:
+
+| Condition | `kind` | `recoverable` | Suggested remediation |
+|-----------|--------|---------------|-----------------------|
+| Chrome process is gone | `"chrome_terminated"` | `false` | `agentchrome connect --launch` |
+| Probe failed but Chrome may still be alive | `"transient"` | `true` | `agentchrome connect` |
+
+Scripts can branch on these fields to decide whether to relaunch Chrome or simply re-discover the connection.
+
 ## Usage Examples
 
 <details>

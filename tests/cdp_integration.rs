@@ -8,7 +8,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use agentchrome::cdp::{CdpClient, CdpConfig, CdpError, ReconnectConfig};
+use agentchrome::cdp::{CdpClient, CdpConfig, CdpError, KeepAliveConfig, ReconnectConfig};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -283,6 +283,14 @@ fn quick_config() -> CdpConfig {
             initial_backoff: Duration::from_millis(50),
             max_backoff: Duration::from_millis(200),
         },
+        keepalive: keepalive_disabled(),
+    }
+}
+
+fn keepalive_disabled() -> KeepAliveConfig {
+    KeepAliveConfig {
+        interval: None,
+        pong_timeout: Duration::from_secs(10),
     }
 }
 
@@ -469,6 +477,7 @@ async fn connection_timeout() {
             max_retries: 0,
             ..ReconnectConfig::default()
         },
+        keepalive: keepalive_disabled(),
     };
 
     let start = std::time::Instant::now();
@@ -500,6 +509,7 @@ async fn command_timeout() {
             max_retries: 0,
             ..ReconnectConfig::default()
         },
+        keepalive: keepalive_disabled(),
     };
     let client = CdpClient::connect(&ws_url(addr), config).await.unwrap();
 
@@ -525,6 +535,7 @@ async fn websocket_close_handling() {
             max_retries: 0,
             ..ReconnectConfig::default()
         },
+        keepalive: keepalive_disabled(),
     };
     let client = CdpClient::connect(&ws_url(addr), config).await.unwrap();
 
@@ -578,6 +589,7 @@ async fn reconnection_after_disconnection() {
             initial_backoff: Duration::from_millis(50),
             max_backoff: Duration::from_millis(500),
         },
+        keepalive: keepalive_disabled(),
     };
 
     let client = CdpClient::connect(&ws_url(addr), config).await.unwrap();
@@ -630,6 +642,7 @@ async fn reconnection_failure() {
             initial_backoff: Duration::from_millis(50),
             max_backoff: Duration::from_millis(100),
         },
+        keepalive: keepalive_disabled(),
     };
 
     let client = CdpClient::connect(&ws_url(addr), config).await.unwrap();

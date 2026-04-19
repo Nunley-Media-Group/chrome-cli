@@ -3,14 +3,14 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
+use agentchrome::cdp::CdpClient;
 use agentchrome::chrome::{TargetInfo, activate_target, query_targets};
-use agentchrome::connection::{resolve_connection, select_target};
+use agentchrome::connection::select_target;
 use agentchrome::error::AppError;
 use agentchrome::session;
 
 use crate::cli::{GlobalOpts, TabsArgs, TabsCommand};
-use crate::output::{cdp_config, print_output};
+use crate::output::{connect_from_global, print_output};
 
 /// Execute the `tabs` subcommand group.
 ///
@@ -117,16 +117,15 @@ fn filter_page_targets(targets: &[TargetInfo], include_all: bool) -> Vec<&Target
 // =============================================================================
 
 async fn execute_list(global: &GlobalOpts, include_all: bool) -> Result<(), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let conn = connect_from_global(global).await?;
 
-    let targets = query_targets(&conn.host, conn.port).await?;
+    let targets = query_targets(&conn.resolved.host, conn.resolved.port).await?;
     let filtered = filter_page_targets(&targets, include_all);
 
     // Determine the active tab by querying Chrome's actual visibility state
     // via CDP sessions, rather than relying on /json/list positional ordering
     // (which does not reliably reflect activation state in headless mode).
-    let config = cdp_config(global);
-    let visible_id = query_visible_target_id(&conn.ws_url, &filtered, config).await;
+    let visible_id = query_visible_target_id(&conn.client, &filtered).await;
 
     let tabs: Vec<TabInfo> = filtered
         .iter()
@@ -155,20 +154,18 @@ async fn execute_create(
     url: Option<&str>,
     background: bool,
 ) -> Result<(), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
-
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config.clone()).await?;
+    let conn = connect_from_global(global).await?;
+    let client = &conn.client;
 
     // When --background is used, record the currently active (visible) tab
     // so we can re-activate it after creation. Uses CDP visibilityState
     // rather than /json/list ordering (which is unreliable in headless mode).
     let original_active_id = if background {
-        let targets = query_targets(&conn.host, conn.port).await?;
+        let targets = query_targets(&conn.resolved.host, conn.resolved.port).await?;
         let pages: Vec<&TargetInfo> = targets.iter().filter(|t| t.target_type == "page").collect();
         let mut visible_id = None;
         for page in &pages {
-            if check_target_visible(&client, &page.id).await {
+            if check_target_visible(client, &page.id).await {
                 visible_id = Some(page.id.clone());
                 break;
             }
@@ -196,21 +193,21 @@ async fn execute_create(
     // then verifies via CDP document.visibilityState (which is authoritative,
     // unlike /json/list ordering which is unreliable in headless mode).
     if let Some(ref active_id) = original_active_id {
-        activate_target(&conn.host, conn.port, active_id).await?;
+        activate_target(&conn.resolved.host, conn.resolved.port, active_id).await?;
 
         // Stability verification: page-load events can re-activate the new
         // tab after our initial activation succeeds. Wait briefly, then
         // verify via CDP that the original tab is actually visible.
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if !check_target_visible(&client, active_id).await {
+        if !check_target_visible(client, active_id).await {
             // Page-load re-activated the new tab. Re-activate and re-verify.
-            activate_target(&conn.host, conn.port, active_id).await?;
+            activate_target(&conn.resolved.host, conn.resolved.port, active_id).await?;
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 
     // Re-query to get the new tab's resolved URL and title
-    let targets = query_targets(&conn.host, conn.port).await?;
+    let targets = query_targets(&conn.resolved.host, conn.resolved.port).await?;
     let new_tab = targets.iter().find(|t| t.id == target_id);
 
     let output = CreateResult {
@@ -223,9 +220,9 @@ async fn execute_create(
 }
 
 async fn execute_close(global: &GlobalOpts, target_args: &[String]) -> Result<(), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let conn = connect_from_global(global).await?;
 
-    let targets = query_targets(&conn.host, conn.port).await?;
+    let targets = query_targets(&conn.resolved.host, conn.resolved.port).await?;
 
     // Resolve all target arguments BEFORE closing any (avoids index shift)
     let mut to_close: Vec<&TargetInfo> = Vec::new();
@@ -241,8 +238,7 @@ async fn execute_close(global: &GlobalOpts, target_args: &[String]) -> Result<()
         return Err(AppError::last_tab());
     }
 
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
+    let client = &conn.client;
 
     let mut closed_ids = Vec::new();
     for target in &to_close {
@@ -259,7 +255,7 @@ async fn execute_close(global: &GlobalOpts, target_args: &[String]) -> Result<()
     let expected_remaining = page_count - closing_page_count;
     let mut remaining = expected_remaining;
     for _ in 0..10 {
-        let remaining_targets = query_targets(&conn.host, conn.port).await?;
+        let remaining_targets = query_targets(&conn.resolved.host, conn.resolved.port).await?;
         remaining = remaining_targets
             .iter()
             .filter(|t| t.target_type == "page")
@@ -283,13 +279,12 @@ async fn execute_activate(
     target_arg: &str,
     quiet: bool,
 ) -> Result<(), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let conn = connect_from_global(global).await?;
 
-    let targets = query_targets(&conn.host, conn.port).await?;
+    let targets = query_targets(&conn.resolved.host, conn.resolved.port).await?;
     let target = select_target(&targets, Some(target_arg))?;
 
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
+    let client = &conn.client;
 
     let params = serde_json::json!({ "targetId": target.id });
     client
@@ -298,7 +293,7 @@ async fn execute_activate(
 
     // Poll until Chrome's HTTP endpoint reflects the activation.
     for _ in 0..50 {
-        let check = query_targets(&conn.host, conn.port).await?;
+        let check = query_targets(&conn.resolved.host, conn.resolved.port).await?;
         let first_page = check.iter().find(|t| t.target_type == "page");
         if first_page.is_some_and(|t| t.id == target.id) {
             break;
@@ -355,18 +350,15 @@ async fn check_target_visible(client: &CdpClient, target_id: &str) -> bool {
 /// Uses an optimistic strategy: checks the first target first, since it is the
 /// most common case. Falls back to scanning the rest if needed.
 async fn query_visible_target_id(
-    ws_url: &str,
+    client: &CdpClient,
     page_targets: &[&TargetInfo],
-    config: CdpConfig,
 ) -> Option<String> {
     if page_targets.is_empty() {
         return None;
     }
 
-    let client = CdpClient::connect(ws_url, config).await.ok()?;
-
     for target in page_targets {
-        if check_target_visible(&client, &target.id).await {
+        if check_target_visible(client, &target.id).await {
             return Some(target.id.clone());
         }
     }

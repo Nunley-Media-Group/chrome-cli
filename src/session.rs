@@ -13,6 +13,12 @@ pub struct SessionData {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub active_tab_id: Option<String>,
     pub timestamp: String,
+    /// ISO 8601 timestamp of the most recent auto-reconnect, or `None` if never.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_reconnect_at: Option<String>,
+    /// Cumulative successful auto-reconnects for this session file.
+    #[serde(default)]
+    pub reconnect_count: u32,
 }
 
 /// Errors that can occur during session file operations.
@@ -185,6 +191,56 @@ pub fn delete_session_from(path: &std::path::Path) -> Result<(), SessionError> {
     }
 }
 
+/// Rewrite the session file with a new WebSocket URL, preserving `pid`, `port`,
+/// and `active_tab_id` from `existing`. Bumps `reconnect_count` and refreshes
+/// `timestamp` and `last_reconnect_at`.
+///
+/// Writes atomically and returns the newly persisted record so callers can use
+/// the updated `ws_url` and telemetry fields.
+///
+/// # Errors
+///
+/// Returns `SessionError::Io` on I/O failure, or `SessionError::NoHomeDir` if
+/// the home directory cannot be determined.
+pub fn rewrite_preserving(
+    existing: &SessionData,
+    new_ws_url: String,
+) -> Result<SessionData, SessionError> {
+    let path = session_file_path()?;
+    rewrite_preserving_to(&path, existing, new_ws_url)
+}
+
+/// Testable variant of [`rewrite_preserving`] that writes to a specific path.
+///
+/// When `new_ws_url` matches the existing URL, returns the existing record
+/// unchanged without writing — this avoids inflating `reconnect_count` and
+/// rewriting the file when rediscovery returned the same endpoint.
+///
+/// # Errors
+///
+/// Returns `SessionError::Io` on I/O failure.
+pub fn rewrite_preserving_to(
+    path: &std::path::Path,
+    existing: &SessionData,
+    new_ws_url: String,
+) -> Result<SessionData, SessionError> {
+    if new_ws_url == existing.ws_url {
+        return Ok(existing.clone());
+    }
+    let now = now_iso8601();
+    let updated = SessionData {
+        ws_url: new_ws_url,
+        port: existing.port,
+        pid: existing.pid,
+        active_tab_id: existing.active_tab_id.clone(),
+        timestamp: now.clone(),
+        last_reconnect_at: Some(now),
+        reconnect_count: existing.reconnect_count.saturating_add(1),
+    };
+    write_session_to(path, &updated)?;
+    Ok(updated)
+}
+
 /// Format the current time as a simplified ISO 8601 string (e.g., `"2026-02-11T12:00:00Z"`).
 ///
 /// Uses the Howard Hinnant algorithm for civil date computation from Unix timestamp.
@@ -275,6 +331,8 @@ mod tests {
             pid: Some(1234),
             active_tab_id: None,
             timestamp: "2026-02-11T12:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
         };
 
         write_session_to(&path, &data).unwrap();
@@ -301,6 +359,8 @@ mod tests {
             pid: None,
             active_tab_id: None,
             timestamp: "2026-02-11T12:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
         };
 
         write_session_to(&path, &data).unwrap();
@@ -384,6 +444,8 @@ mod tests {
             pid: Some(54321),
             active_tab_id: None,
             timestamp: "2026-02-15T00:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
         };
         write_session_to(&path, &launch).unwrap();
 
@@ -411,6 +473,8 @@ mod tests {
             pid: Some(99999),
             active_tab_id: None,
             timestamp: "2026-02-15T00:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
         };
         write_session_to(&path, &launch).unwrap();
 
@@ -450,6 +514,8 @@ mod tests {
             pid: Some(11111),
             active_tab_id: None,
             timestamp: "2026-02-15T00:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
         };
         write_session_to(&path, &existing).unwrap();
 
@@ -472,6 +538,8 @@ mod tests {
             pid: Some(1234),
             active_tab_id: Some("ABCDEF123456".into()),
             timestamp: "2026-02-17T12:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
         };
 
         write_session_to(&path, &data).unwrap();
@@ -494,6 +562,8 @@ mod tests {
             pid: None,
             active_tab_id: None,
             timestamp: "2026-02-17T12:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
         };
 
         write_session_to(&path, &data).unwrap();
@@ -525,6 +595,74 @@ mod tests {
         let read = read_session_from(&path).unwrap().unwrap();
         assert_eq!(read.active_tab_id, None);
         assert_eq!(read.pid, Some(5678));
+        // Legacy files without reconnect telemetry deserialize with defaults.
+        assert_eq!(read.last_reconnect_at, None);
+        assert_eq!(read.reconnect_count, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_session_without_reconnect_fields_deserializes() {
+        let dir = std::env::temp_dir().join("agentchrome-test-session-legacy-185");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+
+        let legacy_json = r#"{
+            "ws_url": "ws://127.0.0.1:9222/devtools/browser/legacy",
+            "port": 9222,
+            "pid": 4242,
+            "active_tab_id": "TAB1",
+            "timestamp": "2026-04-18T00:00:00Z"
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+
+        let read = read_session_from(&path).unwrap().unwrap();
+        assert_eq!(read.pid, Some(4242));
+        assert_eq!(read.active_tab_id.as_deref(), Some("TAB1"));
+        assert_eq!(read.last_reconnect_at, None);
+        assert_eq!(read.reconnect_count, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rewrite_preserving_keeps_pid_and_bumps_count() {
+        let dir = std::env::temp_dir().join("agentchrome-test-rewrite-preserving");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+
+        let original = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/OLD".into(),
+            port: 9222,
+            pid: Some(12_345),
+            active_tab_id: Some("TAB-A".into()),
+            timestamp: "2026-04-18T00:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 2,
+        };
+        write_session_to(&path, &original).unwrap();
+
+        let updated = rewrite_preserving_to(
+            &path,
+            &original,
+            "ws://127.0.0.1:9222/devtools/browser/NEW".into(),
+        )
+        .unwrap();
+
+        assert_eq!(updated.ws_url, "ws://127.0.0.1:9222/devtools/browser/NEW");
+        assert_eq!(updated.port, 9222);
+        assert_eq!(updated.pid, Some(12_345));
+        assert_eq!(updated.active_tab_id.as_deref(), Some("TAB-A"));
+        assert_eq!(updated.reconnect_count, 3);
+        assert!(updated.last_reconnect_at.is_some());
+
+        // The persisted file matches the returned record
+        let on_disk = read_session_from(&path).unwrap().unwrap();
+        assert_eq!(on_disk.ws_url, updated.ws_url);
+        assert_eq!(on_disk.pid, Some(12_345));
+        assert_eq!(on_disk.reconnect_count, 3);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

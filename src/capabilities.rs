@@ -616,6 +616,8 @@ mod tests {
             page_id: None,
             auto_dismiss_dialogs: false,
             config: None,
+            keepalive_interval: None,
+            no_keepalive: false,
             output: crate::cli::OutputFormat {
                 json: false,
                 pretty: false,

@@ -2,7 +2,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 
 use super::error::CdpError;
-use super::transport::{ReconnectConfig, TransportCommand, TransportHandle, spawn_transport};
+use super::transport::{
+    KeepAliveConfig, ReconnectConfig, TransportCommand, TransportHandle, spawn_transport,
+};
 use super::types::CdpEvent;
 
 /// Configuration for a CDP client connection.
@@ -16,6 +18,8 @@ pub struct CdpConfig {
     pub channel_capacity: usize,
     /// Reconnection settings.
     pub reconnect: ReconnectConfig,
+    /// WebSocket keep-alive settings.
+    pub keepalive: KeepAliveConfig,
 }
 
 impl Default for CdpConfig {
@@ -25,6 +29,7 @@ impl Default for CdpConfig {
             command_timeout: Duration::from_secs(30),
             channel_capacity: 256,
             reconnect: ReconnectConfig::default(),
+            keepalive: KeepAliveConfig::default(),
         }
     }
 }
@@ -44,6 +49,12 @@ pub struct CdpClient {
 impl CdpClient {
     /// Connect to a Chrome CDP WebSocket endpoint.
     ///
+    /// **Prefer [`crate::connection::connect_for_command`] for command code paths**;
+    /// only the `connect` subcommand bootstrap and the transport's own
+    /// reconnect loop should call this directly. Going through
+    /// `connect_for_command` ensures the invocation-level auto-reconnect and
+    /// keep-alive plumbing apply uniformly across every command.
+    ///
     /// # Errors
     ///
     /// Returns `CdpError::Connection` if the WebSocket handshake fails,
@@ -55,6 +66,7 @@ impl CdpClient {
             config.channel_capacity,
             config.reconnect.clone(),
             config.connect_timeout,
+            config.keepalive,
         )
         .await?;
 

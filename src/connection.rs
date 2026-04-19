@@ -1,13 +1,139 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::cdp::{CdpError, CdpEvent, CdpSession};
-use crate::chrome::{TargetInfo, discover_chrome, query_targets, query_version};
+use crate::cdp::{CdpClient, CdpConfig, CdpError, CdpEvent, CdpSession};
+use crate::chrome::{
+    ProbeResult, TargetInfo, discover_chrome, is_process_alive, query_targets, query_version,
+};
 use crate::error::AppError;
-use crate::session;
+use crate::session::{self, SessionData};
 
 /// Default Chrome `DevTools` Protocol port.
 pub const DEFAULT_CDP_PORT: u16 = 9222;
+
+/// Per-attempt latency budget and overall retry policy for the invocation-level
+/// auto-reconnect path.
+///
+/// This policy lives above the WebSocket-level `cdp::ReconnectConfig`: it
+/// governs how many times we re-probe Chrome on the stored port before
+/// classifying the loss. The two layers apply at different lifecycles —
+/// invocation-level reconnect runs before `CdpClient::connect`, while the
+/// transport's reconnect runs once a connection exists.
+#[derive(Debug, Clone, Copy)]
+pub struct ReconnectPolicy {
+    /// Maximum number of probe attempts (default 3).
+    pub max_attempts: u32,
+    /// Initial delay before retrying after a failed probe (default 100 ms).
+    pub initial_backoff: Duration,
+    /// Cap on the exponential backoff between probes (default 5 s).
+    pub max_backoff: Duration,
+    /// Per-attempt timeout for an individual probe (default 500 ms).
+    pub probe_timeout_ms: u64,
+    /// When `true`, emit per-probe diagnostics on stderr via `eprintln!`.
+    /// Defaults to `false` to keep stdout JSON pure.
+    pub verbose: bool,
+}
+
+impl Default for ReconnectPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_backoff: Duration::from_millis(100),
+            max_backoff: Duration::from_secs(5),
+            probe_timeout_ms: 500,
+            verbose: false,
+        }
+    }
+}
+
+/// Classification of an unrecoverable connection-loss outcome.
+///
+/// `ChromeTerminated` means we could prove the launched Chrome process is
+/// gone (PID liveness probe returned `Dead`). `Transient` means everything
+/// else — including "we couldn't tell" — so callers default to a recoverable
+/// remediation hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LossKind {
+    ChromeTerminated,
+    Transient,
+}
+
+impl LossKind {
+    /// Stable JSON discriminator emitted in structured error output.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ChromeTerminated => "chrome_terminated",
+            Self::Transient => "transient",
+        }
+    }
+
+    /// Whether scripts should treat this loss as recoverable. Mirrors the
+    /// `recoverable` field in the structured error JSON.
+    #[must_use]
+    pub const fn is_recoverable(self) -> bool {
+        matches!(self, Self::Transient)
+    }
+}
+
+/// Classify a final reconnect failure based on the stored Chrome PID.
+///
+/// Defaults to `Transient` when the PID is missing or the liveness probe is
+/// inconclusive — we never tell the user "unrecoverable" unless we can prove it.
+#[must_use]
+pub fn classify_loss(stored_pid: Option<u32>) -> LossKind {
+    match stored_pid {
+        Some(pid) => match is_process_alive(pid) {
+            ProbeResult::Dead => LossKind::ChromeTerminated,
+            ProbeResult::Alive | ProbeResult::Unknown => LossKind::Transient,
+        },
+        None => LossKind::Transient,
+    }
+}
+
+/// Probe Chrome on the stored port to obtain a fresh browser-level WebSocket URL.
+///
+/// Each attempt is bounded by [`ReconnectPolicy::probe_timeout_ms`] so a hung
+/// probe cannot consume the entire reconnect window. Between failed attempts
+/// we sleep with exponential backoff capped at [`ReconnectPolicy::max_backoff`].
+///
+/// # Errors
+///
+/// Returns `AppError::transient_connection_loss(..)` once the attempt budget
+/// has been exhausted. Callers higher up may upgrade this to
+/// `chrome_terminated` after running [`classify_loss`].
+async fn rediscover_on_stored_port(
+    host: &str,
+    port: u16,
+    policy: &ReconnectPolicy,
+) -> Result<String, AppError> {
+    let probe_timeout = Duration::from_millis(policy.probe_timeout_ms);
+    let mut backoff = policy.initial_backoff;
+    let mut last_error = String::from("no attempts");
+
+    for attempt in 1..=policy.max_attempts.max(1) {
+        if policy.verbose {
+            eprintln!(
+                "auto-reconnect: probe attempt {attempt}/{} on {host}:{port}",
+                policy.max_attempts
+            );
+        }
+
+        let probe = query_version(host, port);
+        match tokio::time::timeout(probe_timeout, probe).await {
+            Ok(Ok(version)) => return Ok(version.ws_debugger_url),
+            Ok(Err(e)) => last_error = e.to_string(),
+            Err(_) => last_error = format!("probe timed out after {}ms", policy.probe_timeout_ms),
+        }
+
+        if attempt < policy.max_attempts {
+            tokio::time::sleep(backoff).await;
+            backoff = backoff.saturating_mul(2).min(policy.max_backoff);
+        }
+    }
+
+    Err(AppError::transient_connection_loss(last_error))
+}
 
 /// Resolved connection info ready for use by a command.
 #[derive(Debug)]
@@ -93,6 +219,166 @@ pub async fn resolve_connection(
         }),
         Err(_) => Err(AppError::no_chrome_found()),
     }
+}
+
+/// Resolve a Chrome connection with invocation-level auto-reconnect.
+///
+/// Behaves like [`resolve_connection`] when there is no session file or the
+/// stored connection is healthy. When the stored `ws_url` is unreachable but
+/// Chrome is still on the stored port, transparently re-discovers the current
+/// browser-level WebSocket URL, rewrites the session file (preserving `pid`,
+/// `port`, `active_tab_id`), and returns the fresh connection.
+///
+/// `--ws-url` and explicit `--port` paths delegate to `resolve_connection`
+/// since reconnect only makes sense when reading from the session file.
+///
+/// # Errors
+///
+/// Returns `AppError::chrome_terminated()` (unrecoverable, exit code 2) if the
+/// stored PID's process is dead. Returns `AppError::transient_connection_loss(..)`
+/// (recoverable, exit code 2) for any other reconnect failure.
+pub async fn resolve_connection_with_reconnect(
+    host: &str,
+    port: Option<u16>,
+    ws_url: Option<&str>,
+    policy: &ReconnectPolicy,
+) -> Result<ResolvedConnection, AppError> {
+    if ws_url.is_some() || port.is_some() {
+        return resolve_connection(host, port, ws_url).await;
+    }
+
+    let Some(session_data) = session::read_session()? else {
+        // No session file: fall back to auto-discovery on the default port.
+        return match discover_chrome(host, DEFAULT_CDP_PORT).await {
+            Ok((ws_url, p)) => Ok(ResolvedConnection {
+                ws_url,
+                host: host.to_string(),
+                port: p,
+            }),
+            Err(_) => Err(AppError::no_chrome_found()),
+        };
+    };
+
+    // Fast path: port responds and the returned browser ws_url matches what we
+    // have on disk. A bare `/json/version` ping is not enough — the port can be
+    // reachable while the browser-level WebSocket has rotated to a new id, so
+    // we compare endpoints and rewrite the session file when they diverge.
+    let rediscover_err = match query_version(host, session_data.port).await {
+        Ok(version) => {
+            if version.ws_debugger_url == session_data.ws_url {
+                return Ok(ResolvedConnection {
+                    ws_url: session_data.ws_url,
+                    host: host.to_string(),
+                    port: session_data.port,
+                });
+            }
+            // Stored ws_url is stale but port is live: rewrite and retry in-band.
+            let updated =
+                session::rewrite_preserving(&session_data, version.ws_debugger_url.clone())
+                    .unwrap_or_else(|e| {
+                        eprintln!("warning: could not persist reconnect to session file: {e}");
+                        SessionData {
+                            ws_url: version.ws_debugger_url.clone(),
+                            ..session_data.clone()
+                        }
+                    });
+            return Ok(ResolvedConnection {
+                ws_url: updated.ws_url,
+                host: host.to_string(),
+                port: session_data.port,
+            });
+        }
+        Err(e) => e.to_string(),
+    };
+
+    // Port unreachable: retry on the stored port with the policy's backoff.
+    let rediscover_err = match rediscover_on_stored_port(host, session_data.port, policy).await {
+        Ok(new_ws_url) => {
+            let updated = session::rewrite_preserving(&session_data, new_ws_url.clone())
+                .unwrap_or_else(|e| {
+                    // Best-effort: failure to persist must not block the command.
+                    eprintln!("warning: could not persist reconnect to session file: {e}");
+                    SessionData {
+                        ws_url: new_ws_url.clone(),
+                        ..session_data.clone()
+                    }
+                });
+            return Ok(ResolvedConnection {
+                ws_url: updated.ws_url,
+                host: host.to_string(),
+                port: session_data.port,
+            });
+        }
+        Err(e) => format!("{rediscover_err}; {e}"),
+    };
+
+    // Stored port unreachable: try auto-discovery on the default port.
+    if let Ok((discovered, p)) = discover_chrome(host, DEFAULT_CDP_PORT).await {
+        let updated = session::rewrite_preserving(&session_data, discovered.clone())
+            .unwrap_or_else(|e| {
+                eprintln!("warning: could not persist reconnect to session file: {e}");
+                SessionData {
+                    ws_url: discovered.clone(),
+                    port: p,
+                    ..session_data.clone()
+                }
+            });
+        return Ok(ResolvedConnection {
+            ws_url: updated.ws_url,
+            host: host.to_string(),
+            port: p,
+        });
+    }
+
+    Err(match classify_loss(session_data.pid) {
+        LossKind::ChromeTerminated => AppError::chrome_terminated(),
+        LossKind::Transient => AppError::transient_connection_loss(format!(
+            "stored port unreachable; re-discovery exhausted ({rediscover_err})"
+        )),
+    })
+}
+
+/// A live CDP client paired with the resolution metadata used to obtain it.
+#[derive(Debug)]
+pub struct CommandConnection {
+    pub client: CdpClient,
+    pub resolved: ResolvedConnection,
+}
+
+/// Single entry point for commands that need a Chrome CDP connection.
+///
+/// Wraps [`resolve_connection_with_reconnect`] + [`CdpClient::connect`] so every
+/// command shares the same auto-reconnect and keep-alive plumbing. New commands
+/// must route through this function rather than calling `CdpClient::connect`
+/// directly; the `connect` subcommand is exempt because it is what creates the
+/// session file in the first place.
+///
+/// # Errors
+///
+/// Propagates `AppError` from the resolution layer (including
+/// `chrome_terminated` / `transient_connection_loss`) or `CdpError` from the
+/// transport handshake.
+pub async fn connect_for_command(
+    host: &str,
+    port: Option<u16>,
+    ws_url: Option<&str>,
+    timeout_ms: Option<u64>,
+    keepalive: crate::cdp::KeepAliveConfig,
+    policy: &ReconnectPolicy,
+) -> Result<CommandConnection, AppError> {
+    let resolved = resolve_connection_with_reconnect(host, port, ws_url, policy).await?;
+
+    let config = CdpConfig {
+        keepalive,
+        command_timeout: timeout_ms.map_or_else(
+            || CdpConfig::default().command_timeout,
+            Duration::from_millis,
+        ),
+        ..CdpConfig::default()
+    };
+    let client = CdpClient::connect(&resolved.ws_url, config).await?;
+
+    Ok(CommandConnection { client, resolved })
 }
 
 /// Extract port from a WebSocket URL like `ws://host:port/path`.
@@ -454,7 +740,7 @@ mod tests {
 
     #[tokio::test]
     async fn managed_session_enables_domain_once() {
-        use crate::cdp::{CdpClient, CdpConfig, ReconnectConfig};
+        use crate::cdp::{CdpClient, CdpConfig, KeepAliveConfig, ReconnectConfig};
         use futures_util::{SinkExt, StreamExt};
         use std::time::Duration;
         use tokio::net::TcpListener;
@@ -501,6 +787,10 @@ mod tests {
             reconnect: ReconnectConfig {
                 max_retries: 0,
                 ..ReconnectConfig::default()
+            },
+            keepalive: KeepAliveConfig {
+                interval: None,
+                pong_timeout: Duration::from_secs(10),
             },
         };
         let client = CdpClient::connect(&url, config).await.unwrap();

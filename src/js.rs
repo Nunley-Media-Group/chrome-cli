@@ -1,13 +1,12 @@
-use std::time::Duration;
-
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::cdp::CdpClient;
+use agentchrome::connection::{ManagedSession, resolve_target};
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{GlobalOpts, JsArgs, JsCommand, JsExecArgs};
 use crate::emulate::apply_emulate_state;
+use crate::output::connect_from_global_with_timeout;
 
 // =============================================================================
 // Output types
@@ -38,19 +37,6 @@ struct JsExecError {
 }
 
 // =============================================================================
-// Config helper
-// =============================================================================
-
-fn cdp_config(global: &GlobalOpts, exec_args: &JsExecArgs) -> CdpConfig {
-    let mut config = crate::output::cdp_config(global);
-    // Execution-specific --timeout overrides global --timeout
-    if let Some(timeout_ms) = exec_args.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
-    }
-    config
-}
-
-// =============================================================================
 // Dispatcher
 // =============================================================================
 
@@ -73,23 +59,24 @@ async fn setup_session(
     global: &GlobalOpts,
     exec_args: &JsExecArgs,
 ) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    // `js exec --timeout` overrides the global timeout for this invocation.
+    let conn =
+        connect_from_global_with_timeout(global, exec_args.timeout.or(global.timeout)).await?;
+
     let target = resolve_target(
-        &conn.host,
-        conn.port,
+        &conn.resolved.host,
+        conn.resolved.port,
         global.tab.as_deref(),
         global.page_id.as_deref(),
     )
     .await?;
 
-    let config = cdp_config(global, exec_args);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
+    let session = conn.client.create_session(&target.id).await?;
     let mut managed = ManagedSession::new(session);
     apply_emulate_state(&mut managed).await?;
     managed.install_dialog_interceptors().await;
 
-    Ok((client, managed))
+    Ok((conn.client, managed))
 }
 
 // =============================================================================

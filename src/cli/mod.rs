@@ -109,6 +109,21 @@ pub struct GlobalOpts {
     #[arg(long, global = true, env = "AGENTCHROME_CONFIG")]
     pub config: Option<PathBuf>,
 
+    /// WebSocket keep-alive interval in milliseconds (default: 30000; 0 disables)
+    #[arg(
+        long = "keepalive-interval",
+        value_name = "MS",
+        value_parser = clap::value_parser!(u64),
+        env = "AGENTCHROME_KEEPALIVE_INTERVAL",
+        global = true,
+        conflicts_with = "no_keepalive"
+    )]
+    pub keepalive_interval: Option<u64>,
+
+    /// Disable WebSocket keep-alive pings entirely
+    #[arg(long = "no-keepalive", global = true)]
+    pub no_keepalive: bool,
+
     #[command(flatten)]
     pub output: OutputFormat,
 }
@@ -175,7 +190,13 @@ EXAMPLES:
   agentchrome connect --status
 
   # Disconnect and remove session file
-  agentchrome connect --disconnect"
+  agentchrome connect --disconnect
+
+  # Run a long command with a custom keep-alive interval
+  agentchrome --keepalive-interval 60000 console follow
+
+  # Disable keep-alive entirely
+  agentchrome --no-keepalive page snapshot --json"
     )]
     Connect(ConnectArgs),
 

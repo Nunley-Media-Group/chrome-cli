@@ -443,7 +443,9 @@ fn exit_code_should_not_be(world: &mut CliWorld, rejected: i32) {
 // CdpWorld — CDP WebSocket client BDD tests
 // =============================================================================
 
-use agentchrome::cdp::{CdpClient, CdpConfig, CdpError, CdpEvent, ReconnectConfig};
+use agentchrome::cdp::{
+    CdpClient, CdpConfig, CdpError, CdpEvent, KeepAliveConfig, ReconnectConfig,
+};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::collections::HashMap;
@@ -501,7 +503,15 @@ impl CdpWorld {
                 initial_backoff: Duration::from_millis(50),
                 max_backoff: Duration::from_millis(200),
             },
+            keepalive: keepalive_disabled(),
         }
+    }
+}
+
+fn keepalive_disabled() -> KeepAliveConfig {
+    KeepAliveConfig {
+        interval: None,
+        pong_timeout: Duration::from_secs(10),
     }
 }
 
@@ -916,6 +926,7 @@ async fn connect_with_timeout(world: &mut CdpWorld) {
             max_retries: 0,
             ..ReconnectConfig::default()
         },
+        keepalive: keepalive_disabled(),
     };
     let start = std::time::Instant::now();
     match CdpClient::connect(&world.ws_url(), config).await {
@@ -979,6 +990,7 @@ async fn connected_with_short_timeout(world: &mut CdpWorld) {
             max_retries: 0,
             ..ReconnectConfig::default()
         },
+        keepalive: keepalive_disabled(),
     };
     let url = format!("ws://{addr}");
     world.client = Some(
@@ -1083,6 +1095,7 @@ async fn connected_with_reconnection(world: &mut CdpWorld) {
             initial_backoff: Duration::from_millis(50),
             max_backoff: Duration::from_millis(500),
         },
+        keepalive: keepalive_disabled(),
     };
     let url = format!("ws://{addr}");
     world.mock_addr = Some(addr);
@@ -1155,6 +1168,7 @@ async fn connected_with_limited_retries(world: &mut CdpWorld) {
             initial_backoff: Duration::from_millis(50),
             max_backoff: Duration::from_millis(100),
         },
+        keepalive: keepalive_disabled(),
     };
     let url = format!("ws://{addr}");
     world.mock_addr = Some(addr);
@@ -1541,6 +1555,70 @@ fn session_output_is_single_line(world: &mut SessionWorld) {
     assert!(
         !trimmed.contains('\n'),
         "Expected single-line output but got multiple lines:\n{trimmed}"
+    );
+}
+
+// =============================================================================
+// ResilienceReadmeWorld — README inspection BDD steps for issue #185
+// (no Chrome needed; distinct from the pre-existing ReadmeWorld used by the
+// readme-quickstart feature, which only inspects section structure)
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct ResilienceReadmeWorld {
+    contents: String,
+}
+
+#[when("I inspect the project README.md")]
+fn resilience_readme_inspect(world: &mut ResilienceReadmeWorld) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("README.md");
+    world.contents = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to read README.md at {}: {e}", path.display()));
+}
+
+#[then(expr = "it contains the heading {string}")]
+fn resilience_readme_contains_heading(world: &mut ResilienceReadmeWorld, heading: String) {
+    let needle = format!("## {heading}");
+    assert!(
+        world.contents.contains(&needle),
+        "README does not contain the heading '{heading}' (looking for '{needle}')"
+    );
+}
+
+#[then(expr = "it mentions {string} and the default {int} ms")]
+fn resilience_readme_mentions_keepalive_default(
+    world: &mut ResilienceReadmeWorld,
+    term: String,
+    ms: i64,
+) {
+    assert!(
+        world.contents.contains(&term),
+        "README does not mention '{term}'"
+    );
+    let ms_str = format!("{ms}");
+    assert!(
+        world.contents.contains(&ms_str),
+        "README does not mention the default '{ms_str}'"
+    );
+}
+
+#[then("it mentions the error kind discriminator and the recoverable boolean")]
+fn resilience_readme_mentions_error_kinds(world: &mut ResilienceReadmeWorld) {
+    for needle in &["chrome_terminated", "transient", "recoverable"] {
+        assert!(
+            world.contents.contains(needle),
+            "README does not mention '{needle}'"
+        );
+    }
+}
+
+#[then(expr = "it includes at least one copy-pasteable {string} command example")]
+fn resilience_readme_includes_example(world: &mut ResilienceReadmeWorld, flag: String) {
+    let needle = format!("agentchrome {flag}");
+    let alt = format!("agentchrome --{flag}");
+    assert!(
+        world.contents.contains(&needle) || world.contents.contains(&alt),
+        "README does not contain a copy-pasteable example with '{flag}'"
     );
 }
 
@@ -3677,6 +3755,17 @@ const SESSION_TESTABLE_SCENARIOS: &[&str] = &[
 const DISCONNECT_KILL_TESTABLE_SCENARIOS: &[&str] =
     &["Disconnect with already-exited process succeeds cleanly"];
 
+/// Issue #185 — scenarios that exercise CLI surfaces (clap help, capabilities)
+/// and the README without needing a live Chrome connection.
+const RECONNECT_185_CLI_SCENARIOS: &[&str] = &[
+    "Clap --help lists the new flags",
+    "Clap long help includes worked EXAMPLES for the new flags",
+    "Capabilities manifest reflects the new flags",
+];
+
+/// Issue #185 — README inspection scenario (uses `ResilienceReadmeWorld` below).
+const RECONNECT_185_README_SCENARIOS: &[&str] = &["README documents session resilience"];
+
 /// JS execution BDD scenarios that can be tested without a running Chrome instance.
 const JS_TESTABLE_SCENARIOS: &[&str] = &["File not found error"];
 
@@ -4772,6 +4861,26 @@ async fn main() {
             "tests/features/session-connection-management.feature",
             |_feature, _rule, scenario| {
                 SESSION_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Issue #185 — CLI surface scenarios reuse CliWorld. README inspection
+    // uses ReadmeWorld. Chrome-dependent reconnect/keep-alive scenarios are
+    // verified manually via the smoke test in tasks.md (T036).
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/185-session-reconnect-keepalive.feature",
+            |_feature, _rule, scenario| {
+                RECONNECT_185_CLI_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+    ResilienceReadmeWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/185-session-reconnect-keepalive.feature",
+            |_feature, _rule, scenario| {
+                RECONNECT_185_README_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

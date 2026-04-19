@@ -11,6 +11,74 @@ pub enum Channel {
     Dev,
 }
 
+/// Result of a process liveness probe.
+///
+/// Used to classify connection losses as `chrome_terminated` (definitively
+/// dead) versus `transient` (alive or unknown).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeResult {
+    /// The process exists and accepts signals from the current user.
+    Alive,
+    /// The process does not exist (`ESRCH` on Unix, missing in `tasklist` on Windows).
+    Dead,
+    /// We could not determine liveness (e.g. permission denied, OS error).
+    Unknown,
+}
+
+/// Probe whether a process with the given PID is currently alive.
+///
+/// On Unix, sends signal `0` via `libc::kill`, which performs an existence/permission
+/// check without actually delivering a signal. On Windows, shells out to `tasklist`.
+/// When the result is ambiguous we return [`ProbeResult::Unknown`], so callers can
+/// fall back to the conservative "transient" classification.
+#[must_use]
+pub fn is_process_alive(pid: u32) -> ProbeResult {
+    #[cfg(unix)]
+    {
+        // PID values fit in i32 on all supported platforms.
+        #[allow(clippy::cast_possible_wrap)]
+        let pid_i32 = pid as i32;
+        // SAFETY: signal 0 is the documented null-signal; it never delivers a
+        // signal, only validates existence + permission for the target PID.
+        let rc = unsafe { libc::kill(pid_i32, 0) };
+        if rc == 0 {
+            return ProbeResult::Alive;
+        }
+        // SAFETY: libc::__errno_location / __error are sound to read after a
+        // failing libc call. std::io::Error::last_os_error wraps that for us.
+        let err = std::io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::ESRCH) => ProbeResult::Dead,
+            Some(libc::EPERM) => ProbeResult::Alive, // EPERM means the process exists
+            _ => ProbeResult::Unknown,
+        }
+    }
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                // tasklist prints "INFO: No tasks are running..." when no match;
+                // otherwise the PID appears in the output.
+                if stdout.contains(&pid.to_string()) {
+                    ProbeResult::Alive
+                } else {
+                    ProbeResult::Dead
+                }
+            }
+            _ => ProbeResult::Unknown,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        ProbeResult::Unknown
+    }
+}
+
 /// Find a Chrome executable for the given release channel.
 ///
 /// Checks the `CHROME_PATH` environment variable first, then falls back
@@ -206,6 +274,21 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         let result = find_chrome_from(Channel::Stable, Some(&exe));
         assert_eq!(result.unwrap(), exe);
+    }
+
+    #[test]
+    fn is_process_alive_self_is_alive() {
+        let me = std::process::id();
+        assert_eq!(is_process_alive(me), ProbeResult::Alive);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn is_process_alive_high_pid_is_dead() {
+        // u32::MAX wraps to -1 as i32, which targets a process group instead
+        // of a single process; use a high but valid-i32 PID so libc::kill
+        // returns ESRCH.
+        assert_eq!(is_process_alive(999_999_999), ProbeResult::Dead);
     }
 
     #[test]

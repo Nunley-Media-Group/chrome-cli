@@ -63,6 +63,29 @@ impl Default for ReconnectConfig {
     }
 }
 
+/// Transport-level WebSocket keep-alive configuration.
+///
+/// When `interval` is `Some(d)`, the transport task sends a `Ping` frame
+/// after `d` of outbound silence and treats a missing `Pong` within
+/// `pong_timeout` as a dead connection. When `interval` is `None`, the
+/// keep-alive loop is disabled entirely.
+#[derive(Debug, Clone, Copy)]
+pub struct KeepAliveConfig {
+    /// Interval between keep-alive pings. `None` disables keep-alive.
+    pub interval: Option<Duration>,
+    /// Time to wait for a `Pong` response before treating the link as dead.
+    pub pong_timeout: Duration,
+}
+
+impl Default for KeepAliveConfig {
+    fn default() -> Self {
+        Self {
+            interval: Some(Duration::from_secs(30)),
+            pong_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
 /// Clonable handle for communicating with the transport task.
 #[derive(Debug, Clone)]
 pub struct TransportHandle {
@@ -109,6 +132,7 @@ pub async fn spawn_transport(
     channel_capacity: usize,
     reconnect_config: ReconnectConfig,
     connect_timeout: Duration,
+    keepalive: KeepAliveConfig,
 ) -> Result<TransportHandle, CdpError> {
     let ws_stream = connect_ws(url, connect_timeout).await?;
     let connected = Arc::new(AtomicBool::new(true));
@@ -133,6 +157,11 @@ pub async fn spawn_transport(
             reconnect_config,
             connect_timeout,
             reconnect_failure: None,
+            keepalive,
+            // Initialize inside the task so scheduler delay between spawn and
+            // first poll isn't counted against the first keep-alive interval.
+            last_outbound: Instant::now(),
+            last_ping_at: None,
         };
         task.run().await;
     });
@@ -160,9 +189,16 @@ struct TransportTask {
     reconnect_config: ReconnectConfig,
     connect_timeout: Duration,
     reconnect_failure: Option<(u32, String)>,
+    keepalive: KeepAliveConfig,
+    /// Timestamp of the most recent outbound WebSocket frame, used to gate
+    /// the keep-alive timer against steady command traffic.
+    last_outbound: Instant,
+    /// `Some(when_sent)` while a Ping is awaiting a Pong; `None` otherwise.
+    last_ping_at: Option<Instant>,
 }
 
 impl TransportTask {
+    #[allow(clippy::too_many_lines)]
     async fn run(&mut self) {
         loop {
             // If reconnection has permanently failed, drain remaining
@@ -191,26 +227,51 @@ impl TransportTask {
                 }
             };
 
+            // When keep-alive is disabled, this resolves to a never-firing
+            // future so the select! branch is effectively inert.
+            let keepalive_interval = self.keepalive.interval;
+            let last_outbound = self.last_outbound;
+            let keepalive_tick = async move {
+                match keepalive_interval {
+                    Some(interval) => {
+                        tokio::time::sleep_until(last_outbound + interval).await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+
+            // Inert unless a Ping is outstanding.
+            let pong_timeout = self.keepalive.pong_timeout;
+            let last_ping = self.last_ping_at;
+            let pong_deadline = async move {
+                match last_ping {
+                    Some(sent_at) => {
+                        tokio::time::sleep_until(sent_at + pong_timeout).await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+
             tokio::select! {
-                // Branch 1: WebSocket read
                 ws_msg = self.ws_stream.next() => {
                     match ws_msg {
                         Some(Ok(Message::Text(text))) => {
                             self.handle_text_message(&text);
                         }
+                        Some(Ok(Message::Pong(_))) => {
+                            self.last_ping_at = None;
+                        }
                         Some(Ok(Message::Close(_)) | Err(_)) | None => {
                             self.handle_disconnect().await;
-                            // If reconnected, continue normally.
-                            // If reconnect failed, reconnect_failure is set and
-                            // the top-of-loop check will drain commands.
+                            self.last_ping_at = None;
+                            self.last_outbound = Instant::now();
                         }
                         Some(Ok(_)) => {
-                            // Binary, Ping, Pong, Frame — ignore
+                            // Binary, Ping, Frame — ignore
                         }
                     }
                 }
 
-                // Branch 2: Command channel
                 cmd = self.command_rx.recv() => {
                     match cmd {
                         Some(TransportCommand::SendCommand { command, response_tx, deadline }) => {
@@ -231,9 +292,26 @@ impl TransportTask {
                     }
                 }
 
-                // Branch 3: Timeout sweep
                 () = timeout_sleep => {
                     self.sweep_timeouts();
+                }
+
+                () = keepalive_tick => {
+                    if self.keepalive.interval.is_some() {
+                        let _ = self.ws_stream.send(Message::Ping(Vec::new().into())).await;
+                        let now = Instant::now();
+                        self.last_outbound = now;
+                        self.last_ping_at = Some(now);
+                    }
+                }
+
+                () = pong_deadline => {
+                    if self.last_ping_at.is_some() {
+                        // Missed Pong — treat as dead and let reconnect recover.
+                        self.handle_disconnect().await;
+                        self.last_ping_at = None;
+                        self.last_outbound = Instant::now();
+                    }
                 }
             }
         }
@@ -307,6 +385,9 @@ impl TransportTask {
             ))));
             return;
         }
+
+        // Resets the keep-alive timer so pings don't fire during steady traffic.
+        self.last_outbound = Instant::now();
 
         self.pending.insert(
             id,

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-04-19
+
+### Added
+
+- Add WebSocket keep-alive pings with pong watchdog and `--keepalive-interval` / `--no-keepalive` global flags (env: `AGENTCHROME_KEEPALIVE_INTERVAL`, config: `[keepalive].interval_ms`, default 30 s) to keep long-running CDP sessions alive across idle gaps (#185)
+- Add invocation-level auto-reconnect: when the cached `ws_url` is stale or rotated, every command now rediscovers Chrome on the stored port via the bounded `ReconnectPolicy` (max attempts, exponential backoff, per-probe `probe_timeout_ms`) and rewrites the session file in-band, preserving `pid`, `port`, and unrelated fields (#185)
+- Add structured connection-loss errors distinguishing `kind: "chrome_terminated"` (`recoverable: false`, suggests `connect --launch`) from `kind: "transient"` (`recoverable: true`, suggests `connect`) via a PID liveness probe in `chrome::platform` (#185)
+- Add `last_reconnect_at` (ISO 8601) and `reconnect_count` to the session file, surfaced via `connect --status` along with the effective keep-alive interval and enabled flag (#185)
+- Add `[keepalive]` and `[reconnect]` sections to the config file with precedence ordering CLI > env > config > built-in default; `--no-keepalive` and `--keepalive-interval 0` always disable pings (#185)
+- Add README "Session resilience" section documenting auto-reconnect, keep-alive flag/env/config, disable mechanism, and `kind` / `recoverable` scripting guidance, plus capabilities-manifest and man-page coverage of the new flags (#185)
+- Add BDD coverage for AC21–AC36 in `tests/features/185-session-reconnect-keepalive.feature`, including Scenario Outlines for uniform reconnect across commands and keep-alive interval precedence (#185)
+
+### Fixed
+
+- Fix reconnect fast-path so a `/json/version` ping that returns a rotated `ws_debugger_url` rewrites the session file instead of returning the stale URL (#185)
+
 ## [1.32.0] - 2026-04-18
 
 ### Added

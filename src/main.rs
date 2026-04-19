@@ -195,6 +195,10 @@ fn apply_config_defaults(cli_global: &GlobalOpts, config: &config::ConfigFile) -
         page_id: cli_global.page_id.clone(),
         auto_dismiss_dialogs: cli_global.auto_dismiss_dialogs,
         config: cli_global.config.clone(),
+        keepalive_interval: cli_global
+            .keepalive_interval
+            .or(config.keepalive.interval_ms),
+        no_keepalive: cli_global.no_keepalive,
         output: cli::OutputFormat {
             json: cli_global.output.json,
             pretty: cli_global.output.pretty,
@@ -299,6 +303,20 @@ struct StatusInfo {
     pid: Option<u32>,
     timestamp: String,
     reachable: bool,
+    /// Last auto-reconnect timestamp, or `null` if never.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_reconnect_at: Option<String>,
+    /// Cumulative auto-reconnects within this session file's lifetime.
+    reconnect_count: u32,
+    keepalive: KeepaliveStatus,
+}
+
+#[derive(Serialize)]
+struct KeepaliveStatus {
+    /// `null` when keep-alive is disabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    interval_ms: Option<u64>,
+    enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -348,15 +366,24 @@ fn save_session(info: &ConnectionInfo) {
         .ok()
         .flatten()
         .filter(|existing| existing.port == info.port);
-    let pid = info.pid.or_else(|| existing.as_ref().and_then(|e| e.pid));
-    let active_tab_id = existing.and_then(|e| e.active_tab_id);
 
-    let data = SessionData {
-        ws_url: info.ws_url.clone(),
-        port: info.port,
-        pid,
-        active_tab_id,
-        timestamp: session::now_iso8601(),
+    let data = match existing {
+        Some(e) => SessionData {
+            ws_url: info.ws_url.clone(),
+            port: info.port,
+            pid: info.pid.or(e.pid),
+            timestamp: session::now_iso8601(),
+            ..e
+        },
+        None => SessionData {
+            ws_url: info.ws_url.clone(),
+            port: info.port,
+            pid: info.pid,
+            active_tab_id: None,
+            timestamp: session::now_iso8601(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
+        },
     };
     if let Err(e) = session::write_session(&data) {
         eprintln!("warning: could not save session file: {e}");
@@ -509,12 +536,24 @@ async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
         .await
         .is_ok();
 
+    let keepalive = output::build_keepalive(global);
+    let interval_ms = keepalive
+        .interval
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    let keepalive_status = KeepaliveStatus {
+        enabled: interval_ms.is_some(),
+        interval_ms,
+    };
+
     let status = StatusInfo {
         ws_url: session_data.ws_url,
         port: session_data.port,
         pid: session_data.pid,
         timestamp: session_data.timestamp,
         reachable,
+        last_reconnect_at: session_data.last_reconnect_at,
+        reconnect_count: session_data.reconnect_count,
+        keepalive: keepalive_status,
     };
 
     if global.output.plain {
@@ -551,6 +590,18 @@ fn format_plain_status(status: &StatusInfo) -> String {
     }
     let _ = writeln!(out, "timestamp: {}", status.timestamp);
     let _ = writeln!(out, "reachable: {}", status.reachable);
+    if let Some(ref ts) = status.last_reconnect_at {
+        let _ = writeln!(out, "last_reconnect_at: {ts}");
+    }
+    let _ = writeln!(out, "reconnect_count:   {}", status.reconnect_count);
+    match status.keepalive.interval_ms {
+        Some(ms) => {
+            let _ = writeln!(out, "keepalive: enabled ({ms} ms)");
+        }
+        None => {
+            let _ = writeln!(out, "keepalive: disabled");
+        }
+    }
     out
 }
 
@@ -600,11 +651,7 @@ fn kill_process(pid: u32) {
         let start = std::time::Instant::now();
 
         while start.elapsed() < max_wait {
-            // kill(pid, 0) checks if the process exists without sending a signal.
-            // SAFETY: signal 0 is a null signal used only for existence checks.
-            let exists = unsafe { libc::kill(pid_i32, 0) };
-            if exists != 0 {
-                // Process no longer exists — SIGTERM worked.
+            if matches!(chrome::is_process_alive(pid), chrome::ProbeResult::Dead) {
                 return;
             }
             thread::sleep(poll_interval);

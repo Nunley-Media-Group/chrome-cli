@@ -3,11 +3,11 @@ use std::time::Duration;
 use serde::Serialize;
 
 use agentchrome::cdp::CdpClient;
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::connection::{ManagedSession, resolve_target};
 use agentchrome::error::AppError;
 
 use crate::cli::{DialogAction, DialogArgs, DialogCommand, DialogHandleArgs, GlobalOpts};
-use crate::output::{cdp_config, print_output};
+use crate::output::{connect_from_global, print_output};
 
 // =============================================================================
 // Output types
@@ -104,18 +104,17 @@ const PAGE_ENABLE_TIMEOUT_MS: u64 = 300;
 async fn setup_dialog_session(
     global: &GlobalOpts,
 ) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let conn = connect_from_global(global).await?;
+
     let target = resolve_target(
-        &conn.host,
-        conn.port,
+        &conn.resolved.host,
+        conn.resolved.port,
         global.tab.as_deref(),
         global.page_id.as_deref(),
     )
     .await?;
 
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
+    let session = conn.client.create_session(&target.id).await?;
     let managed = ManagedSession::new(session);
 
     // Send Page.enable with a short timeout. This blocks when a dialog is
@@ -123,7 +122,7 @@ async fn setup_dialog_session(
     let page_enable = managed.send_command("Page.enable", None);
     let _ = tokio::time::timeout(Duration::from_millis(PAGE_ENABLE_TIMEOUT_MS), page_enable).await;
 
-    Ok((client, managed))
+    Ok((conn.client, managed))
 }
 
 // =============================================================================

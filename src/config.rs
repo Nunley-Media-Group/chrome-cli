@@ -29,6 +29,10 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# agentchrome configuration file
 # [tabs]
 # auto_activate = true
 # filter_internal = true
+
+# WebSocket keep-alive
+# [keepalive]
+# interval_ms = 30000        # 0 disables; --no-keepalive overrides
 "#;
 
 // ---------------------------------------------------------------------------
@@ -43,6 +47,8 @@ pub struct ConfigFile {
     pub launch: LaunchConfig,
     pub output: OutputConfig,
     pub tabs: TabsConfig,
+    /// WebSocket keep-alive configuration.
+    pub keepalive: KeepaliveConfigFile,
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -74,6 +80,14 @@ pub struct OutputConfig {
 pub struct TabsConfig {
     pub auto_activate: Option<bool>,
     pub filter_internal: Option<bool>,
+}
+
+/// `[keepalive]` section of the TOML config file.
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct KeepaliveConfigFile {
+    /// Interval in milliseconds between keep-alive pings. `0` or unset disables.
+    pub interval_ms: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +329,8 @@ struct StrictConfigFile {
     output: StrictOutputConfig,
     #[serde(default)]
     tabs: StrictTabsConfig,
+    #[serde(default)]
+    keepalive: StrictKeepaliveConfig,
 }
 
 #[derive(Default, Deserialize)]
@@ -348,6 +364,12 @@ struct StrictTabsConfig {
     filter_internal: Option<bool>,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictKeepaliveConfig {
+    interval_ms: Option<u64>,
+}
+
 impl From<StrictConfigFile> for ConfigFile {
     fn from(s: StrictConfigFile) -> Self {
         Self {
@@ -369,6 +391,9 @@ impl From<StrictConfigFile> for ConfigFile {
             tabs: TabsConfig {
                 auto_activate: s.tabs.auto_activate,
                 filter_internal: s.tabs.filter_internal,
+            },
+            keepalive: KeepaliveConfigFile {
+                interval_ms: s.keepalive.interval_ms,
             },
         }
     }
@@ -614,6 +639,7 @@ unknown_key = "hello"
                 auto_activate: Some(false),
                 filter_internal: Some(false),
             },
+            keepalive: KeepaliveConfigFile::default(),
         };
         let path = PathBuf::from("/tmp/test.toml");
         let resolved = resolve_config(&config, Some(path.clone()));

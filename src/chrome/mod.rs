@@ -11,4 +11,6 @@ pub use discovery::{
 };
 pub use error::ChromeError;
 pub use launcher::{ChromeProcess, LaunchConfig, find_available_port, launch_chrome};
-pub use platform::{Channel, default_user_data_dir, find_chrome_executable};
+pub use platform::{
+    Channel, ProbeResult, default_user_data_dir, find_chrome_executable, is_process_alive,
+};

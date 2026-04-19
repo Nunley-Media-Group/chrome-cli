@@ -312,6 +312,47 @@ impl AppError {
         }
     }
 
+    /// Unrecoverable connection loss: Chrome process is gone.
+    ///
+    /// Emits a structured JSON error on stderr with `kind = "chrome_terminated"`
+    /// and `recoverable = false`, suggesting `agentchrome connect --launch`.
+    #[must_use]
+    pub fn chrome_terminated() -> Self {
+        Self::structured_loss(
+            crate::connection::LossKind::ChromeTerminated,
+            "Chrome process has terminated. \
+             Run 'agentchrome connect --launch' to start a new session."
+                .to_string(),
+        )
+    }
+
+    /// Recoverable connection loss: probe failed but we cannot prove Chrome is
+    /// gone. Emits `kind = "transient"`, `recoverable = true`, and suggests
+    /// `agentchrome connect`.
+    #[must_use]
+    pub fn transient_connection_loss(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let message = format!(
+            "Chrome connection failed: {detail}. \
+             Run 'agentchrome connect' to rediscover."
+        );
+        Self::structured_loss(crate::connection::LossKind::Transient, message)
+    }
+
+    fn structured_loss(kind: crate::connection::LossKind, message: String) -> Self {
+        let custom = serde_json::json!({
+            "error": message,
+            "code": ExitCode::ConnectionError as u8,
+            "kind": kind.as_str(),
+            "recoverable": kind.is_recoverable(),
+        });
+        Self {
+            message,
+            code: ExitCode::ConnectionError,
+            custom_json: Some(custom.to_string()),
+        }
+    }
+
     #[must_use]
     pub fn no_snapshot_state() -> Self {
         Self {
@@ -721,6 +762,33 @@ mod tests {
         let err = AppError::no_chrome_found();
         assert!(err.message.contains("No Chrome instance found"));
         assert!(matches!(err.code, ExitCode::ConnectionError));
+    }
+
+    #[test]
+    fn chrome_terminated_emits_structured_json() {
+        let err = AppError::chrome_terminated();
+        assert!(matches!(err.code, ExitCode::ConnectionError));
+        assert!(err.message.contains("agentchrome connect --launch"));
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        assert_eq!(json["kind"], "chrome_terminated");
+        assert_eq!(json["recoverable"], false);
+        assert_eq!(json["code"], 2);
+        assert!(json["error"].as_str().unwrap().contains("terminated"));
+    }
+
+    #[test]
+    fn transient_connection_loss_emits_structured_json() {
+        let err = AppError::transient_connection_loss("probe timeout");
+        assert!(matches!(err.code, ExitCode::ConnectionError));
+        assert!(err.message.contains("probe timeout"));
+        assert!(err.message.contains("agentchrome connect"));
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        assert_eq!(json["kind"], "transient");
+        assert_eq!(json["recoverable"], true);
+        assert_eq!(json["code"], 2);
+        assert!(json["error"].as_str().unwrap().contains("probe timeout"));
     }
 
     #[test]

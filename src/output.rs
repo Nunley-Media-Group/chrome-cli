@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use agentchrome::cdp::{CdpClient, CdpConfig};
-use agentchrome::connection::{ManagedSession, resolve_connection, resolve_target};
+use agentchrome::cdp::{CdpClient, KeepAliveConfig};
+use agentchrome::connection::{ManagedSession, ReconnectPolicy, resolve_target};
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{GlobalOpts, OutputFormat};
@@ -87,16 +87,69 @@ pub fn print_output(value: &impl Serialize, output: &OutputFormat) -> Result<(),
 }
 
 // =============================================================================
-// CDP config helper
+// CDP config helpers
 // =============================================================================
 
-/// Build a `CdpConfig` from the global CLI options.
-pub fn cdp_config(global: &GlobalOpts) -> CdpConfig {
-    let mut config = CdpConfig::default();
-    if let Some(timeout_ms) = global.timeout {
-        config.command_timeout = Duration::from_millis(timeout_ms);
+/// Resolve the effective keep-alive config from `GlobalOpts`.
+///
+/// Precedence: `--no-keepalive` > `--keepalive-interval 0` > `--keepalive-interval N`
+/// > `AGENTCHROME_KEEPALIVE_INTERVAL` (handled by clap `env`) > built-in default.
+pub fn build_keepalive(global: &GlobalOpts) -> KeepAliveConfig {
+    if global.no_keepalive {
+        return KeepAliveConfig {
+            interval: None,
+            ..KeepAliveConfig::default()
+        };
     }
-    config
+    match global.keepalive_interval {
+        Some(0) => KeepAliveConfig {
+            interval: None,
+            ..KeepAliveConfig::default()
+        },
+        Some(ms) => KeepAliveConfig {
+            interval: Some(Duration::from_millis(ms)),
+            ..KeepAliveConfig::default()
+        },
+        None => KeepAliveConfig::default(),
+    }
+}
+
+/// Open a CDP connection for the current command, applying invocation-level
+/// auto-reconnect and keep-alive defaults derived from `global`.
+///
+/// This collapses the `policy + keepalive + connect_for_command` boilerplate
+/// that every command would otherwise repeat.
+///
+/// # Errors
+///
+/// Propagates `AppError` from the resolve/connect pipeline.
+pub async fn connect_from_global(
+    global: &GlobalOpts,
+) -> Result<agentchrome::connection::CommandConnection, AppError> {
+    connect_from_global_with_timeout(global, global.timeout).await
+}
+
+/// Like [`connect_from_global`], but lets a subcommand override the command
+/// timeout (e.g. `js exec --timeout`).
+///
+/// # Errors
+///
+/// Propagates `AppError` from the resolve/connect pipeline.
+pub async fn connect_from_global_with_timeout(
+    global: &GlobalOpts,
+    timeout_ms: Option<u64>,
+) -> Result<agentchrome::connection::CommandConnection, AppError> {
+    let policy = ReconnectPolicy::default();
+    let keepalive = build_keepalive(global);
+    agentchrome::connection::connect_for_command(
+        &global.host,
+        global.port,
+        global.ws_url.as_deref(),
+        timeout_ms,
+        keepalive,
+        &policy,
+    )
+    .await
 }
 
 // =============================================================================
@@ -105,22 +158,20 @@ pub fn cdp_config(global: &GlobalOpts) -> CdpConfig {
 
 /// Connect to Chrome, attach to a target, and apply emulation state.
 pub async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let conn = connect_from_global(global).await?;
     let target = resolve_target(
-        &conn.host,
-        conn.port,
+        &conn.resolved.host,
+        conn.resolved.port,
         global.tab.as_deref(),
         global.page_id.as_deref(),
     )
     .await?;
 
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
+    let session = conn.client.create_session(&target.id).await?;
     let mut managed = ManagedSession::new(session);
     apply_emulate_state(&mut managed).await?;
 
-    Ok((client, managed))
+    Ok((conn.client, managed))
 }
 
 /// Like `setup_session`, but without applying emulation state.
@@ -129,21 +180,19 @@ pub async fn setup_session(global: &GlobalOpts) -> Result<(CdpClient, ManagedSes
 pub async fn setup_session_bare(
     global: &GlobalOpts,
 ) -> Result<(CdpClient, ManagedSession), AppError> {
-    let conn = resolve_connection(&global.host, global.port, global.ws_url.as_deref()).await?;
+    let conn = connect_from_global(global).await?;
     let target = resolve_target(
-        &conn.host,
-        conn.port,
+        &conn.resolved.host,
+        conn.resolved.port,
         global.tab.as_deref(),
         global.page_id.as_deref(),
     )
     .await?;
 
-    let config = cdp_config(global);
-    let client = CdpClient::connect(&conn.ws_url, config).await?;
-    let session = client.create_session(&target.id).await?;
+    let session = conn.client.create_session(&target.id).await?;
     let managed = ManagedSession::new(session);
 
-    Ok((client, managed))
+    Ok((conn.client, managed))
 }
 
 /// Like `setup_session`, but also installs dialog interceptors.
