@@ -4,7 +4,7 @@ resolver = "3"
 
 [package]
 name = "agentchrome"
-version = "1.33.0"
+version = "1.33.1"
 edition = "2024"
 authors = ["Nunley Media Group"]
 license = "MIT OR Apache-2.0"
@@ -13,16 +13,16 @@ description = "A CLI tool for browser automation via the Chrome DevTools Protoco
 keywords = ["chrome", "cdp", "browser", "automation", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 exclude = [
-  ".claude/",
-  ".github/",
-  "docs/",
-  "examples/",
-  "tests/",
-  "sdlc-config.json",
-  "VERSION",
-  "CHANGELOG.md",
-  "rust-toolchain.toml",
-  "rustfmt.toml",
+  "/.claude/",
+  "/.github/",
+  "/docs/",
+  "/examples/",
+  "/tests/",
+  "/sdlc-config.json",
+  "/VERSION",
+  "/CHANGELOG.md",
+  "/rust-toolchain.toml",
+  "/rustfmt.toml",
 ]
 
 [dependencies]
