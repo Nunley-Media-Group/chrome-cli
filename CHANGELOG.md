@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.33.1] - 2026-04-19
+
+### Fixed
+
+- Anchor `package.exclude` patterns to repo root (`/examples/`, `/tests/`, etc.) so the gitignore-style globs no longer strip `src/examples/` and other in-tree module directories from the published crate tarball, unblocking `cargo publish` for 1.33.x
+
 ## [1.33.0] - 2026-04-19
 
 ### Added
