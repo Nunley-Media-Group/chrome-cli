@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-04-18
+
+### Added
+
+- Add `--pierce-shadow` flag to `page snapshot` to include open shadow DOM content in the accessibility tree, plus supplemental shadow-root traversal that merges interactive nodes under their shadow host (#181)
+- Add `--include-iframes` to `page snapshot` to produce a single aggregated accessibility tree that inlines every enumerable iframe's content under its owner `<iframe>` node with a `"frame": <index>` annotation, and extend `SnapshotState` with aggregate UID routing so subsequent `interact`, `form`, and `dom` commands resolve UIDs through the originating frame without an explicit `--frame` (#181)
+- Add `--deep` flag to `page text` to extract visible text from the main frame, every iframe, and all open shadow roots in document order, mutually exclusive with `--frame` (#181)
+- Add BDD coverage for AC29-AC32 covering aggregate snapshot/text modes, combined `--include-iframes --pierce-shadow`, and idempotency on pages without nested content (#181)
+
 ## [1.31.0] - 2026-04-17
 
 ### Added
