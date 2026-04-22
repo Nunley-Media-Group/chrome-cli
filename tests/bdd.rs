@@ -387,6 +387,27 @@ fn stderr_should_be_valid_json(world: &mut CliWorld) {
     });
 }
 
+#[then("stderr should contain exactly one JSON object")]
+fn stderr_should_contain_exactly_one_json_object(world: &mut CliWorld) {
+    let trimmed = world.stderr.trim_end_matches('\n');
+    let lines: Vec<&str> = trimmed
+        .split('\n')
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "stderr should contain exactly one non-empty line\nstderr: {}",
+        world.stderr
+    );
+    let _: serde_json::Value = serde_json::from_str(lines[0]).unwrap_or_else(|e| {
+        panic!(
+            "stderr line is not valid JSON: {e}\nstderr: {}",
+            world.stderr
+        );
+    });
+}
+
 #[then(expr = "stderr JSON should have key {string}")]
 fn stderr_json_should_have_key(world: &mut CliWorld, key: String) {
     let trimmed = world.stderr.trim();
@@ -4907,6 +4928,12 @@ async fn main() {
     // Clap validation JSON stderr fix (issue #98) — all scenarios are testable without Chrome
     // (argument validation errors, help/version, not-implemented stub).
     CliWorld::run("tests/features/98-fix-clap-validation-json-stderr.feature").await;
+
+    // Error-output consistency (issue #197) — all scenarios in the feature file are
+    // CLI-testable without a running Chrome. Chrome-dependent scenarios (form fill on
+    // non-fillable elements) are documented in the feature file as comments and
+    // verified via unit tests in src/error.rs + the manual smoke test in tasks.md.
+    CliWorld::run("tests/features/197-improve-error-output-consistency.feature").await;
 
     run_dialog_features().await;
 

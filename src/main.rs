@@ -28,7 +28,10 @@ mod tabs;
 
 use std::time::Duration;
 
-use clap::{CommandFactory, Parser, error::ErrorKind};
+use clap::{
+    CommandFactory, Parser,
+    error::{ContextKind, ContextValue, ErrorKind},
+};
 use serde::Serialize;
 
 use agentchrome::chrome::{
@@ -69,6 +72,11 @@ async fn main() {
                 .collect::<Vec<_>>()
                 .join(", ");
             let clean = if clean.is_empty() { msg } else { clean };
+            let argv: Vec<String> = std::env::args().collect();
+            let clean = match syntax_hint(&e, &argv) {
+                Some(hint) => format!("{clean}. {hint}"),
+                None => clean,
+            };
             let app_err = AppError {
                 message: clean,
                 code: ExitCode::GeneralError,
@@ -83,6 +91,69 @@ async fn main() {
         e.print_json_stderr();
         #[allow(clippy::cast_possible_truncation)]
         std::process::exit(e.code as i32);
+    }
+}
+
+/// If a clap `UnknownArgument` error was raised for `--uid` or `--selector` on a
+/// subcommand whose target is a positional (e.g., `interact click`), build a
+/// `"Did you mean: agentchrome <sub> <value>"` suffix. Returns `None` for any
+/// other error kind, any other flag, or when the subcommand path / value cannot
+/// be recovered from argv.
+fn syntax_hint(err: &clap::Error, argv: &[String]) -> Option<String> {
+    if !matches!(err.kind(), ErrorKind::UnknownArgument) {
+        return None;
+    }
+    let invalid = match err.get(ContextKind::InvalidArg)? {
+        ContextValue::String(s) => s.clone(),
+        ContextValue::Strings(v) => v.first()?.clone(),
+        _ => return None,
+    };
+    // Clap renders InvalidArg as the flag name plus optional `<VALUE>` / `=VALUE` suffix.
+    let bare = invalid.split([' ', '=']).next().unwrap_or("");
+    let flag = match bare {
+        "--uid" => "--uid",
+        "--selector" => "--selector",
+        _ => return None,
+    };
+
+    let value = extract_flag_value(argv, flag)?;
+    let sub_path = resolve_subcommand_path(argv)?;
+    Some(format!("Did you mean: agentchrome {sub_path} {value}"))
+}
+
+fn extract_flag_value(argv: &[String], flag: &str) -> Option<String> {
+    let eq_prefix = format!("{flag}=");
+    for (i, arg) in argv.iter().enumerate() {
+        if let Some(v) = arg.strip_prefix(&eq_prefix) {
+            return Some(v.to_string());
+        }
+        if arg == flag {
+            return argv.get(i + 1).cloned();
+        }
+    }
+    None
+}
+
+fn resolve_subcommand_path(argv: &[String]) -> Option<String> {
+    let mut cmd = Cli::command();
+    let mut path: Vec<String> = Vec::new();
+    for arg in argv.iter().skip(1) {
+        match cmd.find_subcommand(arg).cloned() {
+            Some(sub) => {
+                path.push(arg.clone());
+                cmd = sub;
+            }
+            None => {
+                if !path.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.join(" "))
     }
 }
 
@@ -670,5 +741,91 @@ fn kill_process(pid: u32) {
         let _ = std::process::Command::new("taskkill")
             .args(["/T", "/F", "/PID", &pid.to_string()])
             .output();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn resolve_subcommand_path_nested() {
+        let a = argv(&["agentchrome", "interact", "click", "--uid", "s6"]);
+        assert_eq!(
+            resolve_subcommand_path(&a).as_deref(),
+            Some("interact click")
+        );
+    }
+
+    #[test]
+    fn resolve_subcommand_path_skips_global_flags() {
+        let a = argv(&[
+            "agentchrome",
+            "--port",
+            "9333",
+            "interact",
+            "click",
+            "--uid",
+            "s6",
+        ]);
+        assert_eq!(
+            resolve_subcommand_path(&a).as_deref(),
+            Some("interact click")
+        );
+    }
+
+    #[test]
+    fn resolve_subcommand_path_returns_none_when_no_subcommand() {
+        let a = argv(&["agentchrome", "--help"]);
+        assert!(resolve_subcommand_path(&a).is_none());
+    }
+
+    #[test]
+    fn extract_flag_value_space_form() {
+        let a = argv(&["agentchrome", "interact", "click", "--uid", "s6"]);
+        assert_eq!(extract_flag_value(&a, "--uid").as_deref(), Some("s6"));
+    }
+
+    #[test]
+    fn extract_flag_value_equals_form() {
+        let a = argv(&["agentchrome", "interact", "click", "--uid=s7"]);
+        assert_eq!(extract_flag_value(&a, "--uid").as_deref(), Some("s7"));
+    }
+
+    #[test]
+    fn syntax_hint_click_uid_produces_did_you_mean() {
+        // Trigger a real clap UnknownArgument error for --uid on `interact click`.
+        let result = Cli::try_parse_from(["agentchrome", "interact", "click", "--uid", "s6"]);
+        let err = result.err().expect("expected clap error");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+        let a = argv(&["agentchrome", "interact", "click", "--uid", "s6"]);
+        let hint = syntax_hint(&err, &a).expect("expected a hint");
+        assert_eq!(hint, "Did you mean: agentchrome interact click s6");
+    }
+
+    #[test]
+    fn syntax_hint_suppressed_for_unrelated_clap_errors() {
+        // `connect --nonexistent-flag` raises UnknownArgument for a different flag.
+        let result = Cli::try_parse_from(["agentchrome", "connect", "--nonexistent-flag"]);
+        let err = result.err().expect("expected clap error");
+        let a = argv(&["agentchrome", "connect", "--nonexistent-flag"]);
+        assert!(
+            syntax_hint(&err, &a).is_none(),
+            "hint must only fire for --uid / --selector misuse"
+        );
+    }
+
+    #[test]
+    fn syntax_hint_ignores_non_unknown_argument_errors() {
+        // Missing required positional on `interact click` → DifferentErrorKind.
+        let result = Cli::try_parse_from(["agentchrome", "interact", "click"]);
+        let err = result.err().expect("expected clap error");
+        assert_ne!(err.kind(), ErrorKind::UnknownArgument);
+        let a = argv(&["agentchrome", "interact", "click"]);
+        assert!(syntax_hint(&err, &a).is_none());
     }
 }

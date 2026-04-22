@@ -1,0 +1,108 @@
+# File: tests/features/improve-error-output-consistency.feature
+#
+# Generated from: specs/feature-improve-error-output-consistency/requirements.md
+# Issue: #197
+
+Feature: Consistent error output on all failure paths
+  As an AI agent or browser-automation engineer debugging a failed AgentChrome command
+  I want every non-zero exit to emit a descriptive JSON error on stderr
+  So that I can programmatically identify what went wrong without guessing at silent failures
+
+  Background:
+    Given a headless Chrome instance is running
+    And agentchrome is connected to that instance
+    And the fixture "tests/fixtures/improve-error-output-consistency.html" has been loaded
+    And an accessibility snapshot has been taken
+
+  # --- AC1: Non-zero exits always emit structured JSON ---
+
+  Scenario: Non-zero exit always emits one JSON object on stderr
+    Given a command will fail for a known reason (unknown UID "s9999")
+    When I run "agentchrome form fill s9999 hello"
+    Then the process exits with a non-zero code in the range 1..5
+    And stderr contains exactly one line
+    And that line parses as a JSON object
+    And the object has a non-empty string field "error"
+    And the object has an integer field "code" equal to the process exit code
+
+  # --- AC2: form fill on incompatible element names the element type ---
+
+  Scenario: form fill on a <div> returns a descriptive "not fillable" error
+    Given UID "<div_uid>" refers to a <div> element in the fixture
+    When I run "agentchrome form fill <div_uid> hello"
+    Then the process exits with code 1
+    And stderr contains one JSON object
+    And the "error" field mentions tag=div
+    And the "error" field suggests "agentchrome interact click" or "agentchrome js exec"
+    And the JSON object contains a "kind" field equal to "not_fillable"
+    And the JSON object contains an "element_type" object with "tag":"div"
+
+  Scenario: form fill on a <canvas> suggests js exec
+    Given UID "<canvas_uid>" refers to a <canvas> element in the fixture
+    When I run "agentchrome form fill <canvas_uid> anything"
+    Then stderr contains a JSON error whose "suggested_alternatives" includes "'agentchrome js exec'"
+
+  Scenario: form fill on a non-editable combobox names the role
+    Given UID "<combobox_uid>" refers to an element with role="combobox" and no editable input descendant
+    When I run "agentchrome form fill <combobox_uid> value"
+    Then stderr contains a JSON error whose "element_type.role" equals "combobox"
+    And the "error" field explains the element is not fillable
+
+  # --- AC3: Syntax suggestion on --uid misuse ---
+
+  Scenario: interact click with --uid flag emits a "Did you mean" hint
+    When I run "agentchrome interact click --uid s6"
+    Then the process exits with code 1
+    And stderr contains exactly one JSON object
+    And the "error" field contains the suggestion "Did you mean: agentchrome interact click s6"
+
+  Scenario: Unrelated clap errors do not receive the syntax hint
+    When I run "agentchrome connect --nonexistent-flag"
+    Then stderr contains exactly one JSON object
+    And the "error" field does NOT contain "Did you mean: agentchrome interact click"
+
+  # --- AC4: Silent failure audit is complete ---
+
+  Scenario Outline: Every flagged module emits JSON on any failure path
+    Given the failing invocation "<invocation>" targets module "<module>"
+    When the command runs and exits non-zero
+    Then stderr contains exactly one JSON object with fields "error" and "code"
+    And stdout is either empty or a valid JSON object
+
+    Examples:
+      | invocation                                        | module        |
+      | agentchrome form fill s9999 value                 | form.rs       |
+      | agentchrome form fill <div_uid> value             | form.rs       |
+      | agentchrome interact click s9999                  | interact.rs   |
+      | agentchrome interact scroll --uid s9999 down      | interact.rs   |
+      | agentchrome page wait --text "never" --timeout 500| page.rs       |
+      | agentchrome page screenshot --uid s9999           | page.rs       |
+
+  # --- AC5: Help documentation describes the error contract ---
+
+  Scenario: Top-level --help documents the error schema and exit codes
+    When I run "agentchrome --help"
+    Then stdout contains the phrase "ERROR HANDLING"
+    And stdout contains "{error"
+    And stdout contains "code"
+    And stdout lists exit codes "0=success", "1=general", "2=connection", "3=target", "4=timeout", "5=protocol"
+    And stdout contains the phrase "exactly one JSON object"
+
+  # --- AC6: Exactly one error object per invocation ---
+
+  Scenario: A failing command emits exactly one JSON line on stderr
+    Given any command that will fail
+    When the command exits non-zero
+    Then stderr contains exactly one line
+    And that line is a single JSON object
+    And no partial JSON fragment or prose appears on stderr
+    And stdout does not contain both a data payload and an error
+
+  # --- AC7: custom_json payloads preserve the stable {error, code} shape ---
+
+  Scenario: Errors with custom_json still contain the stable fields
+    Given a command fails via a path that populates custom_json (e.g., form fill on a <div>)
+    When the error is emitted
+    Then the JSON object on stderr contains a string field "error"
+    And the JSON object contains an integer field "code" in 1..5
+    And any additional fields (kind, element_type, suggested_alternatives) do not replace the stable fields
