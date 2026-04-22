@@ -143,17 +143,25 @@ pub fn write_session(data: &SessionData) -> Result<(), SessionError> {
 pub fn write_session_to(path: &std::path::Path, data: &SessionData) -> Result<(), SessionError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
-        }
+        set_owner_only_perms(parent, 0o700)?;
     }
 
     let json = serde_json::to_string_pretty(data)
         .map_err(|e| SessionError::InvalidFormat(e.to_string()))?;
 
     write_session_atomic(path, json.as_bytes())
+}
+
+#[cfg(unix)]
+fn set_owner_only_perms(path: &std::path::Path, mode: u32) -> Result<(), SessionError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_perms(_path: &std::path::Path, _mode: u32) -> Result<(), SessionError> {
+    Ok(())
 }
 
 /// Maximum retry attempts for the temp→final rename on Windows/NTFS. Antivirus
@@ -174,12 +182,7 @@ const RENAME_RETRY_DELAY_MS: u64 = 10;
 fn write_session_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), SessionError> {
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, bytes)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    set_owner_only_perms(&tmp_path, 0o600)?;
 
     let mut last_err: Option<std::io::Error> = None;
     for attempt in 0..RENAME_RETRIES {
@@ -209,11 +212,7 @@ fn write_session_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), Sess
     );
     let _ = std::fs::remove_file(&tmp_path);
     std::fs::write(path, bytes)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    set_owner_only_perms(path, 0o600)?;
     Ok(())
 }
 
