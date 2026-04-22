@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.40.0] - 2026-04-22
+
+### Added
+
+- Normalize flag shapes across related subcommands so first-time users and AI agents hit the canonical form on the first guess: `cookie set --url <URL>` is now accepted as a hidden alias for `--domain` (folded via `url::Url::parse` + `host_str()`); `tabs close --tab <ID>` is accepted as a hidden alias for the positional target list (merged with positional IDs preserving order); and `dom query` is accepted as a hidden alias for `dom select`. Canonical forms, `--help`, `examples`, and the capabilities manifest are unchanged — aliases are `hide = true` / subcommand aliases so there remains one documented shape per command. Passing both `--url` and `--domain` to `cookie set`, or passing a malformed / host-less URL, errors with a message that names `--domain` as the canonical alternative. (#230)
+
 ## [1.39.3] - 2026-04-22
 
 ### Fixed
