@@ -710,23 +710,27 @@ EXAMPLES:
 
     /// Output a machine-readable manifest of all CLI capabilities
     #[command(
-        long_about = "Output a complete, machine-readable JSON manifest describing every command, \
-            subcommand, flag, argument, and type in the CLI. Designed for AI agents and tooling \
-            that need to programmatically discover the CLI surface. The manifest is generated at \
+        long_about = "Output a machine-readable manifest of agentchrome CLI capabilities. \
+            Without arguments, returns a lightweight listing (name + description per command) \
+            for cheap discovery. With a command name, returns the full detail descriptor for \
+            that command — subcommands, args, flags, types. The manifest is generated at \
             runtime from the clap command tree, so it is always in sync with the binary.",
         after_long_help = "\
 EXAMPLES:
-  # Full capabilities manifest
+  # Summary listing of all commands (progressive disclosure)
   agentchrome capabilities
 
+  # Summary listing as JSON
+  agentchrome capabilities --json
+
+  # Full detail for one command
+  agentchrome capabilities page
+
+  # Full detail for one command, as JSON
+  agentchrome capabilities page --json
+
   # Pretty-printed for readability
-  agentchrome capabilities --pretty
-
-  # Capabilities for a specific command
-  agentchrome capabilities --command navigate
-
-  # Compact listing (names and descriptions only)
-  agentchrome capabilities --compact"
+  agentchrome capabilities --pretty"
     )]
     Capabilities(CapabilitiesArgs),
 
@@ -3720,8 +3724,8 @@ pub struct ExamplesArgs {
 /// Arguments for the `capabilities` subcommand.
 #[derive(Args)]
 pub struct CapabilitiesArgs {
-    /// Show capabilities for a specific command only
-    #[arg(long)]
+    /// Command name to show the full descriptor for (omit for the summary listing).
+    /// Run `agentchrome capabilities` to list valid names.
     pub command: Option<String>,
 
     /// Minimal output: command names and descriptions only
@@ -3859,6 +3863,57 @@ mod tests {
         assert!(
             after_str.contains("--json"),
             "examples after_long_help must contain at least one --json example\ngot: {after_str}"
+        );
+    }
+
+    #[test]
+    fn capabilities_with_positional_parses() {
+        let cli = try_parse("capabilities page").expect("capabilities page should parse");
+        let super::Command::Capabilities(args) = cli.command else {
+            panic!("Expected Capabilities command variant");
+        };
+        assert_eq!(args.command.as_deref(), Some("page"));
+        assert!(!args.compact);
+    }
+
+    #[test]
+    fn capabilities_no_args_parses() {
+        let cli = try_parse("capabilities").expect("capabilities should parse");
+        let super::Command::Capabilities(args) = cli.command else {
+            panic!("Expected Capabilities command variant");
+        };
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn capabilities_subcommand_carries_clap_help_metadata() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        let caps = cmd
+            .get_subcommands()
+            .find(|s| s.get_name() == "capabilities")
+            .expect("capabilities subcommand must exist");
+
+        let long_about = caps
+            .get_long_about()
+            .expect("capabilities must have long_about");
+        let long_about_str = long_about.to_string();
+        assert!(
+            long_about_str.contains("detail") || long_about_str.contains("listing"),
+            "capabilities long_about must mention 'detail' or 'listing'\ngot: {long_about_str}"
+        );
+
+        let after = caps
+            .get_after_long_help()
+            .expect("capabilities must have after_long_help");
+        let after_str = after.to_string();
+        assert!(
+            after_str.contains("capabilities"),
+            "capabilities after_long_help must contain 'capabilities'\ngot: {after_str}"
+        );
+        assert!(
+            after_str.contains("--json"),
+            "capabilities after_long_help must contain a --json example\ngot: {after_str}"
         );
     }
 }

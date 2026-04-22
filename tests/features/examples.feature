@@ -45,13 +45,21 @@ Feature: Built-in Examples Subcommand
     And stdout should not start with "{"
     And the exit code should be 0
 
-  Scenario: JSON output for summary listing
+  Scenario: JSON output for summary listing (progressive disclosure, AC13)
     Given the agentchrome binary is available
     When I run "agentchrome examples --json"
     Then stdout should be a valid JSON array
     And each JSON entry should have a "command" field
     And each JSON entry should have a "description" field
-    And each JSON entry should have an "examples" array
+    And no JSON entry should have a "examples" field
+    And the JSON payload size should be less than 4096 bytes
+    And the exit code should be 0
+
+  Scenario: JSON output for a command group still carries examples (AC14)
+    Given the agentchrome binary is available
+    When I run "agentchrome examples navigate --json"
+    Then stdout should be a valid JSON object
+    And the JSON "examples" array should have at least 1 entries
     And the exit code should be 0
 
   Scenario: JSON output for a specific command group

@@ -1,8 +1,8 @@
 # Design: Interaction Strategy Guide in Examples Command
 
-**Issues**: #201
-**Date**: 2026-04-16
-**Status**: Draft
+**Issues**: #201, #218
+**Date**: 2026-04-21
+**Status**: Amended
 **Author**: Claude (spec-writer)
 
 ---
@@ -472,6 +472,169 @@ Only `main.rs`'s current `use crate::examples::execute_examples;` entry point an
 |-------|------------|-----------------------------------------------------------------------------------------------|
 | #201  | 2026-04-16 | Initial feature design                                                                        |
 | #201  | 2026-04-16 | Expanded launch strategy set from 4 to 10 guides (sync with requirements update)              |
+| #218  | 2026-04-21 | Progressive Disclosure retrofit for `examples` and `capabilities` listings (see § "Progressive Disclosure Retrofit — Added by #218") |
+
+---
+
+## Progressive Disclosure Retrofit — Added by #218
+
+### Summary
+
+Issue #218 retrofits the two remaining non-compliant listing commands to conform to the `tech.md` **Progressive Disclosure for Listings** principle. The rule's grandfather exemption was removed during #201 review, so the originally out-of-scope retrofit is now the scope of this follow-on issue. Behavior for every other listing command in the CLI is unchanged.
+
+Affected surfaces:
+
+| Command | Before | After |
+|---------|--------|-------|
+| `agentchrome examples --json` | `Vec<CommandGroupSummary>` where each entry carries nested `examples: Vec<ExampleEntry>` (~3–5 KB) | Array of `{command, description}` only (~1 KB); `examples` array removed from listing entries |
+| `agentchrome examples <group> --json` | Single `CommandGroupSummary` with nested `examples` array | Unchanged (detail path already exists; reused) |
+| `agentchrome capabilities --json` | Monolithic `CapabilitiesManifest` with `commands: Vec<CommandDescriptor>` carrying nested `subcommands`/`args`/`flags` (~8–15 KB) | `CapabilitiesManifest` where each entry in `commands` is a `{name, description}` summary (~1 KB total) |
+| `agentchrome capabilities <command> --json` | Does not exist | New positional returning full `CommandDescriptor` with `subcommands`, `args`, `flags` |
+| `agentchrome capabilities <unknown>` | N/A | JSON error on stderr; exit 1 |
+
+### API / Type Changes
+
+#### New listing types (serialization split — mirrors the `StrategySummary` / `Strategy` pattern from #201)
+
+```rust
+// src/examples/commands.rs — added by #218
+#[derive(Serialize, Clone)]
+pub struct CommandGroupListing {
+    pub command: String,
+    pub description: String,
+}
+
+impl From<&CommandGroupSummary> for CommandGroupListing { /* project `command` + `description` */ }
+
+// src/capabilities.rs — added by #218
+#[derive(Serialize, Clone)]
+pub struct CommandListing {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct CapabilitiesManifestListing {
+    pub name: String,
+    pub version: String,
+    pub commands: Vec<CommandListing>,
+    pub global_flags: Vec<FlagDescriptor>,
+    pub exit_codes: Vec<ExitCodeDescriptor>,
+}
+
+impl From<&CapabilitiesManifest> for CapabilitiesManifestListing { /* summary projection */ }
+```
+
+Rationale for two-type split rather than `#[serde(skip_serializing_if)]` on the existing types: a guard unit test (FR26) asserts the listing JSON does not contain detail field names at all. Skipping fields at runtime leaves the type surface capable of serializing detail data into the listing path, which is exactly the regression the guard test prevents. Two-type split gives a compile-time guarantee that listing-shaped output cannot carry detail fields.
+
+#### Clap change — new `Capabilities` positional
+
+```rust
+// src/cli/mod.rs — CapabilitiesArgs, modified by #218
+pub struct CapabilitiesArgs {
+    /// When present, return the full descriptor for the named command;
+    /// when absent, return the summaries-only listing.
+    /// Valid names: run `agentchrome capabilities` to list.
+    pub command: Option<String>,
+    // existing fields (compact, etc.) unchanged
+}
+```
+
+The `Capabilities` variant gains an updated `long_about` + `after_long_help` covering both listing and detail paths with at least one `--json` example (FR22).
+
+#### Dispatcher changes
+
+```rust
+// src/examples/mod.rs — execute_examples bare-listing branch, modified by #218
+None => {
+    let groups = all_examples_with_synthetic_strategies();
+    let listing: Vec<CommandGroupListing> = groups.iter().map(Into::into).collect();
+    // Plain path unchanged (summary lines already use command + description only).
+    // JSON path now prints `&listing` instead of `&groups`.
+}
+
+// src/capabilities.rs — execute_capabilities, modified by #218
+match args.command {
+    None => {
+        let manifest = build_manifest(&root_cmd, args.compact);
+        let listing = CapabilitiesManifestListing::from(&manifest);
+        print_output(&listing, &global.output)
+    }
+    Some(ref name) => {
+        let manifest = build_manifest(&root_cmd, args.compact);
+        match manifest.commands.iter().find(|c| c.name == *name) {
+            Some(descriptor) => print_output(descriptor, &global.output),
+            None => Err(AppError::general(format!(
+                "Unknown command: '{name}'. Available: {}",
+                manifest.commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")
+            ))),
+        }
+    }
+}
+```
+
+The existing `--command <name>` flag path (already in `capabilities.rs` around lines 436 and 584, where it filters to matching commands) is either reused by or removed in favor of the new positional — tasks.md T020 decides which based on whether any existing caller relies on the flag form. Default assumption: keep the flag as a hidden alias for one release, log a deprecation warning, remove in the next major.
+
+### Plain-text output for `examples` listing
+
+The plain-text top-level `examples` listing already prints one line per group (`command — description`) without the `examples` array, so the human-readable path is already summary-shaped. The retrofit is a JSON-only change for that surface. For `capabilities`, the plain-text path currently shows the full manifest; the retrofit trims it to one-line-per-command, matching the existing `examples` summary style.
+
+### Output sizes
+
+| Surface | Current | Target |
+|---------|---------|--------|
+| `examples --json` | 3–5 KB | < 1.5 KB |
+| `capabilities --json` | 8–15 KB | < 2 KB |
+| `capabilities <command> --json` | N/A (new) | 1–3 KB per command (detail) |
+
+All comfortably under the 4 KB listing budget from the steering rule.
+
+### Breaking change & migration
+
+The listing-shape change is a CLI contract break. Per the issue, the user chose the breaking path over an opt-in `--full` flag. Mitigation:
+
+- `CHANGELOG.md` entry under the next release heading explicitly labels the change as breaking and names the new detail path for callers that need full bodies (FR25).
+- The existing `examples.feature` BDD scenario asserting `examples` array presence on the listing (AC11d) is retired in favor of a new scenario asserting the summary shape (AC19).
+- No in-code deprecation shim — v1 pre-GA, no promised backward compatibility.
+
+### Alternatives Considered (added by #218)
+
+| Option | Description | Pros | Cons | Decision |
+|--------|-------------|------|------|----------|
+| **F: Two-type split (listing type vs. detail type)** | `CommandGroupListing` / `CommandListing` separate from detail types; dispatcher serializes the listing type. | Compile-time guarantee the listing path cannot leak detail fields; mirrors #201's `StrategySummary` / `Strategy` pattern; unit test (FR26) becomes a compile-time property. | Two types per surface. | **Selected** |
+| G: `#[serde(skip_serializing_if)]` on nested fields | Keep one type; skip `examples`/`subcommands` when serializing via a listing flag. | Fewer types. | Serialization context leaks into the type's invariants; the guard test becomes a runtime check rather than a structural one; regression-prone. | Rejected |
+| H: `--full` opt-in flag | Listing stays as-is; `--full` flag returns detail bodies. | Zero breaking change. | User explicitly rejected this path; also continues to default into non-compliance. | Rejected (issue directive) |
+
+### Security Considerations (added by #218)
+
+- Command-name lookup in `capabilities <name>` is an exact match against a static allow-list derived from `build_manifest` — no path traversal, shell interpolation, or dynamic dispatch.
+- No new authentication / authorization surface.
+
+### Performance Considerations (added by #218)
+
+- Summary projection is O(n) over a ~17-command manifest; negligible relative to the existing 50ms budget.
+- `build_manifest` is still called once per invocation (same as today); summary projection is a cheap `.iter().map(Into::into).collect()` pass.
+
+### Testing Strategy (added by #218)
+
+| Layer | Type | Coverage |
+|-------|------|----------|
+| `examples/commands.rs` | Unit | Serializing `CommandGroupListing` produces JSON whose keys are exactly `{command, description}` — no `examples` key (FR26) |
+| `capabilities.rs` | Unit | Serializing `CommandListing` produces JSON whose keys are exactly `{name, description}` — no `subcommands`/`args`/`flags` (FR26) |
+| `capabilities.rs` | Unit | `find_command` returns `None` for unknown, `Some(CommandDescriptor)` for known |
+| `capabilities.rs` | Unit (clap help steering) | `Command::Capabilities` variant carries `long_about` + `after_long_help` mentioning `capabilities <command>` and at least one `--json` example (mirrors T015 from #201) |
+| Feature | Integration (BDD) | `tests/features/examples.feature` updated: existing "each entry has examples array" scenario is replaced by summary-shape scenario (AC13); `tests/features/capabilities.feature` extended with scenarios for AC15–AC17 |
+| Manual smoke | Verify | Sizes measured: `examples --json | wc -c`, `capabilities --json | wc -c` both under 4096 |
+
+### Risks & Mitigations (added by #218)
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| New `capabilities <command>` positional collides with an existing flag / arg on `Capabilities` (per retrospective on arg-name collisions) | Medium | Medium | Task T020 greps existing `CapabilitiesArgs` for field-name collisions before adding; an existing `--command <name>` flag likely exists and must be reconciled (either removed or reshaped into the positional) |
+| Shell completions / man pages stale after clap change | Medium | Low | FR22 / AC18 require man page + completion check; verification task runs `cargo xtask man capabilities` |
+| Downstream agents break when listing shape changes | Medium | Medium | Explicitly chosen breaking change; `CHANGELOG.md` breaking-change entry (FR25); announced via release notes; new `capabilities <command>` detail path documented in the same entry |
+| `--command` flag form already exists and some consumer uses it | Low | Medium | Keep the flag as a hidden alias in one release, print a stderr deprecation warning, remove in the next major |
+| Listing-size measurement varies with binary-name or command metadata drift | Low | Low | Under-4 KB assertion has comfortable headroom (target < 2 KB for capabilities, < 1.5 KB for examples) |
 
 ---
 

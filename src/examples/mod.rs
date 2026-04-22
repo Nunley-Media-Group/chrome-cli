@@ -15,7 +15,8 @@ pub(super) fn write_em_dash_line(out: &mut String, left: &str, right: &str) {
 }
 
 use commands::{
-    CommandGroupSummary, ExampleEntry, all_examples, format_plain_detail, format_plain_summary,
+    CommandGroupListing, CommandGroupSummary, ExampleEntry, all_examples, format_plain_detail,
+    format_plain_summary,
 };
 use strategies::{
     find_strategy, format_plain_strategy_detail, format_plain_strategy_list, strategy_summaries,
@@ -56,7 +57,8 @@ pub fn execute_examples(global: &GlobalOpts, args: &ExamplesArgs) -> Result<(), 
             if is_plain {
                 print!("{}", format_plain_summary(&groups));
             } else {
-                print_output(&groups, &global.output)?;
+                let listing: Vec<CommandGroupListing> = groups.iter().map(Into::into).collect();
+                print_output(&listing, &global.output)?;
             }
         }
         Some("strategies") => {

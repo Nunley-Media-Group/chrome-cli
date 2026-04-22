@@ -1,8 +1,8 @@
 # Tasks: Interaction Strategy Guide in Examples Command
 
-**Issues**: #201
-**Date**: 2026-04-16
-**Status**: Planning
+**Issues**: #201, #218
+**Date**: 2026-04-21
+**Status**: Amended
 **Author**: Claude (spec-writer)
 
 ---
@@ -17,7 +17,8 @@
 | Integration | 3 | [ ] |
 | Testing | 6 | [ ] |
 | Verification | 2 | [ ] |
-| **Total** | **18 tasks** | |
+| Phase 6 (Progressive Disclosure Retrofit — added by #218) | 12 | [ ] |
+| **Total** | **30 tasks** | |
 
 Note: `structure.md` defines a layered CLI architecture (CLI \u2192 Dispatch \u2192 Command Modules \u2192 CDP); this feature touches only the CLI + Command Module layers. The "Backend" phase maps to the command-module layer, and the "Frontend" phase is not applicable.
 
@@ -309,6 +310,171 @@ Note: `structure.md` defines a layered CLI architecture (CLI \u2192 Dispatch \u2
 
 ---
 
+## Phase 6: Progressive Disclosure Retrofit (added by #218)
+
+### T019: Introduce `CommandGroupListing` summary type in `src/examples/commands.rs`
+
+**File(s)**: `src/examples/commands.rs`
+**Type**: Modify
+**Depends**: T001
+**Acceptance**:
+- [ ] `pub struct CommandGroupListing { command: String, description: String }` defined with `#[derive(Serialize, Clone)]`
+- [ ] `impl From<&CommandGroupSummary> for CommandGroupListing` implemented
+- [ ] `cargo build` + `cargo clippy --all-targets` pass
+
+### T020: Change `examples --json` top-level listing to serialize `Vec<CommandGroupListing>`
+
+**File(s)**: `src/examples/mod.rs`
+**Type**: Modify
+**Depends**: T019, T007
+**Acceptance**:
+- [ ] The `args.command == None` branch of `execute_examples` projects the `Vec<CommandGroupSummary>` (including the synthetic `strategies` entry) to `Vec<CommandGroupListing>` before calling `print_output`
+- [ ] `agentchrome examples --json` stdout contains no `"examples"` key at any position
+- [ ] `agentchrome examples --json` payload size < 4 KB (via `| wc -c`)
+- [ ] `agentchrome examples <group> --json` (detail path) is unchanged and still includes the nested `examples` array (AC14)
+- [ ] `cargo build` + `cargo clippy --all-targets` pass
+
+### T021: Add `name: Option<String>` positional to `CapabilitiesArgs` in `src/cli/mod.rs`
+
+**File(s)**: `src/cli/mod.rs`
+**Type**: Modify
+**Depends**: None
+**Acceptance**:
+- [ ] `CapabilitiesArgs` has a new `command: Option<String>` first positional (field name chosen to avoid collision with any existing flag; verify by grepping `CapabilitiesArgs` struct definition)
+- [ ] If an existing `--command <name>` flag is present on `CapabilitiesArgs`, it is either removed or kept as a hidden alias with a deprecation warning printed to stderr (decision noted in commit message)
+- [ ] `Command::Capabilities` variant `long_about` describes listing vs. detail paths
+- [ ] `Command::Capabilities` variant `after_long_help` includes (minimum): `agentchrome capabilities`, `agentchrome capabilities --json`, `agentchrome capabilities page`, `agentchrome capabilities page --json`, one `--pretty` example
+- [ ] Unit test asserts `agentchrome capabilities page` parses to `CapabilitiesArgs { command: Some("page"), .. }` and `agentchrome capabilities` to `{ command: None, .. }`
+- [ ] `cargo build` + `cargo clippy --all-targets` pass
+
+### T022: Introduce `CommandListing` + `CapabilitiesManifestListing` summary types
+
+**File(s)**: `src/capabilities.rs`
+**Type**: Modify
+**Depends**: None
+**Acceptance**:
+- [ ] `pub struct CommandListing { name: String, description: String }` defined with `#[derive(Serialize, Clone)]`
+- [ ] `pub struct CapabilitiesManifestListing { name, version, commands: Vec<CommandListing>, global_flags, exit_codes }` defined with `#[derive(Serialize, Clone)]`
+- [ ] `impl From<&CapabilitiesManifest> for CapabilitiesManifestListing` implemented
+- [ ] Field order in `CapabilitiesManifestListing` matches AC15 (`name`, `version`, `global_flags`, `exit_codes`, and `commands` array — AC15 does not require a specific order, but snapshot tests may assume one)
+- [ ] `cargo build` + `cargo clippy --all-targets` pass
+
+### T023: Wire `capabilities` dispatcher to listing/detail branches
+
+**File(s)**: `src/capabilities.rs`
+**Type**: Modify
+**Depends**: T021, T022
+**Acceptance**:
+- [ ] `execute_capabilities(global, args)` handles:
+  - `args.command == None` → build manifest, project to `CapabilitiesManifestListing`, print
+  - `args.command == Some(n)` → build manifest, find matching `CommandDescriptor`; Some → print detail; None → `AppError` with message `"Unknown command: '<n>'. Available: <csv>"`, `ExitCode::GeneralError`
+- [ ] Plain-text path for listing emits one line per command (`<name> — <description>`)
+- [ ] Plain-text path for detail retains the existing detailed formatting
+- [ ] `cargo build` + `cargo clippy --all-targets` + `cargo fmt --check` pass
+
+### T024: Progressive-disclosure guard unit tests
+
+**File(s)**: `src/examples/commands.rs`, `src/capabilities.rs` (append `#[cfg(test)]` blocks)
+**Type**: Create
+**Depends**: T019, T022
+**Acceptance**:
+- [ ] In `commands.rs`: test `command_group_listing_json_has_only_two_fields` — serialize a `CommandGroupListing`, parse back, assert keys are exactly `{command, description}`; assert serialized string does NOT contain `"examples"`
+- [ ] In `capabilities.rs`: test `command_listing_json_has_only_two_fields` — serialize a `CommandListing`, assert keys exactly `{name, description}`; assert string does NOT contain `"subcommands"`, `"args"`, `"flags"`
+- [ ] In `capabilities.rs`: test `unknown_command_returns_error_with_available_list` — `execute_capabilities` with `command: Some("nonexistent")` returns `AppError` whose message contains `"Unknown command"` and at least five known command names
+- [ ] In `capabilities.rs`: test `capabilities_listing_under_4kb` — serialize `CapabilitiesManifestListing::from(&build_manifest(...))` and assert payload length < 4096 bytes
+- [ ] `cargo test --lib` passes
+
+### T025: Clap help metadata test for `Capabilities` variant
+
+**File(s)**: `src/cli/mod.rs` (extend test module)
+**Type**: Create
+**Depends**: T021
+**Acceptance**:
+- [ ] Test `capabilities_subcommand_carries_clap_help_metadata`: introspects the `capabilities` clap subcommand; asserts `get_long_about()` contains the substring `"detail"` (or equivalent listing/detail language) and `get_after_long_help()` contains `"capabilities"` and at least one `--json` example
+- [ ] `cargo test --lib` passes
+
+### T026: Update `tests/features/examples.feature` for the new listing shape
+
+**File(s)**: `tests/features/examples.feature`
+**Type**: Modify
+**Depends**: T020
+**Acceptance**:
+- [ ] Scenarios that previously asserted `each JSON entry should have an "examples" array` on the top-level listing are replaced with scenarios asserting: (a) each listing entry has exactly `command` and `description`, (b) stdout does not contain `"examples"` as a JSON key anywhere in the listing payload
+- [ ] A new regression scenario asserts `agentchrome examples navigate --json` still returns a non-empty `examples` array (AC14)
+- [ ] A new scenario asserts listing payload size is under 4 KB
+- [ ] `cargo test --test bdd` passes
+
+### T027: Update `tests/features/capabilities.feature` for AC15–AC17
+
+**File(s)**: `tests/features/capabilities.feature`
+**Type**: Modify
+**Depends**: T023
+**Acceptance**:
+- [ ] Scenario "listing returns summaries only" asserts the shape described in AC15 (each `commands` entry has `name` + `description` only; stdout contains no `"subcommands"`, `"args"`, `"flags"` keys; payload < 4 KB)
+- [ ] Scenario "detail returns full descriptor" asserts AC16 for `agentchrome capabilities page --json`
+- [ ] Scenario "unknown command is an error" asserts AC17 (stderr JSON error, stdout empty, exit 1)
+- [ ] Existing scenarios covering the legacy monolithic manifest shape are retired or updated; detail-field assertions move to the new detail-path scenario
+- [ ] `cargo test --test bdd` passes
+
+### T028: Add BDD regression scenario to the spec's `feature.gherkin`
+
+**File(s)**: `specs/feature-add-interaction-strategy-guide-to-examples-command/feature.gherkin`
+**Type**: Modify
+**Depends**: None
+**Acceptance**:
+- [ ] New scenarios appended under `# Added by issue #218` that mirror the BDD tests described in T026/T027 (AC13–AC17)
+- [ ] The existing AC11d scenario is left in place for history; a new scenario immediately following it documents that #218 supersedes the `examples` array assertion on the listing path
+
+### T029: CHANGELOG entry labelling the shape change as breaking
+
+**File(s)**: `CHANGELOG.md`
+**Type**: Modify
+**Depends**: T020, T023
+**Acceptance**:
+- [ ] An entry under the next unreleased heading (or the next release being cut) describes both shape changes, names the new `capabilities <command>` detail path, and uses the literal word `breaking` (e.g., "BREAKING", "Breaking change")
+- [ ] The entry references issue #218
+- [ ] No existing entries are modified
+
+### T030: Regenerate man pages + verify completions
+
+**File(s)**: None (verification only; man pages and completions are clap-driven)
+**Type**: Verify
+**Depends**: T021
+**Acceptance**:
+- [ ] `cargo xtask man capabilities` output documents the new `<command>` positional (AC18)
+- [ ] `cargo run -- --completions zsh | grep -i capabilities` shows completion for the new positional
+- [ ] `cargo run -- capabilities --help` displays the new `long_about` / `after_long_help`
+- [ ] If `xtask/src/main.rs` needs adjustment to pick up the new positional, the adjustment is in this task
+
+### T031: Manual smoke test for the retrofit
+
+**File(s)**: None (verification only)
+**Type**: Verify
+**Depends**: T020, T023, T024–T030
+**Acceptance**:
+- [ ] `./target/debug/agentchrome examples --json | wc -c` < 4096
+- [ ] `./target/debug/agentchrome examples --json | jq '.[0] | keys'` returns exactly `["command", "description"]`
+- [ ] `./target/debug/agentchrome examples navigate --json | jq '.examples | length'` returns ≥ 1 (AC14 regression)
+- [ ] `./target/debug/agentchrome capabilities --json | wc -c` < 4096
+- [ ] `./target/debug/agentchrome capabilities --json | jq '.commands[0] | keys'` returns exactly `["description", "name"]` (alphabetical)
+- [ ] `./target/debug/agentchrome capabilities page --json | jq 'keys'` includes `subcommands`, `args`, `flags`
+- [ ] `./target/debug/agentchrome capabilities nonexistent 2>&1 1>/dev/null` writes JSON to stderr; exit code 1
+
+### T032: Verification gates for the retrofit
+
+**File(s)**: None (verification only)
+**Type**: Verify
+**Depends**: T031
+**Acceptance**:
+- [ ] `cargo build` → exit 0
+- [ ] `cargo test --lib` → exit 0 (includes T024, T025)
+- [ ] `cargo test --test bdd` → exit 0 (includes T026, T027)
+- [ ] `cargo clippy --all-targets` → exit 0 (no new warnings)
+- [ ] `cargo fmt --check` → exit 0
+- [ ] Manual smoke (T031) → all assertions pass
+
+---
+
 ## Dependency Graph
 
 ```
@@ -329,6 +495,18 @@ T001 (split examples.rs) ──┬──▶ T002 (types) ──▶ T004 (data 1-
 
 Critical path: **T001 \u2192 T002 \u2192 T004 \u2192 T005 \u2192 T006 \u2192 T007 \u2192 T016 \u2192 T017 \u2192 T018** (9 tasks).
 
+### Phase 6 dependency graph (added by #218)
+
+```
+T001 ──▶ T019 ──▶ T020 ──┐
+                          │
+T021 ──▶ T022 ──▶ T023 ──┼──▶ T024 ──▶ T026, T027, T028 ──▶ T029 ──▶ T030 ──▶ T031 ──▶ T032
+   │                      │
+   └──▶ T025 ─────────────┘
+```
+
+Phase 6 critical path: **T021 → T022 → T023 → T024 → T027 → T029 → T031 → T032** (8 tasks). Phase 6 depends on Phase 1's T001 (submodule layout) but is independent of Phase 4/5 strategy-guide tasks — the retrofit can merge before or after the #201 strategy tasks complete, though landing after #201 (per the issue's "Coordinate with #201 on ordering" note) avoids churn on the submodule files.
+
 ---
 
 ## Change History
@@ -336,6 +514,7 @@ Critical path: **T001 \u2192 T002 \u2192 T004 \u2192 T005 \u2192 T006 \u2192 T00
 | Issue | Date       | Summary                  |
 |-------|------------|--------------------------|
 | #201  | 2026-04-16 | Initial task breakdown   |
+| #218  | 2026-04-21 | Added Phase 6 (T019–T030) for Progressive Disclosure retrofit of `examples` and `capabilities` listings |
 
 ---
 

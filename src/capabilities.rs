@@ -29,6 +29,47 @@ pub struct CommandDescriptor {
     subcommands: Option<Vec<SubcommandDescriptor>>,
 }
 
+// Separate listing types from the detail descriptors above so the compiler
+// guarantees the listing path cannot carry `subcommands` / `args` / `flags`.
+
+#[derive(Serialize, Clone)]
+pub struct CommandListing {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct CapabilitiesManifestListing {
+    pub name: String,
+    pub version: String,
+    pub commands: Vec<CommandListing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_flags: Option<Vec<FlagDescriptor>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_codes: Option<Vec<ExitCodeDescriptor>>,
+}
+
+impl From<&CommandDescriptor> for CommandListing {
+    fn from(c: &CommandDescriptor) -> Self {
+        Self {
+            name: c.name.clone(),
+            description: c.description.clone(),
+        }
+    }
+}
+
+impl From<&CapabilitiesManifest> for CapabilitiesManifestListing {
+    fn from(m: &CapabilitiesManifest) -> Self {
+        Self {
+            name: m.name.clone(),
+            version: m.version.clone(),
+            commands: m.commands.iter().map(CommandListing::from).collect(),
+            global_flags: m.global_flags.clone(),
+            exit_codes: m.exit_codes.clone(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct SubcommandDescriptor {
     name: String,
@@ -48,7 +89,7 @@ pub struct ArgDescriptor {
     description: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct FlagDescriptor {
     name: String,
     #[serde(rename = "type")]
@@ -62,7 +103,7 @@ pub struct FlagDescriptor {
     description: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ExitCodeDescriptor {
     code: u8,
     name: String,
@@ -427,33 +468,29 @@ fn is_internal_arg(arg: &clap::Arg) -> bool {
 
 pub fn execute_capabilities(global: &GlobalOpts, args: &CapabilitiesArgs) -> Result<(), AppError> {
     let cmd = Cli::command();
-    let mut manifest = build_manifest(&cmd, args.compact);
+    let manifest = build_manifest(&cmd, args.compact);
 
-    // Filter to a specific command if requested
-    if let Some(ref name) = args.command {
-        let available: Vec<String> = manifest.commands.iter().map(|c| c.name.clone()).collect();
-
-        let matching: Vec<CommandDescriptor> = manifest
-            .commands
-            .into_iter()
-            .filter(|c| c.name == *name)
-            .collect();
-
-        if matching.is_empty() {
-            return Err(AppError {
-                message: format!(
-                    "Unknown command: '{name}'. Available: {}",
-                    available.join(", ")
-                ),
-                code: ExitCode::GeneralError,
-                custom_json: None,
-            });
+    match &args.command {
+        None => {
+            // Progressive-disclosure listing — summaries only.
+            let listing = CapabilitiesManifestListing::from(&manifest);
+            print_output(&listing, &global.output)
         }
-
-        manifest.commands = matching;
+        Some(name) => {
+            let available: Vec<String> = manifest.commands.iter().map(|c| c.name.clone()).collect();
+            let Some(descriptor) = manifest.commands.iter().find(|c| c.name == *name) else {
+                return Err(AppError {
+                    message: format!(
+                        "Unknown command: '{name}'. Available: {}",
+                        available.join(", ")
+                    ),
+                    code: ExitCode::GeneralError,
+                    custom_json: None,
+                });
+            };
+            print_output(descriptor, &global.output)
+        }
     }
-
-    print_output(&manifest, &global.output)
 }
 
 // =============================================================================
@@ -654,5 +691,72 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.get("global_flags").is_none());
         assert!(parsed.get("exit_codes").is_none());
+    }
+
+    #[test]
+    fn command_listing_json_has_only_two_fields() {
+        let desc = CommandDescriptor {
+            name: "page".into(),
+            description: "Page inspection".into(),
+            subcommands: Some(Vec::new()),
+        };
+        let listing: CommandListing = (&desc).into();
+        let json = serde_json::to_string(&listing).unwrap();
+        assert!(!json.contains("subcommands"));
+        assert!(!json.contains("\"args\""));
+        assert!(!json.contains("\"flags\""));
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj.len(), 2);
+        assert!(obj.contains_key("name"));
+        assert!(obj.contains_key("description"));
+    }
+
+    #[test]
+    fn unknown_command_returns_error_with_available_list() {
+        let global = GlobalOpts {
+            port: None,
+            host: "127.0.0.1".into(),
+            ws_url: None,
+            timeout: None,
+            tab: None,
+            page_id: None,
+            auto_dismiss_dialogs: false,
+            config: None,
+            keepalive_interval: None,
+            no_keepalive: false,
+            output: crate::cli::OutputFormat {
+                json: false,
+                pretty: false,
+                plain: false,
+                large_response_threshold: None,
+            },
+        };
+        let args = CapabilitiesArgs {
+            command: Some("nonexistent".into()),
+            compact: false,
+        };
+        let err = execute_capabilities(&global, &args).unwrap_err();
+        assert!(err.message.contains("Unknown command"));
+        let known = ["navigate", "tabs", "page", "dom", "interact"];
+        let hit_count = known.iter().filter(|n| err.message.contains(*n)).count();
+        assert!(
+            hit_count >= 5,
+            "expected ≥5 known commands listed in error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn capabilities_listing_under_4kb() {
+        let manifest = build_manifest(&root_cmd(), false);
+        let listing = CapabilitiesManifestListing::from(&manifest);
+        let json = serde_json::to_string(&listing).unwrap();
+        assert!(
+            json.len() < 4096,
+            "capabilities listing JSON must be < 4KB; got {} bytes",
+            json.len()
+        );
+        assert!(!json.contains("\"subcommands\""));
     }
 }

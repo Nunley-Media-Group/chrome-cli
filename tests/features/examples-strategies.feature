@@ -164,12 +164,14 @@ Feature: Interaction Strategy Guide in Examples Command
     Then stderr should contain "Unknown command group"
     And the exit code should be 1
 
-  Scenario: AC11d - Existing examples --json shape is preserved
+  Scenario: AC11d - Existing examples --json listing shape (superseded by #218)
+    # AC13 (#218) removes the nested `examples` array from the top-level listing;
+    # the `command` + `description` assertion is preserved.
     When I run "agentchrome examples --json"
     Then stdout should be a valid JSON array
     And each JSON entry should have a "command" field
     And each JSON entry should have a "description" field
-    And each JSON entry should have an "examples" array
+    And no JSON entry should have a "examples" field
     And the exit code should be 0
 
   # --- Progressive Disclosure Contract Guard ---

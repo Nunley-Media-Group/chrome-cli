@@ -1,8 +1,8 @@
 # Requirements: Interaction Strategy Guide in Examples Command
 
-**Issues**: #201
-**Date**: 2026-04-16
-**Status**: Draft
+**Issues**: #201, #218
+**Date**: 2026-04-21
+**Status**: Amended
 **Author**: Claude (spec-writer)
 
 ---
@@ -157,6 +157,72 @@ Strategy guides are **living documentation**: when new features ship (e.g., the 
 
 **Rationale**: Per the retrospective on environment-varying behavior, any feature that might diverge by runtime environment should have explicit cross-environment ACs. The `examples` subcommand does not touch Chrome or CDP, so it SHOULD be fully deterministic — AC12 codifies that expectation.
 
+### AC13: `examples --json` top-level listing returns summaries only (added by #218)
+
+**Given** the agentchrome binary is available
+**When** `agentchrome examples --json` is run
+**Then** stdout is a valid JSON array
+**And** each entry has **exactly** these fields: `command`, `description` — the nested `examples` array is NOT present on listing entries
+**And** the total JSON payload is under 4 KB
+**And** the command exits with exit code 0
+
+**Supersedes** AC11d's "each JSON entry should have an `examples` array" assertion. AC11d was written under the pre-retrofit grandfather exemption that has since been removed from `tech.md`'s Progressive Disclosure for Listings rule.
+
+### AC14: `examples <group> --json` still returns full detail (added by #218)
+
+**Given** the agentchrome binary is available
+**When** `agentchrome examples navigate --json` is run
+**Then** stdout is a valid JSON object containing `command`, `description`, and a non-empty `examples` array
+**And** each entry in `examples` has `cmd` and `description` fields (optionally `flags`)
+**And** the command exits with exit code 0
+
+### AC15: `capabilities --json` listing returns summaries only (added by #218)
+
+**Given** the agentchrome binary is available
+**When** `agentchrome capabilities --json` is run
+**Then** stdout is a valid JSON object with top-level fields `name`, `version`, `global_flags`, `exit_codes`, and a `commands` array
+**And** each entry in `commands` has **exactly** these fields: `name`, `description` — no `subcommands`, `args`, or `flags` arrays on listing entries
+**And** the total JSON payload is under 4 KB
+**And** the command exits with exit code 0
+
+### AC16: `capabilities <command> --json` returns the full descriptor (added by #218)
+
+**Given** the agentchrome binary is available
+**When** `agentchrome capabilities page --json` is run
+**Then** stdout is a valid JSON object with the full `CommandDescriptor` shape: `name`, `description`, `subcommands`, `args`, `flags`
+**And** the `subcommands` array is populated with each subcommand's full `args` and `flags`
+**And** the command exits with exit code 0
+
+### AC17: Unknown command in `capabilities <name>` is an error (added by #218)
+
+**Given** no command named `nonexistent` exists
+**When** `agentchrome capabilities nonexistent` is run
+**Then** a JSON error object is written to stderr listing available command names
+**And** stdout is empty
+**And** the command exits with exit code 1
+
+### AC18: Shell completions and man pages reflect the new `capabilities` positional (added by #218)
+
+**Given** the retrofit is in place
+**When** `cargo xtask man capabilities` (or the aggregated flow) renders the man page
+**Then** the new positional `<command>` is documented
+**And** `agentchrome --completions zsh` output includes completion for the new positional
+
+### AC19: BDD tests assert progressive-disclosure compliance for both commands (added by #218)
+
+**Given** the retrofit is in place
+**When** `cargo test --test bdd` is run
+**Then** `tests/features/examples.feature` contains scenarios asserting the new summary-only shape for `examples --json` and asserting detail-only fields are absent from the listing
+**And** `tests/features/capabilities.feature` contains equivalent scenarios covering AC15–AC17
+**And** all scenarios pass
+
+### AC20: Breaking-change documentation (added by #218)
+
+**Given** the retrofit is merged
+**When** `CHANGELOG.md` is inspected
+**Then** there is an entry under the next release heading describing the shape change to `examples --json` and `capabilities --json`, naming the new `capabilities <command>` detail path
+**And** the entry explicitly labels the change as a breaking change
+
 ### Generated Gherkin Preview
 
 ```gherkin
@@ -206,6 +272,16 @@ Feature: Interaction Strategy Guide in Examples Command
 | FR14 | No new argument name collides with existing global flags or the existing `examples <command>` positional (per retrospective learning)           | Must     | "strategies" must not collide with any command group name — none of: connect, tabs, navigate, page, diagnose, dom, js, console, network, interact, form, emulate, perf, dialog, skill, media, config |
 | FR15 | Strategy guide content references only agentchrome commands that actually exist at the time of writing                                          | Must     | Prevents the guide from instructing users to run commands that have not shipped |
 | FR16 | Strategy data structure supports future strategies being added without modifying the dispatcher or clap definitions                             | Should   | Dispatch by name from a table in `examples.rs` |
+| FR17 | `examples --json` top-level listing emits only `command` and `description` per entry — the nested `examples` array is removed from listing output (added by #218) | Must | Breaking change; supersedes the `examples` array assertion in AC11d |
+| FR18 | `examples <group> --json` continues to return the full per-group `examples` array on the detail path (added by #218) | Must | Detail path unchanged |
+| FR19 | `capabilities --json` listing emits only `name` and `description` per command — `subcommands`, `args`, `flags` removed from listing entries (added by #218) | Must | Breaking change |
+| FR20 | New positional `capabilities <command>` returns the full `CommandDescriptor` on the detail path (added by #218) | Must | New detail path; mirrors the flat-positional pattern chosen for `examples strategies` |
+| FR21 | Unknown command in `capabilities <command>` returns a JSON error on stderr with exit code 1, listing available command names (added by #218) | Must | Mirrors existing unknown-strategy / unknown-group behavior |
+| FR22 | Clap `long_about` and `after_long_help` on the `Capabilities` variant document the new positional with at least one worked `--json` example (added by #218) | Must | Per tech.md Clap Help Entries steering principle |
+| FR23 | The ten already-compliant listing commands (`tabs list`, `network list`, `console read`, `cookie list`, `media list`, `page frames`, `page workers`, `dom select`/`tree`, `skill list`) are NOT modified (added by #218) | Must | Scope guard |
+| FR24 | BDD scenarios in `tests/features/examples.feature` and `tests/features/capabilities.feature` cover AC13–AC17 (added by #218) | Must | Update existing feature files, not create new ones |
+| FR25 | `CHANGELOG.md` entry under the next release heading labels the shape change as breaking (added by #218) | Must | User explicitly chose the breaking-change path over an opt-in `--full` flag |
+| FR26 | Progressive-disclosure guard unit test asserts serialized listing JSON for `examples` and `capabilities` does NOT contain detail field names (`examples`, `subcommands`, `args`, `flags`) (added by #218) | Should | Prevents accidental regression into non-compliance |
 
 ---
 
@@ -318,7 +394,14 @@ No other fields are emitted in the listing. Roughly 100\u2013200 bytes per entry
 - Localization of strategy content — English only for now
 - Strategy content that depends on runtime page state (that is the `diagnose` command's job)
 - Fuzzy matching or "did you mean \u2026?" suggestions for unknown strategy names (the error lists valid names; exact match required)
-- **Retrofitting the existing `agentchrome examples --json` top-level listing** to comply with the new **Progressive Disclosure for Listings** steering principle. That top-level listing currently returns all command groups with all of their examples (~7 KB JSON) \u2014 technically non-compliant under the new tech.md rule now that the grandfather exemption has been removed. Retrofitting it (e.g., summaries-only by default, `--full` opt-in) is a separate change that would touch every existing `examples` BDD scenario and is out of scope for this issue. Flagged for a follow-on issue.
+- **Retrofitting the existing `agentchrome examples --json` top-level listing** to comply with the new **Progressive Disclosure for Listings** steering principle. That top-level listing currently returns all command groups with all of their examples (~7 KB JSON) \u2014 technically non-compliant under the new tech.md rule now that the grandfather exemption has been removed. Retrofitting it (e.g., summaries-only by default, `--full` opt-in) is a separate change that would touch every existing `examples` BDD scenario and is out of scope for this issue. **Resolved by issue #218** — retrofit of `examples --json` and `capabilities --json` listings is folded into this spec via AC13–AC20 and FR17–FR26.
+
+**Added by #218 (out of scope for the retrofit itself):**
+
+- Retrofitting any of the other ten already-compliant listing commands (`tabs list`, `network list`, `console read`, `cookie list`, `media list`, `page frames`, `page workers`, `dom select`/`tree`, `skill list`) — they already emit lightweight summaries.
+- Introducing an opt-in `--full` flag for backward compatibility — the user has explicitly chosen the breaking-change path for v1.
+- Changes to BDD step-definition infrastructure beyond what the new scenarios require.
+- Further refactoring of `src/examples/` module layout (already done by #201) or `src/capabilities.rs` beyond the new positional + listing-shape change.
 
 ---
 
@@ -349,6 +432,7 @@ No other fields are emitted in the listing. Roughly 100\u2013200 bytes per entry
 |-------|------------|--------------------------------------------------------------------------------------------------|
 | #201  | 2026-04-16 | Initial feature spec                                                                             |
 | #201  | 2026-04-16 | Expanded launch strategy set from 4 to 10 guides (added shadow-dom, spa-navigation-waits, react-controlled-inputs, debugging-failed-interactions, authentication-cookie-reuse, multi-tab-workflows) |
+| #218  | 2026-04-21 | Progressive Disclosure retrofit: `examples --json` and `capabilities --json` listings return summaries only; new `capabilities <command>` detail positional; breaking-change CHANGELOG entry. Supersedes AC11d's `examples` array assertion. |
 
 ---
 
