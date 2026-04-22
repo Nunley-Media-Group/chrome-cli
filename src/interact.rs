@@ -838,8 +838,8 @@ fn parse_key_combination(input: &str) -> Result<ParsedKey, AppError> {
 /// Get the CDP `key` value for a key name.
 fn cdp_key_value(key: &str) -> &str {
     match key {
-        "Enter" => "\r",
-        "Tab" => "\t",
+        "Enter" => "Enter",
+        "Tab" => "Tab",
         "Escape" => "Escape",
         "Backspace" => "Backspace",
         "Delete" => "Delete",
@@ -938,6 +938,126 @@ fn cdp_key_code(key: &str) -> String {
     }
 }
 
+/// Get the Windows virtual-key code for a key name.
+///
+/// CDP populates `KeyboardEvent.keyCode` / `event.which` from this value;
+/// omitting it causes jQuery-style handlers that short-circuit on `which === 0`
+/// to ignore the event.
+fn windows_virtual_key_code(key: &str) -> i64 {
+    match key {
+        "Backspace" => 8,
+        "Tab" => 9,
+        "Enter" => 13,
+        "Shift" => 16,
+        "Control" => 17,
+        "Alt" => 18,
+        "Pause" => 19,
+        "CapsLock" => 20,
+        "Escape" => 27,
+        "Space" => 32,
+        "PageUp" => 33,
+        "PageDown" => 34,
+        "End" => 35,
+        "Home" => 36,
+        "ArrowLeft" => 37,
+        "ArrowUp" => 38,
+        "ArrowRight" => 39,
+        "ArrowDown" => 40,
+        "PrintScreen" => 44,
+        "Insert" => 45,
+        "Delete" => 46,
+        "Meta" => 91,
+        "ContextMenu" => 93,
+        "NumLock" => 144,
+        "ScrollLock" => 145,
+        "Semicolon" => 186,
+        "Equal" => 187,
+        "Comma" => 188,
+        "Minus" => 189,
+        "Period" => 190,
+        "Slash" => 191,
+        "Backquote" => 192,
+        "BracketLeft" => 219,
+        "Backslash" => 220,
+        "BracketRight" => 221,
+        "Quote" => 222,
+        k if k.len() == 1 => {
+            let c = k.chars().next().unwrap();
+            if c.is_ascii_alphabetic() {
+                c.to_ascii_uppercase() as i64
+            } else if c.is_ascii_digit() {
+                c as i64
+            } else {
+                0
+            }
+        }
+        k if k.starts_with('F') && k.len() >= 2 => k[1..]
+            .parse::<i64>()
+            .ok()
+            .filter(|n| (1..=24).contains(n))
+            .map_or(0, |n| 111 + n),
+        _ => 0,
+    }
+}
+
+/// Get the text a real keyboard would produce for `keyDown` on a printable key.
+///
+/// Returns `None` for non-printable keys (navigation, function keys, bare
+/// modifiers). CDP uses `text` on `keyDown` to drive `keypress` and `input`
+/// events on focused form elements.
+fn key_text(key: &str, modifiers: u8) -> Option<String> {
+    let shift = modifiers & 8 != 0;
+    match key {
+        "Enter" => Some("\r".to_string()),
+        "Tab" => Some("\t".to_string()),
+        "Space" => Some(" ".to_string()),
+        "Escape" | "Backspace" | "Delete" | "Insert" | "ArrowUp" | "ArrowDown" | "ArrowLeft"
+        | "ArrowRight" | "Home" | "End" | "PageUp" | "PageDown" | "Alt" | "Control" | "Meta"
+        | "Shift" | "CapsLock" | "NumLock" | "ScrollLock" | "ContextMenu" | "PrintScreen"
+        | "Pause" => None,
+        "Minus" => Some(if shift { "_" } else { "-" }.to_string()),
+        "Equal" => Some(if shift { "+" } else { "=" }.to_string()),
+        "BracketLeft" => Some(if shift { "{" } else { "[" }.to_string()),
+        "BracketRight" => Some(if shift { "}" } else { "]" }.to_string()),
+        "Backslash" => Some(if shift { "|" } else { "\\" }.to_string()),
+        "Semicolon" => Some(if shift { ":" } else { ";" }.to_string()),
+        "Quote" => Some(if shift { "\"" } else { "'" }.to_string()),
+        "Backquote" => Some(if shift { "~" } else { "`" }.to_string()),
+        "Comma" => Some(if shift { "<" } else { "," }.to_string()),
+        "Period" => Some(if shift { ">" } else { "." }.to_string()),
+        "Slash" => Some(if shift { "?" } else { "/" }.to_string()),
+        k if k.starts_with('F') && k.len() >= 2 && k[1..].chars().all(|c| c.is_ascii_digit()) => {
+            None
+        }
+        k if k.starts_with("Numpad") => None,
+        k if k.starts_with("Media") || k.starts_with("Audio") => None,
+        k if k.len() == 1 => {
+            let c = k.chars().next().unwrap();
+            if c.is_ascii_lowercase() && shift {
+                Some(c.to_ascii_uppercase().to_string())
+            } else if c.is_ascii_digit() && shift {
+                let shifted = match c {
+                    '1' => '!',
+                    '2' => '@',
+                    '3' => '#',
+                    '4' => '$',
+                    '5' => '%',
+                    '6' => '^',
+                    '7' => '&',
+                    '8' => '*',
+                    '9' => '(',
+                    '0' => ')',
+                    _ => c,
+                };
+                Some(shifted.to_string())
+            } else {
+                Some(c.to_string())
+            }
+        }
+        _ => None,
+    }
+}
+
 // =============================================================================
 // Keyboard dispatch helpers
 // =============================================================================
@@ -950,14 +1070,20 @@ async fn dispatch_key_press(
 ) -> Result<(), AppError> {
     let key_value = cdp_key_value(key);
     let code = cdp_key_code(key);
+    let vk = windows_virtual_key_code(key);
+    let text = key_text(key, modifiers);
 
     // keyDown
-    let down_params = serde_json::json!({
+    let mut down_params = serde_json::json!({
         "type": "keyDown",
         "key": key_value,
         "code": code,
         "modifiers": modifiers,
+        "windowsVirtualKeyCode": vk,
     });
+    if let Some(t) = text {
+        down_params["text"] = serde_json::Value::String(t);
+    }
     session
         .send_command("Input.dispatchKeyEvent", Some(down_params))
         .await
@@ -969,6 +1095,7 @@ async fn dispatch_key_press(
         "key": key_value,
         "code": code,
         "modifiers": modifiers,
+        "windowsVirtualKeyCode": vk,
     });
     session
         .send_command("Input.dispatchKeyEvent", Some(up_params))
@@ -1007,6 +1134,7 @@ async fn dispatch_modifier_event(
         "key": key,
         "code": code,
         "modifiers": modifiers,
+        "windowsVirtualKeyCode": windows_virtual_key_code(key),
     });
     let action = if event_type == "keyDown" {
         "modifier_down"
@@ -2724,8 +2852,8 @@ mod tests {
 
     #[test]
     fn cdp_key_value_special_keys() {
-        assert_eq!(cdp_key_value("Enter"), "\r");
-        assert_eq!(cdp_key_value("Tab"), "\t");
+        assert_eq!(cdp_key_value("Enter"), "Enter");
+        assert_eq!(cdp_key_value("Tab"), "Tab");
         assert_eq!(cdp_key_value("Space"), " ");
         assert_eq!(cdp_key_value("Escape"), "Escape");
         assert_eq!(cdp_key_value("Backspace"), "Backspace");
@@ -2823,6 +2951,121 @@ mod tests {
         assert_eq!(cdp_key_code("Comma"), "Comma");
         assert_eq!(cdp_key_code("Period"), "Period");
         assert_eq!(cdp_key_code("Slash"), "Slash");
+    }
+
+    // =========================================================================
+    // windowsVirtualKeyCode tests (issue #227)
+    // =========================================================================
+
+    #[test]
+    fn vk_letters() {
+        assert_eq!(windows_virtual_key_code("a"), 65);
+        assert_eq!(windows_virtual_key_code("A"), 65);
+        assert_eq!(windows_virtual_key_code("z"), 90);
+        assert_eq!(windows_virtual_key_code("Z"), 90);
+    }
+
+    #[test]
+    fn vk_digits() {
+        assert_eq!(windows_virtual_key_code("0"), 48);
+        assert_eq!(windows_virtual_key_code("5"), 53);
+        assert_eq!(windows_virtual_key_code("9"), 57);
+    }
+
+    #[test]
+    fn vk_special() {
+        assert_eq!(windows_virtual_key_code("Enter"), 13);
+        assert_eq!(windows_virtual_key_code("Tab"), 9);
+        assert_eq!(windows_virtual_key_code("Escape"), 27);
+        assert_eq!(windows_virtual_key_code("Backspace"), 8);
+        assert_eq!(windows_virtual_key_code("Space"), 32);
+        assert_eq!(windows_virtual_key_code("Delete"), 46);
+        assert_eq!(windows_virtual_key_code("Insert"), 45);
+    }
+
+    #[test]
+    fn vk_navigation() {
+        assert_eq!(windows_virtual_key_code("ArrowLeft"), 37);
+        assert_eq!(windows_virtual_key_code("ArrowUp"), 38);
+        assert_eq!(windows_virtual_key_code("ArrowRight"), 39);
+        assert_eq!(windows_virtual_key_code("ArrowDown"), 40);
+        assert_eq!(windows_virtual_key_code("Home"), 36);
+        assert_eq!(windows_virtual_key_code("End"), 35);
+        assert_eq!(windows_virtual_key_code("PageUp"), 33);
+        assert_eq!(windows_virtual_key_code("PageDown"), 34);
+    }
+
+    #[test]
+    fn vk_modifiers() {
+        assert_eq!(windows_virtual_key_code("Shift"), 16);
+        assert_eq!(windows_virtual_key_code("Control"), 17);
+        assert_eq!(windows_virtual_key_code("Alt"), 18);
+        assert_eq!(windows_virtual_key_code("Meta"), 91);
+    }
+
+    #[test]
+    fn vk_function_keys() {
+        assert_eq!(windows_virtual_key_code("F1"), 112);
+        assert_eq!(windows_virtual_key_code("F12"), 123);
+        assert_eq!(windows_virtual_key_code("F24"), 135);
+    }
+
+    #[test]
+    fn vk_unknown_returns_zero() {
+        assert_eq!(windows_virtual_key_code("FooBar"), 0);
+        assert_eq!(windows_virtual_key_code(""), 0);
+    }
+
+    // =========================================================================
+    // key_text tests (issue #227)
+    // =========================================================================
+
+    #[test]
+    fn key_text_letters_no_shift() {
+        assert_eq!(key_text("a", 0), Some("a".to_string()));
+        assert_eq!(key_text("A", 0), Some("A".to_string()));
+    }
+
+    #[test]
+    fn key_text_letters_with_shift() {
+        // Shift + lowercase -> uppercase
+        assert_eq!(key_text("a", 8), Some("A".to_string()));
+        // Shift + uppercase stays uppercase
+        assert_eq!(key_text("A", 8), Some("A".to_string()));
+    }
+
+    #[test]
+    fn key_text_digits() {
+        assert_eq!(key_text("5", 0), Some("5".to_string()));
+        assert_eq!(key_text("5", 8), Some("%".to_string()));
+        assert_eq!(key_text("1", 8), Some("!".to_string()));
+    }
+
+    #[test]
+    fn key_text_printable_named_keys() {
+        assert_eq!(key_text("Enter", 0), Some("\r".to_string()));
+        assert_eq!(key_text("Tab", 0), Some("\t".to_string()));
+        assert_eq!(key_text("Space", 0), Some(" ".to_string()));
+    }
+
+    #[test]
+    fn key_text_symbols() {
+        assert_eq!(key_text("Minus", 0), Some("-".to_string()));
+        assert_eq!(key_text("Minus", 8), Some("_".to_string()));
+        assert_eq!(key_text("Slash", 0), Some("/".to_string()));
+        assert_eq!(key_text("Slash", 8), Some("?".to_string()));
+    }
+
+    #[test]
+    fn key_text_non_printable_returns_none() {
+        assert!(key_text("Escape", 0).is_none());
+        assert!(key_text("Backspace", 0).is_none());
+        assert!(key_text("ArrowUp", 0).is_none());
+        assert!(key_text("PageDown", 0).is_none());
+        assert!(key_text("F1", 0).is_none());
+        assert!(key_text("F12", 0).is_none());
+        assert!(key_text("Shift", 8).is_none());
+        assert!(key_text("Control", 2).is_none());
     }
 
     // =========================================================================

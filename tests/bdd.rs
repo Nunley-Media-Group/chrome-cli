@@ -5176,6 +5176,17 @@ async fn main() {
         )
         .await;
 
+    // interact key keyup regression (issue #227) — all scenarios require a running Chrome
+    // instance navigated to the tests/fixtures/interact-key-keyup-event.html fixture, so
+    // none run in CI without Chrome. The feature file documents the regression scenarios
+    // for manual / integration testing.
+    KeyboardWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/227-fix-interact-key-keyup-event.feature",
+            |_feature, _rule, _scenario| false, // Require real Chrome + fixture
+        )
+        .await;
+
     // Form input — only CLI-testable scenarios (argument validation, help text).
     // Scenarios requiring a running Chrome instance are commented out in the feature file.
     CliWorld::cucumber()
