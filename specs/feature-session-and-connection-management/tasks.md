@@ -1,8 +1,8 @@
 # Tasks: Session and Connection Management
 
-**Issues**: #6, #185
-**Date**: 2026-04-18
-**Status**: Planning
+**Issues**: #6, #185, #226
+**Date**: 2026-04-21
+**Status**: Amended
 **Author**: Claude (spec-driven)
 
 ---
@@ -13,6 +13,7 @@
 |-------|------|---------|
 | #6 | 2026-02-11 | Initial task breakdown — T001–T013 across 5 phases |
 | #185 | 2026-04-18 | Adds Phase 6 (T014–T037) for session reconnection, keep-alive, clap/capabilities/man/README coverage |
+| #226 | 2026-04-21 | Adds Phase 7 (T038–T049) for Windows auto-discovery hardening, `--status` exit-code contract change, stale-session stderr warning, help/capabilities precedence docs |
 
 ---
 
@@ -26,7 +27,8 @@
 | Integration | 1 | [ ] |
 | Testing | 2 | [ ] |
 | Session Reconnection & Keep-Alive (#185) | 24 | [ ] |
-| **Total** | **37** | |
+| Windows Auto-Discovery & Status UX (#226) | 12 | [ ] |
+| **Total** | **49** | |
 
 ---
 
@@ -812,3 +814,197 @@ T029 ──▶ T032 ────────────────────
 - T024–T028 are independent once T023 is done; they can land in parallel commits
 
 **Critical path:** T014 → T015 → T022 → T023 → T028 → T037
+
+---
+
+## Phase 7: Windows Auto-Discovery & Status UX (Issue #226)
+
+### T038: Add session-path diagnostic probe (Windows-first instrumentation)
+
+**File(s)**: `src/session.rs`
+**Type**: Modify
+**Depends**: None
+**Acceptance**:
+- [ ] `session_file_path()` expands its Windows fallback chain: `USERPROFILE` → `HOMEDRIVE`+`HOMEPATH`
+- [ ] `SessionError::NoHomeDir` variant carries a diagnostic string listing every env var consulted and what value (or absence) was seen (redact only the username portion if unavoidable)
+- [ ] `read_session()` parse errors include the resolved file path in the error Display string
+- [ ] Unit test: `USERPROFILE` absent, `HOMEDRIVE`+`HOMEPATH` present → resolution succeeds
+- [ ] Unit test: all Windows env vars absent → `NoHomeDir` error string names each one checked
+- [ ] Unit test: temp HOME containing a space and a non-ASCII character (`Björn O'Malley`) round-trips a `SessionData` write + read identically (AC38)
+- [ ] `cargo test --lib session::` passes on macOS, Linux, and the Windows CI job
+
+**Notes**: This is the "instrumentation pass" described in design §Amendment #226 → Root-Cause Hypotheses. It must land before T039 so the fix is scoped to confirmed failure modes.
+
+### T039: Add atomic-write retry loop for Windows NTFS rename contention
+
+**File(s)**: `src/session.rs`
+**Type**: Modify
+**Depends**: T038
+**Acceptance**:
+- [ ] Internal helper `write_session_atomic` extracted (if not already) and wraps `std::fs::rename` in a bounded retry loop (up to 5 attempts, 10 ms backoff) for `AccessDenied` / `SharingViolation` errors
+- [ ] On exhausted retries, fall back to a direct non-atomic write AND emit a one-line `WARN` to stderr describing the fallback
+- [ ] No behavior change on Unix (rename errors pass through unchanged)
+- [ ] Unit test (mock FS): rename fails N-1 times then succeeds → final state is correct, no WARN emitted
+- [ ] Unit test (mock FS): rename fails N times → direct write used, WARN on stderr, final state still correct
+- [ ] `cargo clippy --all-targets -- -D warnings` passes
+
+### T040: Change `connect --status` exit-code contract (AC39 supersedes AC6)
+
+**File(s)**: `src/main.rs` (in `execute_connect` or its status branch)
+**Type**: Modify
+**Depends**: T038
+**Acceptance**:
+- [ ] `agentchrome connect --status` returns exit code 0 in both branches
+- [ ] Session absent → stdout emits `{"active": false}` (JSON) and nothing on stderr
+- [ ] Session present → stdout emits JSON including `active: true`, `ws_url`, `port`, `pid`, `timestamp`, `reachable`, plus the #185 fields (`last_reconnect_at`, `reconnect_count`, `keepalive.*`)
+- [ ] Any pre-existing test encoding AC6's non-zero exit for the no-session branch is updated in the same commit (grep for `--status` + `exit_code: 1` / `!= 0` in `tests/`)
+- [ ] BDD scenario `--status returns exit 0 when no session` added
+- [ ] BDD scenario `--status returns exit 0 with active:true when session present` added
+- [ ] `cargo test --test bdd` passes (skipping `@requires-chrome` tags)
+
+### T041: Add `resolve_connection_for_status` wrapper reusing FR18 path
+
+**File(s)**: `src/connection.rs`
+**Type**: Modify
+**Depends**: T038
+**Acceptance**:
+- [ ] New public fn `resolve_connection_for_status(host, stored_session) -> Result<StatusReport, _>` lives in `src/connection.rs`
+- [ ] Calls `query_version` (HTTP) against the stored port first; does NOT open a CDP WebSocket unless necessary for rediscovery
+- [ ] When stored `ws_url` is dead but the stored port responds, runs the same rediscovery pass used by `resolve_connection_with_reconnect` and rewrites the session file via `session::rewrite_preserving` (preserves `pid`, `port`, `active_tab_id`; refreshes `timestamp`)
+- [ ] Returns `reachable: true` after successful rediscovery even though the original `ws_url` was dead (AC40 rotated-ws branch)
+- [ ] Returns `reachable: false` when the stored port does not respond and no fallback Chrome is found
+- [ ] Unit test matrix from design §Testing Strategy (#226 additions) row 4 covered
+
+### T042: Add structured `stale_session` stderr warning
+
+**File(s)**: `src/connection.rs`, `src/session.rs` (warning struct)
+**Type**: Modify
+**Depends**: T041
+**Acceptance**:
+- [ ] New fn `emit_stale_session_warning(path, stored_port)` lives on the shared resolution path, called once from `resolve_connection_with_reconnect` before the final error is returned
+- [ ] Warning JSON shape on stderr: `{"warning": "<msg>", "kind": "stale_session", "session_file": "<path>", "stored_port": <n>}`
+- [ ] Warning is emitted BEFORE any `chrome_terminated` / `transient` error JSON that follows
+- [ ] Warning is suppressed when `--quiet` is passed (or equivalent log-level gate)
+- [ ] Tool does NOT silently fall back to port 9222; the default-port probe continues to run, but its failure yields the existing `chrome_terminated` / `transient` error after the warning
+- [ ] First-time `connect` with no session file does NOT emit the warning (session file must exist for the warning to fire)
+- [ ] Unit test: session file points to dead port, no fallback Chrome → warning on stderr, existing error contract unchanged
+- [ ] Unit test: no session file → no warning
+
+### T043: Document session path + resolution precedence in `connect --help`
+
+**File(s)**: `src/cli/mod.rs` (or wherever the `connect` subcommand is defined)
+**Type**: Modify
+**Depends**: None
+**Acceptance**:
+- [ ] A new `const SESSION_FILE_HELP: &str` is defined once and used by both `connect --help` (`long_about` or `after_long_help`) and the capabilities manifest (T044)
+- [ ] The text names both paths: Unix `~/.agentchrome/session.json`, Windows `%USERPROFILE%\.agentchrome\session.json`
+- [ ] The text lists the precedence highest→lowest: `--ws-url` → `--port` → `AGENTCHROME_PORT` → session file → default port 9222
+- [ ] The `EXAMPLES:` section includes at least one worked two-shell cross-invocation flow (shell 1 `connect --launch --headless`, shell 2 `tabs list` with no flags)
+- [ ] `agentchrome connect --help` renders the new text when run locally
+- [ ] BDD scenario asserts each of the five precedence strings appears in the long-help output (AC42)
+- [ ] `cargo xtask man connect` renders a man page section reflecting the same text
+
+### T044: Surface `connect.session_file` object in capabilities manifest
+
+**File(s)**: `src/cli/mod.rs` (capabilities generation), plus whichever module defines the manifest schema
+**Type**: Modify
+**Depends**: T043
+**Acceptance**:
+- [ ] `agentchrome capabilities` JSON contains a `connect.session_file` object
+- [ ] The object has string fields `path_unix` and `path_windows` matching the T043 const
+- [ ] The object has an ordered `precedence` array with exactly five entries in the order of T043
+- [ ] BDD scenario asserts the manifest matches the `connect --help` strings byte-for-byte on the relevant fields (AC43)
+- [ ] Snapshot/golden test for the manifest updated to include the new object
+- [ ] `cargo test --lib` passes
+
+### T045: Regression coverage for explicit-flag and env-var paths
+
+**File(s)**: `tests/features/226-session-autodiscovery.feature`, step definitions
+**Type**: Create / Modify
+**Depends**: T040, T041, T042
+**Acceptance**:
+- [ ] BDD scenario: `--port N` set and session file exists → command uses port N, session file is not consulted (no stale_session warning possible)
+- [ ] BDD scenario: `AGENTCHROME_PORT=N` set and session file exists → same as above
+- [ ] BDD scenario: `--ws-url URL` set and session file exists → uses URL, session file not consulted
+- [ ] BDD scenarios assert no new stderr lines appear on the happy path (regression AC44)
+- [ ] `cargo test --test bdd` passes
+
+### T046: Windows CI cross-invocation BDD scenarios
+
+**File(s)**: `tests/features/226-session-autodiscovery.feature`, Windows-specific step definitions, `.github/workflows/*` (if a new job is required)
+**Type**: Create / Modify
+**Depends**: T038, T039, T040, T041
+**Acceptance**:
+- [ ] BDD scenario tagged `@windows` exercises AC37: shell 1 runs `connect --launch --headless`, shell 2 (new subprocess, fresh env) runs `tabs list` without flags and succeeds with exit 0
+- [ ] BDD scenario exercises AC38: temp HOME contains a space and non-ASCII character, session write + read round-trips, subsequent commands auto-discover
+- [ ] Windows CI job is configured (or existing job extended) to run the `@windows` tagged scenarios
+- [ ] CI job is required (not optional) on the #226 PR — fix is not accepted until green
+
+**Notes**: Per retrospective "environment variants" learning — the defect was environment-specific; regression coverage must be environment-specific too.
+
+### T047: Update existing tests for AC39 exit-code contract
+
+**File(s)**: Any test in `tests/` or `src/` that asserts a non-zero exit for `connect --status` with no session
+**Type**: Modify
+**Depends**: T040
+**Acceptance**:
+- [ ] Grep `tests/ src/` for `connect --status` + `!= 0` / `exit_code: 1` / `Err(…)` and update each site
+- [ ] Updated tests assert exit code 0 and JSON shape `{"active": false}`
+- [ ] `cargo test --all` passes
+- [ ] No test still encodes the AC6 behavior
+
+### T048: Feature Exercise Gate — manual Windows smoke test
+
+**File(s)**: `verification/226-smoke.md` (inline in verification report during `/verify-code`)
+**Type**: Manual
+**Depends**: T038–T047
+**Acceptance**:
+- [ ] On a Windows 11 machine (or VM) matching Rich's original repro, run `agentchrome connect --launch --headless` in Git Bash / cmd / PowerShell (three separate runs, one shell each)
+- [ ] In a new shell of the same flavor, run `agentchrome tabs list` without flags → exit 0, JSON payload returned
+- [ ] `agentchrome connect --status` with no session → `{"active": false}`, exit 0
+- [ ] `agentchrome connect --status` with active session → `active: true`, `reachable: true`, all expected fields
+- [ ] Kill Chrome without `--disconnect`, then run `tabs list` → stderr contains the `stale_session` warning JSON, followed by the `chrome_terminated` error
+- [ ] `agentchrome connect --help` long form renders the session file paths and precedence list
+- [ ] Disconnect + kill orphan Chrome processes per `steering/tech.md` cleanup rules
+
+### T049: Verify no regressions (full workspace)
+
+**File(s)**: Full workspace
+**Type**: Verification
+**Depends**: T038–T048
+**Acceptance**:
+- [ ] `cargo build` succeeds
+- [ ] `cargo test --lib` passes
+- [ ] `cargo test --test bdd` passes (including `@windows` scenarios on the Windows CI job; skipping `@requires-chrome` in headless CI as usual)
+- [ ] `cargo clippy --all-targets -- -D warnings` passes
+- [ ] `cargo fmt --check` passes
+- [ ] `cargo xtask man connect` renders with the session-file/precedence text
+- [ ] `agentchrome capabilities` JSON includes the new `connect.session_file` object
+- [ ] No new `CdpClient::connect` sites have appeared that bypass `resolve_connection_with_reconnect` (FR18 path audit preserved)
+
+---
+
+## Phase 7 Dependency Graph
+
+```
+T038 ──┬──▶ T039 ──┐
+       │           │
+       ├──▶ T040 ──┼──▶ T045 ──┐
+       │           │           │
+       └──▶ T041 ──┼──▶ T042 ──┤
+                   │           │
+T043 ──▶ T044 ─────┤           │
+                   │           ├──▶ T049
+T047 ──────────────┤           │
+                   │           │
+T038+T039+T040+T041 ──▶ T046 ──┤
+                               │
+       T048 (manual) ──────────┘
+```
+
+**Parallel tracks:**
+- T038, T043, T047 can start immediately
+- T044 only needs T043
+- T046 (Windows CI) can land in parallel with T045 once T038–T041 are ready
+
+**Critical path:** T038 → T041 → T042 → T046 → T049

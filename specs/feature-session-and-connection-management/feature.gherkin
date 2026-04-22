@@ -367,3 +367,117 @@ Feature: Session and connection management
     And it mentions "keepalive-interval" with its default of 30000 ms
     And it mentions the error "kind" field and the "recoverable" boolean
     And it includes at least one copy-pasteable "--keepalive-interval" command example
+
+  # --- Windows Auto-Discovery & Status UX (Issue #226) ---
+
+  # Added by issue #226
+  @windows
+  Scenario: Windows cross-invocation auto-discovery after launch
+    # Covers AC37 / FR24
+    Given a clean Windows shell with no AGENTCHROME_PORT and no existing session.json
+    When I run "agentchrome connect --launch --headless" in shell A
+    And I run "agentchrome tabs list" in a new shell B with no flags and no env vars
+    Then shell B connects to the launched Chrome using the persisted session file
+    And the stdout of shell B contains the normal JSON payload for "tabs list"
+    And the exit code of shell B is 0
+
+  # Added by issue #226
+  @windows
+  Scenario: Session path round-trips with spaces and non-ASCII characters
+    # Covers AC38 / FR24
+    Given %USERPROFILE% resolves to a path with a space and a non-ASCII character
+    When agentchrome writes session.json after "connect --launch"
+    And a subsequent invocation reads session.json
+    Then the session data round-trips byte-for-byte
+    And no orphan ".tmp" files remain in the session directory
+
+  # Added by issue #226
+  Scenario: connect --status returns exit 0 when no session exists
+    # Covers AC39 / FR25 (supersedes AC6)
+    Given no session file exists
+    When I run "agentchrome connect --status"
+    Then stdout contains JSON matching {"active": false}
+    And stderr is empty
+    And the exit code is 0
+
+  # Added by issue #226
+  Scenario: connect --status returns exit 0 with active:true when session present
+    # Covers AC39 / FR25
+    Given a valid session file exists and Chrome is running on the stored port
+    When I run "agentchrome connect --status"
+    Then stdout contains JSON with "active": true
+    And the JSON includes "ws_url", "port", "pid", "timestamp", and "reachable"
+    And the exit code is 0
+
+  # Added by issue #226
+  Scenario: connect --status rediscovers rotated ws_url and marks reachable:true
+    # Covers AC40 / FR26
+    Given a session file exists with a stale ws_url but Chrome is running on the stored port
+    When I run "agentchrome connect --status"
+    Then the JSON output has "reachable": true
+    And the JSON output's "ws_url" is the current rediscovered URL
+    And the session file on disk is updated to the new ws_url
+    And the exit code is 0
+
+  # Added by issue #226
+  Scenario: connect --status reports reachable:false when the stored port is dead
+    # Covers AC40 / FR26
+    Given a session file exists but the stored port does not respond
+    And no fallback Chrome is running on any discoverable port
+    When I run "agentchrome connect --status"
+    Then the JSON output has "reachable": false
+    And the exit code is 0
+
+  # Added by issue #226
+  Scenario: Stale-session warning is emitted before the terminal error
+    # Covers AC41 / FR27
+    Given a session file exists pointing to a dead port
+    And no fallback Chrome is running on any discoverable port
+    When I run "agentchrome page snapshot" with no flags or env vars
+    Then stderr contains a JSON warning with "kind": "stale_session"
+    And the warning includes the resolved session file path and the stored port
+    And the warning appears BEFORE the terminal chrome_terminated / transient error JSON
+    And the tool does NOT silently fall back to port 9222
+    And the session file is not deleted
+
+  # Added by issue #226
+  Scenario: No stale-session warning on first-time connect
+    # Covers AC41 boundary
+    Given no session file exists
+    When I run any command that needs Chrome
+    Then stderr does NOT contain a "stale_session" warning
+
+  # Added by issue #226
+  Scenario: connect --help long form documents session file path and precedence
+    # Covers AC42 / FR28
+    When I run "agentchrome connect --help"
+    Then the long help mentions "~/.agentchrome/session.json"
+    And the long help mentions "%USERPROFILE%\.agentchrome\session.json"
+    And the long help lists the precedence "--ws-url" then "--port" then "AGENTCHROME_PORT" then "session.json" then "9222" in that order
+    And the EXAMPLES section shows a two-shell cross-invocation pattern
+
+  # Added by issue #226
+  Scenario: Capabilities manifest surfaces session_file object
+    # Covers AC43 / FR29
+    When I run "agentchrome capabilities"
+    Then the JSON manifest has a "connect.session_file" object
+    And the object has "path_unix" equal to "~/.agentchrome/session.json"
+    And the object has "path_windows" equal to "%USERPROFILE%\.agentchrome\session.json"
+    And the object has a "precedence" array of exactly 5 entries in the order documented by AC42
+
+  # Added by issue #226
+  Scenario Outline: Explicit resolution sources bypass the session file
+    # Covers AC44 / FR28 regression
+    Given a valid session file exists pointing to port 9222
+    And Chrome is also running on port 9333
+    When I run "agentchrome tabs list" with <source> set to 9333
+    Then the command connects to port 9333
+    And stderr does NOT contain a "stale_session" warning
+    And the session file on disk is not modified
+    And the exit code is 0
+
+    Examples:
+      | source                |
+      | --port                |
+      | --ws-url              |
+      | AGENTCHROME_PORT env  |

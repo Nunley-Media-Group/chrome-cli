@@ -323,10 +323,24 @@ fn i_run_command(world: &mut CliWorld, command_line: String) {
         &parts[..]
     };
 
+    // Isolate each run from the developer's real `~/.agentchrome/session.json`
+    // so stderr/stdout assertions are deterministic on machines that have a
+    // stale session file pointing to a port that isn't currently up.
+    let isolated_home = std::env::temp_dir().join(format!(
+        "agentchrome-bdd-cli-{}-{:p}",
+        std::process::id(),
+        world
+    ));
+    let _ = std::fs::create_dir_all(&isolated_home);
+
     let output = std::process::Command::new(binary)
         .args(args)
+        .env("HOME", &isolated_home)
+        .env("USERPROFILE", &isolated_home)
         .output()
         .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    let _ = std::fs::remove_dir_all(&isolated_home);
 
     world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
     world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -3889,6 +3903,18 @@ const RECONNECT_185_CLI_SCENARIOS: &[&str] = &[
 /// Issue #185 — README inspection scenario (uses `ResilienceReadmeWorld` below).
 const RECONNECT_185_README_SCENARIOS: &[&str] = &["README documents session resilience"];
 
+/// Issue #226 — scenarios that run under `SessionWorld` (session-file state).
+const ISSUE_226_SESSION_SCENARIOS: &[&str] =
+    &["connect --status returns exit 0 when no session exists"];
+
+/// Issue #226 — scenarios that run under `CliWorld` (binary surface only).
+const ISSUE_226_CLI_SCENARIOS: &[&str] = &[
+    "connect --help lists session file paths per platform",
+    "connect --help lists resolution precedence",
+    "connect --help includes cross-invocation EXAMPLES",
+    "capabilities manifest includes connect.session_file",
+];
+
 /// JS execution BDD scenarios that can be tested without a running Chrome instance.
 const JS_TESTABLE_SCENARIOS: &[&str] = &["File not found error"];
 
@@ -4995,6 +5021,25 @@ async fn main() {
             |_feature, _rule, scenario| {
                 SESSION_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
+        )
+        .await;
+
+    // Issue #226 — Windows auto-discovery / --status UX.
+    // The no-session scenario manipulates session files and runs under
+    // SessionWorld (temp HOME). Help + capabilities scenarios run under
+    // CliWorld since they only inspect the binary's surface.
+    SessionWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/226-session-autodiscovery.feature",
+            |_feature, _rule, scenario| {
+                ISSUE_226_SESSION_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/226-session-autodiscovery.feature",
+            |_feature, _rule, scenario| ISSUE_226_CLI_SCENARIOS.contains(&scenario.name.as_str()),
         )
         .await;
 

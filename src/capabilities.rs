@@ -27,6 +27,18 @@ pub struct CommandDescriptor {
     description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     subcommands: Option<Vec<SubcommandDescriptor>>,
+    /// Present only on the `connect` command — documents the session file
+    /// path per platform and the connection-source precedence chain so
+    /// consumers can render or validate it without re-parsing help text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_file: Option<SessionFileDescriptor>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SessionFileDescriptor {
+    pub path_unix: String,
+    pub path_windows: String,
+    pub precedence: Vec<String>,
 }
 
 // Separate listing types from the detail descriptors above so the compiler
@@ -147,6 +159,7 @@ fn visit_command(cmd: &clap::Command, compact: bool) -> CommandDescriptor {
             name: cmd.get_name().to_string(),
             description,
             subcommands: None,
+            session_file: session_file_for(cmd.get_name()),
         };
     }
 
@@ -192,6 +205,24 @@ fn visit_command(cmd: &clap::Command, compact: bool) -> CommandDescriptor {
         } else {
             Some(subcommands)
         },
+        session_file: session_file_for(cmd.get_name()),
+    }
+}
+
+/// Return a `SessionFileDescriptor` for commands that surface session-file
+/// metadata. Only `connect` does today; the match is written so adding more
+/// in the future is a single-line change.
+fn session_file_for(cmd_name: &str) -> Option<SessionFileDescriptor> {
+    match cmd_name {
+        "connect" => Some(SessionFileDescriptor {
+            path_unix: crate::cli::SESSION_FILE_PATH_UNIX.to_string(),
+            path_windows: crate::cli::SESSION_FILE_PATH_WINDOWS.to_string(),
+            precedence: crate::cli::CONNECTION_PRECEDENCE
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        }),
+        _ => None,
     }
 }
 
@@ -694,11 +725,52 @@ mod tests {
     }
 
     #[test]
+    fn connect_descriptor_includes_session_file_object() {
+        let manifest = build_manifest(&root_cmd(), false);
+        let connect = manifest
+            .commands
+            .iter()
+            .find(|c| c.name == "connect")
+            .expect("connect command not found");
+        let sf = connect
+            .session_file
+            .as_ref()
+            .expect("connect descriptor must include session_file");
+        assert_eq!(sf.path_unix, "~/.agentchrome/session.json");
+        assert_eq!(sf.path_windows, "%USERPROFILE%\\.agentchrome\\session.json");
+        assert_eq!(
+            sf.precedence,
+            vec![
+                "--ws-url".to_string(),
+                "--port".to_string(),
+                "AGENTCHROME_PORT".to_string(),
+                "session.json".to_string(),
+                "default port 9222".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_connect_descriptors_have_no_session_file() {
+        let manifest = build_manifest(&root_cmd(), false);
+        for cmd in &manifest.commands {
+            if cmd.name != "connect" {
+                assert!(
+                    cmd.session_file.is_none(),
+                    "session_file should be None on {}",
+                    cmd.name
+                );
+            }
+        }
+    }
+
+    #[test]
     fn command_listing_json_has_only_two_fields() {
         let desc = CommandDescriptor {
             name: "page".into(),
             description: "Page inspection".into(),
             subcommands: Some(Vec::new()),
+            session_file: None,
         };
         let listing: CommandListing = (&desc).into();
         let json = serde_json::to_string(&listing).unwrap();

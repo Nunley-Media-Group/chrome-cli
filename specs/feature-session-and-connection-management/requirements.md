@@ -1,8 +1,8 @@
 # Requirements: Session and Connection Management
 
-**Issues**: #6, #185
-**Date**: 2026-04-18
-**Status**: Draft
+**Issues**: #6, #185, #226
+**Date**: 2026-04-21
+**Status**: Amended
 **Author**: Claude (spec-driven)
 
 ---
@@ -13,6 +13,7 @@
 |-------|------|---------|
 | #6 | 2026-02-11 | Initial feature spec — session file, health check, tab targeting, CDP session mgmt |
 | #185 | 2026-04-18 | Adds auto-reconnect on stale session, WebSocket keep-alive ping, and graceful distinction between recoverable and unrecoverable connection loss |
+| #226 | 2026-04-21 | Hardens Windows auto-discovery, makes `connect --status` return exit 0 for both active and inactive sessions, documents session file path and resolution precedence in `connect --help`, emits structured warning on unreachable stored port |
 
 ---
 
@@ -342,6 +343,102 @@ The following acceptance criteria extend AC10, AC11, and AC20 with transparent a
   - How to distinguish the `chrome_terminated` error from the `transient` error in scripts (by `kind` / `recoverable` fields)
 **And** the section includes at least one copy-pasteable example command using `--keepalive-interval`
 
+---
+
+## Enhancement: Windows Auto-Discovery Reliability & Status UX (Issue #226)
+
+End-to-end exercise on Windows 11 (agentchrome 1.33.1) surfaced a recurring gap: after `agentchrome connect --launch --headless` returned a port, subsequent commands in new shell invocations required explicit `--port <N>` because the existing session-file auto-discovery did not visibly engage. The feature gap is not *persistence doesn't exist* — it is that the existing machinery is either failing on Windows or invisible to a new user, and the `--status` surface defined by AC5/AC6 is under-specified for scripted use (AC6's non-zero exit conflates "no session" with a genuine error).
+
+### AC37: Windows auto-discovery round-trip across separate shell invocations
+
+**Given** a clean Windows machine with no `AGENTCHROME_PORT` set and no pre-existing `session.json`
+**When** the user runs `agentchrome connect --launch --headless` in one shell
+**And then** runs `agentchrome tabs list` in a **new** shell without `--port`, `--ws-url`, or `AGENTCHROME_PORT`
+**Then** the second command connects to the launched Chrome instance using the persisted session file
+**And** the second command returns its normal JSON payload on stdout
+**And** the exit code is 0
+**And** the resolved path of the session file is the same across both invocations (i.e., `%USERPROFILE%\.agentchrome\session.json` resolves identically in both shells)
+
+> **Retrospective note (cross-invocation state):** This AC spans two independent CLI invocations separated by a process boundary — per the "multi-step workflow" learning in `steering/retrospective.md`, state established in invocation A must be observable in invocation B.
+
+### AC38: Session file path resolution is deterministic and verifiable
+
+**Given** the session-file path-resolution routine runs on Windows
+**When** `%USERPROFILE%` is set to a path containing spaces or non-ASCII characters (e.g., `C:\Users\Björn O'Malley`)
+**Then** the session file is written to and read from the same canonical path
+**And** JSON round-trips successfully (no encoding corruption)
+**And** atomic write (temp + rename) completes on NTFS without leaving orphan `.tmp` files
+
+### AC39: `connect --status` returns exit code 0 whether or not a session exists
+
+**Given** the user (or an AI agent) runs `agentchrome connect --status` to poll for session presence
+**When** no session file exists
+**Then** the command returns `{"active": false}` on stdout
+**And** the exit code is 0 (not an error)
+**When** a session file exists
+**Then** the command returns JSON with at least `{"active": true, "ws_url": ..., "port": ..., "pid": ..., "timestamp": ...}`
+**And** the exit code is 0
+
+> **Supersedes AC6:** AC6 required a non-zero exit code when no session exists. AC39 changes that contract to exit 0 with `{"active": false}` so scripts and agents can poll `--status` without conflating "no session" with a genuine error. The change is motivated by Rich's Windows exercise where agents invoke `--status` as a discovery probe, not as an assertion. Implementations of #226 MUST adopt the AC39 behavior; any test encoding AC6's non-zero exit for the "no session" branch must be updated.
+
+> **Retrospective note (global output contracts):** Per the "global contracts silently violated" learning, AC39 pins the `--status` exit-code contract explicitly for both branches rather than leaving it implicit.
+
+### AC40: `connect --status` reachability probe respects the resolution precedence
+
+**Given** a session file exists with a `ws_url` that is no longer reachable, but Chrome **is** running on the stored port (rotated `ws_url`)
+**When** the user runs `agentchrome connect --status`
+**Then** the JSON output includes `"reachable": true` (because the port responds and the tool rediscovered the current `ws_url`)
+**And** the JSON output's `ws_url` field reflects the current (rediscovered) URL
+**And** the session file on disk is updated to the current `ws_url`
+**And** the exit code is 0
+
+**Given** the session file's stored port does not respond and Chrome cannot be rediscovered
+**When** the user runs `agentchrome connect --status`
+**Then** the JSON output includes `"reachable": false`
+**And** the exit code is 0 (status itself succeeded; reachability is data, not an error)
+
+### AC41: Structured stderr warning when session points to unreachable port
+
+**Given** a session file exists but the stored port is not responding (Chrome killed without `--disconnect`) and auto-discovery cannot find Chrome on any fallback
+**When** the user runs any command that needs Chrome (not `--status`) without explicit `--port`/`--ws-url`/`AGENTCHROME_PORT`
+**Then** stderr emits a structured JSON warning of the shape `{"warning": "<msg>", "kind": "stale_session", "session_file": "<path>", "stored_port": <n>}` **before** the final error/payload is written
+**And** the tool does NOT silently fall back to the default port 9222
+**And** the final error on stderr follows the existing `kind: chrome_terminated` / `kind: transient` contract from AC26/AC27
+**And** the session file is not silently deleted (per AC26)
+
+> **Retrospective note (path audit):** The warning is emitted by the shared `resolve_connection_with_reconnect` path so every command routed through FR18 inherits the behavior uniformly. No command may bypass this warning by opening its own direct connection.
+
+### AC42: `connect --help` documents the session file path and resolution precedence
+
+**Given** the user runs `agentchrome connect --help`
+**When** they read the long-form help text (`long_about` / `after_long_help`)
+**Then** the help text explicitly identifies the session file path per platform:
+  - Unix: `~/.agentchrome/session.json`
+  - Windows: `%USERPROFILE%\.agentchrome\session.json`
+**And** lists the auto-discovery resolution precedence, highest → lowest:
+  1. `--ws-url` flag
+  2. `--port` flag
+  3. `AGENTCHROME_PORT` env var
+  4. Session file (`session.json`)
+  5. Default probe of port 9222
+**And** the long help `EXAMPLES:` section includes at least one worked invocation showing the two-shell cross-invocation pattern (one shell `connect --launch`, a new shell `tabs list`)
+
+### AC43: `agentchrome capabilities` manifest reflects the documented precedence
+
+**Given** `AC42` is implemented
+**When** the user runs `agentchrome capabilities`
+**Then** the JSON manifest's `connect` entry surfaces a `session_file` object with `path_unix`, `path_windows`, and a `precedence` array matching AC42
+
+### AC44: No regression in explicit-flag and env-var paths
+
+**Given** an existing user whose workflow relies on `--port`, `--ws-url`, or `AGENTCHROME_PORT`
+**When** they run any command with those explicitly set
+**Then** behavior is identical to pre-#226 baseline
+**And** the session file is not consulted (steps 1–3 of AC42 win)
+**And** no new stderr warning is emitted when the explicit source resolves successfully
+
+> **Retrospective note (write-over-existing-state):** AC44 explicitly names which inputs bypass the session file so future changes to the resolution chain cannot silently demote the explicit-flag path.
+
 ### Generated Gherkin Preview
 
 ```gherkin
@@ -593,6 +690,13 @@ Feature: Session and connection management
 | FR21 | Clap metadata for `--keepalive-interval` and `--no-keepalive`: `about`, doc comments, `value_parser` / numeric validation, `conflicts_with`, and `after_long_help` examples (including a `--json` example where applicable) per `steering/tech.md` clap-help rules | Must | Added by #185 — non-negotiable per tech steering |
 | FR22 | `agentchrome capabilities` manifest and generated man pages include the new flags with descriptions and defaults | Must | Added by #185 — downstream surfaces are clap-driven, so FR21 must propagate |
 | FR23 | Update `README.md` with a session-resilience section covering auto-reconnect semantics, keep-alive flag/env/config, disable mechanism, and error-kind scripting guidance, including at least one worked example | Must | Added by #185 — user-facing discoverability |
+| FR24 | Root-cause and fix the Windows auto-discovery path — verify `%USERPROFILE%` resolution (including paths with spaces / non-ASCII), atomic write on NTFS, and JSON parse round-trip so `session.json` written by one shell is read by a subsequent shell | Must | Added by #226 — primary defect vector from Rich's Windows repro |
+| FR25 | `agentchrome connect --status` returns exit code 0 in both the "session present" and "no session" branches, with `{"active": false}` for the latter (supersedes AC6's non-zero exit for the no-session branch) | Must | Added by #226 — scripted-agent polling contract |
+| FR26 | `connect --status` reachability probe reuses the shared reconnect-aware resolution layer so a rotated `ws_url` is rediscovered, the session file is updated, and `reachable` reflects actual port responsiveness | Must | Added by #226 — reuses FR18 path |
+| FR27 | Structured JSON warning on stderr (`kind: stale_session`) when the session file points to a port that does not respond and no fallback Chrome is found, emitted before the final error; tool does not silently fall back to port 9222 | Should | Added by #226 — #FR4 in the issue body |
+| FR28 | `connect --help` long-form text documents the session file path per platform AND enumerates the full resolution precedence (`--ws-url` → `--port` → `AGENTCHROME_PORT` → session file → default 9222), plus at least one cross-invocation `EXAMPLES:` block | Must | Added by #226 — user-facing discoverability |
+| FR29 | `agentchrome capabilities` manifest surfaces a `connect.session_file` object with `path_unix`, `path_windows`, and ordered `precedence` array matching FR28 | Must | Added by #226 — downstream surfaces inherit help-text contract |
+| FR30 | BDD coverage must include at least one scenario run on Windows (CI matrix) that exercises the two-shell cross-invocation auto-discovery path | Must | Added by #226 — defect was environment-specific; per retrospective "environment variants" learning |
 
 ---
 
@@ -697,6 +801,9 @@ Reference `structure.md` and `product.md` for project-specific design standards.
 - **Automatic Chrome re-launch on process termination** (#185) — when Chrome is gone, the tool reports an unrecoverable error and asks the user to `connect --launch`; it does not auto-launch Chrome
 - **Page state preservation across reconnection** (#185) — navigation history, JS state, open dialogs, and network recording buffers may be lost across a reconnect. Only the CDP transport is restored.
 - **Cross-invocation keep-alive** (#185) — keep-alive frames fire only within the lifetime of a single CLI invocation. Keeping the WebSocket alive between invocations would require a daemon, which is explicitly out of scope
+- **Multi-session management** (#226) — concurrent Chrome instances backed by multiple session files remain out of scope; the single-session model is preserved
+- **Migrating the session file to a platform-idiomatic location** (#226) — FR5 of the issue body (moving to `%LOCALAPPDATA%\agentchrome\` on Windows or `~/.config/agentchrome/` on Linux with a backward-compatible fallback read) is deferred. The amendment scope is to make the existing `~/.agentchrome/session.json` path reliable on Windows, not to relocate it
+- **Changing the existing auto-discovery precedence order** (#226) — explicit flags and env vars continue to win over the session file (AC44 / FR28)
 
 ---
 

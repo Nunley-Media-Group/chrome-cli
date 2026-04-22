@@ -180,6 +180,24 @@ fn parse_nonzero_usize(s: &str) -> Result<usize, String> {
     Ok(val)
 }
 
+/// Session file path on Unix platforms.
+pub const SESSION_FILE_PATH_UNIX: &str = "~/.agentchrome/session.json";
+
+/// Session file path on Windows (literal `%USERPROFILE%` placeholder so the
+/// help text matches what users see in PowerShell / cmd).
+pub const SESSION_FILE_PATH_WINDOWS: &str = "%USERPROFILE%\\.agentchrome\\session.json";
+
+/// Ordered connection-source precedence, highest → lowest. Shared between the
+/// `connect --help` long-form text and the `agentchrome capabilities` manifest
+/// so the two surfaces cannot drift.
+pub const CONNECTION_PRECEDENCE: &[&str] = &[
+    "--ws-url",
+    "--port",
+    "AGENTCHROME_PORT",
+    "session.json",
+    "default port 9222",
+];
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Connect to or launch a Chrome instance
@@ -189,6 +207,20 @@ pub enum Command {
             (browser version, WebSocket URL, user agent). The session is persisted to a \
             local file so subsequent commands reuse the same connection.",
         after_long_help = "\
+SESSION FILE:
+  Connection state is persisted to a per-user session file so subsequent
+  CLI invocations can reuse the same Chrome automatically:
+
+    Unix:    ~/.agentchrome/session.json
+    Windows: %USERPROFILE%\\.agentchrome\\session.json
+
+RESOLUTION PRECEDENCE (highest → lowest):
+  1. --ws-url
+  2. --port
+  3. AGENTCHROME_PORT (env var)
+  4. session.json
+  5. default port 9222
+
 EXAMPLES:
   # Connect to Chrome on the default port (9222)
   agentchrome connect
@@ -196,10 +228,16 @@ EXAMPLES:
   # Launch a new headless Chrome instance
   agentchrome connect --launch --headless
 
+  # Cross-invocation auto-discovery (no flags in shell B):
+  #   shell A
+  agentchrome connect --launch --headless
+  #   shell B, later
+  agentchrome tabs list
+
   # Connect to a specific port
   agentchrome connect --port 9333
 
-  # Check connection status
+  # Check connection status (exits 0 whether or not a session exists)
   agentchrome connect --status
 
   # Disconnect and remove session file

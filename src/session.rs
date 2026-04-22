@@ -24,18 +24,23 @@ pub struct SessionData {
 /// Errors that can occur during session file operations.
 #[derive(Debug)]
 pub enum SessionError {
-    /// Could not determine home directory.
-    NoHomeDir,
+    /// Could not determine home directory. Carries a diagnostic listing the
+    /// environment variables consulted so Windows misconfiguration is
+    /// self-evident in the error message.
+    NoHomeDir(String),
     /// I/O error reading/writing session file.
     Io(std::io::Error),
-    /// Session file contains invalid JSON.
+    /// Session file contains invalid JSON. Includes the resolved file path so
+    /// users' first troubleshooting step is obvious.
     InvalidFormat(String),
 }
 
 impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoHomeDir => write!(f, "could not determine home directory"),
+            Self::NoHomeDir(diag) => {
+                write!(f, "could not determine home directory ({diag})")
+            }
             Self::Io(e) => write!(f, "session file error: {e}"),
             Self::InvalidFormat(e) => write!(f, "invalid session file: {e}"),
         }
@@ -82,13 +87,38 @@ pub fn session_file_path() -> Result<PathBuf, SessionError> {
 
 fn home_dir() -> Result<PathBuf, SessionError> {
     #[cfg(unix)]
-    let key = "HOME";
-    #[cfg(windows)]
-    let key = "USERPROFILE";
+    {
+        std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| SessionError::NoHomeDir("HOME env var is unset or invalid".to_string()))
+    }
 
-    std::env::var(key)
-        .map(PathBuf::from)
-        .map_err(|_| SessionError::NoHomeDir)
+    #[cfg(windows)]
+    {
+        windows_home_chain(&|k| std::env::var(k).ok())
+    }
+}
+
+/// Shared implementation of the Windows `%USERPROFILE%` → `%HOMEDRIVE%%HOMEPATH%`
+/// fallback chain. Exposed for unit tests on all platforms so the resolution
+/// contract is exercised regardless of the host OS.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_home_chain<F>(get: &F) -> Result<PathBuf, SessionError>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    if let Some(v) = get("USERPROFILE").filter(|s| !s.is_empty()) {
+        return Ok(PathBuf::from(v));
+    }
+    match (
+        get("HOMEDRIVE").filter(|s| !s.is_empty()),
+        get("HOMEPATH").filter(|s| !s.is_empty()),
+    ) {
+        (Some(drive), Some(path)) => Ok(PathBuf::from(format!("{drive}{path}"))),
+        _ => Err(SessionError::NoHomeDir(
+            "checked USERPROFILE (unset), HOMEDRIVE+HOMEPATH (unset)".to_string(),
+        )),
+    }
 }
 
 /// Write session data to the session file. Creates `~/.agentchrome/` if needed.
@@ -123,9 +153,27 @@ pub fn write_session_to(path: &std::path::Path, data: &SessionData) -> Result<()
     let json = serde_json::to_string_pretty(data)
         .map_err(|e| SessionError::InvalidFormat(e.to_string()))?;
 
-    // Atomic write: write to temp file, then rename
+    write_session_atomic(path, json.as_bytes())
+}
+
+/// Maximum retry attempts for the temp→final rename on Windows/NTFS. Antivirus
+/// scanners occasionally hold the temp file open briefly after write, so a
+/// bounded retry is more reliable than a single attempt.
+const RENAME_RETRIES: u32 = 5;
+/// Delay between rename retries. Short enough not to noticeably stall a
+/// successful write; long enough to let an AV scanner finish a handle release.
+const RENAME_RETRY_DELAY_MS: u64 = 10;
+
+/// Atomic-write primitive: write to `{path}.tmp`, then rename into place.
+///
+/// On Windows, `std::fs::rename` can fail with `AccessDenied` /
+/// `PermissionDenied` when an antivirus scanner is inspecting the temp file.
+/// We retry a bounded number of times and, if the retries exhaust, fall back
+/// to a direct non-atomic write with a `WARN` line on stderr so the user
+/// knows the atomic guarantee was skipped.
+fn write_session_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), SessionError> {
     let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, &json)?;
+    std::fs::write(&tmp_path, bytes)?;
 
     #[cfg(unix)]
     {
@@ -133,8 +181,49 @@ pub fn write_session_to(path: &std::path::Path, data: &SessionData) -> Result<()
         std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
     }
 
-    std::fs::rename(&tmp_path, path)?;
+    let mut last_err: Option<std::io::Error> = None;
+    for attempt in 0..RENAME_RETRIES {
+        match std::fs::rename(&tmp_path, path) {
+            Ok(()) => return Ok(()),
+            Err(e) if is_transient_rename_error(&e) => {
+                last_err = Some(e);
+                if attempt + 1 < RENAME_RETRIES {
+                    std::thread::sleep(std::time::Duration::from_millis(RENAME_RETRY_DELAY_MS));
+                }
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(SessionError::Io(e));
+            }
+        }
+    }
+
+    // Retries exhausted — fall back to a direct (non-atomic) write so the user
+    // does not lose the session. Warn on stderr per the design.
+    let err_msg = last_err
+        .as_ref()
+        .map_or_else(|| "unknown rename error".to_string(), ToString::to_string);
+    eprintln!(
+        "warning: atomic rename of session file failed after {RENAME_RETRIES} retries ({err_msg}); \
+         falling back to direct write"
+    );
+    let _ = std::fs::remove_file(&tmp_path);
+    std::fs::write(path, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(())
+}
+
+/// Whether a rename failure is worth retrying. Windows AV contention surfaces
+/// as `PermissionDenied`; NTFS sharing violations also map here.
+fn is_transient_rename_error(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock
+    )
 }
 
 /// Read session data from the session file.
@@ -160,7 +249,7 @@ pub fn read_session_from(path: &std::path::Path) -> Result<Option<SessionData>, 
     match std::fs::read_to_string(path) {
         Ok(contents) => {
             let data: SessionData = serde_json::from_str(&contents)
-                .map_err(|e| SessionError::InvalidFormat(e.to_string()))?;
+                .map_err(|e| SessionError::InvalidFormat(format!("{} at {}", e, path.display())))?;
             Ok(Some(data))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -669,9 +758,10 @@ mod tests {
 
     #[test]
     fn session_error_display() {
+        let diag = "HOME env var is unset or invalid".to_string();
         assert_eq!(
-            SessionError::NoHomeDir.to_string(),
-            "could not determine home directory"
+            SessionError::NoHomeDir(diag.clone()).to_string(),
+            format!("could not determine home directory ({diag})")
         );
         let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
         assert_eq!(
@@ -682,5 +772,122 @@ mod tests {
             SessionError::InvalidFormat("bad json".into()).to_string(),
             "invalid session file: bad json"
         );
+    }
+
+    #[test]
+    fn windows_home_chain_prefers_userprofile() {
+        let env = |k: &str| match k {
+            "USERPROFILE" => Some("C:\\Users\\rich".to_string()),
+            "HOMEDRIVE" => Some("C:".to_string()),
+            "HOMEPATH" => Some("\\Users\\other".to_string()),
+            _ => None,
+        };
+        let home = windows_home_chain(&env).unwrap();
+        assert_eq!(home, PathBuf::from("C:\\Users\\rich"));
+    }
+
+    #[test]
+    fn windows_home_chain_falls_back_to_homedrive_homepath() {
+        let env = |k: &str| match k {
+            "HOMEDRIVE" => Some("D:".to_string()),
+            "HOMEPATH" => Some("\\Users\\fallback".to_string()),
+            _ => None,
+        };
+        let home = windows_home_chain(&env).unwrap();
+        assert_eq!(home, PathBuf::from("D:\\Users\\fallback"));
+    }
+
+    #[test]
+    fn windows_home_chain_reports_diagnostic_when_unset() {
+        let env = |_k: &str| None;
+        let err = windows_home_chain(&env).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("USERPROFILE"),
+            "diagnostic must name USERPROFILE: {msg}"
+        );
+        assert!(
+            msg.contains("HOMEDRIVE"),
+            "diagnostic must name HOMEDRIVE: {msg}"
+        );
+        assert!(
+            msg.contains("HOMEPATH"),
+            "diagnostic must name HOMEPATH: {msg}"
+        );
+    }
+
+    #[test]
+    fn read_invalid_json_error_includes_path() {
+        let dir = std::env::temp_dir().join("agentchrome-test-read-err-path");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        std::fs::write(&path, "{ not json").unwrap();
+
+        let err = read_session_from(&path).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&path.display().to_string()),
+            "parse error must include resolved file path: {msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_read_roundtrip_with_non_ascii_and_spaces_in_path() {
+        let dir = std::env::temp_dir().join("agentchrome test Björn O'Malley");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+
+        let data = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/unicode".into(),
+            port: 9222,
+            pid: Some(4242),
+            active_tab_id: Some("ünícødé-tab".into()),
+            timestamp: "2026-04-21T00:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
+        };
+
+        write_session_to(&path, &data).unwrap();
+        let read = read_session_from(&path).unwrap().unwrap();
+        assert_eq!(read.ws_url, data.ws_url);
+        assert_eq!(read.active_tab_id.as_deref(), Some("ünícødé-tab"));
+
+        let tmp = path.with_extension("json.tmp");
+        assert!(
+            !tmp.exists(),
+            "temp file must not remain after atomic write"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_recovers_when_final_path_has_preexisting_file() {
+        // Sanity: rename over an existing file is supported on all platforms we
+        // target. This guards against a regression where the retry loop would
+        // incorrectly classify EEXIST as a transient error.
+        let dir = std::env::temp_dir().join("agentchrome-test-write-over-existing");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        std::fs::write(&path, "stale contents").unwrap();
+
+        let data = SessionData {
+            ws_url: "ws://127.0.0.1:9222/devtools/browser/over".into(),
+            port: 9222,
+            pid: None,
+            active_tab_id: None,
+            timestamp: "2026-04-21T00:00:00Z".into(),
+            last_reconnect_at: None,
+            reconnect_count: 0,
+        };
+        write_session_to(&path, &data).unwrap();
+        let read = read_session_from(&path).unwrap().unwrap();
+        assert_eq!(read.ws_url, data.ws_url);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

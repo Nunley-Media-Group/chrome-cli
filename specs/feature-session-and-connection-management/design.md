@@ -1,8 +1,8 @@
 # Design: Session and Connection Management
 
-**Issues**: #6, #185
-**Date**: 2026-04-18
-**Status**: Draft
+**Issues**: #6, #185, #226
+**Date**: 2026-04-21
+**Status**: Amended
 **Author**: Claude (spec-driven)
 
 ---
@@ -13,6 +13,7 @@
 |-------|------|---------|
 | #6 | 2026-02-11 | Initial design — session file, resolution chain, tab targeting |
 | #185 | 2026-04-18 | Adds auto-reconnect pipeline, WebSocket keep-alive, structured loss-kind errors, and reconnect telemetry in session file |
+| #226 | 2026-04-21 | Hardens Windows path resolution, redefines `--status` exit-code contract, adds stale-session stderr warning, documents resolution precedence in `connect --help` and capabilities manifest |
 
 ---
 
@@ -1245,3 +1246,147 @@ After migration, `CdpClient::connect` is callable only from `connection::connect
 - [x] Capabilities manifest + man pages inherit new flags via clap
 - [x] README section specified (AC36)
 - [x] Test strategy covers unit, transport integration, BDD, and smoke; environment variants covered
+
+---
+
+## Amendment #226: Windows Auto-Discovery Reliability & Status UX
+
+### Motivation
+
+Rich's Windows 11 end-to-end exercise with agentchrome 1.33.1 showed that although `src/session.rs` + `src/connection.rs::resolve_connection` already implement session-file auto-discovery, *it did not visibly engage* in his shell invocations. Every subsequent command required explicit `--port <N>`. Additionally, the existing `connect --status` contract (AC6) returns non-zero when no session exists, which conflates "no session" with a genuine error and breaks scripted agents that probe with `--status` before deciding what to do.
+
+The #226 amendment is threefold:
+
+1. **Reliability fix** — audit and harden the Windows read/write path so the session file that `execute_connect` writes after `--launch` is actually the file that the next shell's `resolve_connection` reads.
+2. **Contract fix** — redefine `connect --status` to return exit code 0 for both the present and absent cases, with an `active: bool` discriminator.
+3. **Discoverability fix** — document the resolution precedence and per-platform path in `connect --help` and the capabilities manifest, so users and agents do not need to read the source to understand what `session.json` is doing.
+
+### Root-Cause Hypotheses (to confirm during implementation)
+
+The auto-discovery path currently does:
+
+```
+session::session_file_path()
+  on Unix:    $HOME         + "/.agentchrome/session.json"
+  on Windows: %USERPROFILE% + "\\.agentchrome\\session.json"
+session::read_session()  →  resolve_connection() step 3
+```
+
+Three plausible failure modes for the Windows repro, to be narrowed during implementation:
+
+| Hypothesis | Evidence we will gather | Fix direction |
+|------------|------------------------|---------------|
+| **H1.** `%USERPROFILE%` not set in Rich's bash-for-Windows shell (Git Bash / MSYS translates env vars inconsistently) | Add a one-time probe that prints the resolved session-file path under `--verbose` or as part of `connect --status`; confirm with Rich which value he sees | Fallback chain: `USERPROFILE` → `HOMEDRIVE + HOMEPATH` → `dirs::home_dir()` equivalent implemented inline. Surface the resolved path in every error message so the next user report is diagnosable without running a debugger |
+| **H2.** `save_session` succeeds but atomic rename fails on NTFS (antivirus scanner holds the temp file open momentarily) | BDD scenario that writes, immediately reads, and asserts identity across two processes; unit test that simulates a write retry | Retry the rename up to N times with a 10ms backoff; on final failure, fall back to a direct write (non-atomic) and log a `WARN` to stderr |
+| **H3.** Path encoding: `%USERPROFILE%` contains non-ASCII or spaces; `PathBuf` handles it but a downstream consumer mis-encodes during log output | Unit test that resolves a path under a temp HOME with spaces and Björn-style characters, round-trips JSON | Keep `PathBuf` end-to-end; never lossy-convert to `String` for the I/O path (display-only conversions are fine) |
+
+The design does **not** pick a winner up front — the first commit of #226 is an instrumentation + probe pass that prints the resolved path at every hop, runs against Rich's Windows box, and confirms which hypothesis is correct. Only then does the fix commit land. This keeps us honest: per the retrospective "path audit" learning, we enumerate every sibling code path that shares the pattern before narrowing the fix.
+
+### New/Changed Components
+
+#### `src/session.rs`
+
+1. **`session_file_path()`** — keep the signature, but expand the Windows fallback chain:
+   ```rust
+   // Windows resolution order (new):
+   //   1. %USERPROFILE%
+   //   2. %HOMEDRIVE%%HOMEPATH%
+   //   3. return SessionError::NoHomeDir with a *diagnostic string* naming
+   //      every env var that was consulted, so the user sees which one is missing.
+   ```
+   The diagnostic string is the key behavior: today, `NoHomeDir` is opaque. Under #226 it carries the list of env vars checked so a Windows user can tell at a glance that `%USERPROFILE%` is unset in their shell.
+
+2. **`write_session_atomic()`** (internal helper, extracted) — add a bounded retry loop for the temp-file rename on Windows. Each attempt uses `std::fs::rename`; on `AccessDenied` / `SharingViolation`, sleep 10 ms and retry up to 5 times. On final failure, downgrade to a direct write with a one-line stderr `WARN` describing the fallback.
+
+3. **`read_session()`** — unchanged semantics, but on a parse error, include the resolved file path in the error message (today it is absent), so the user's first troubleshooting step is obvious.
+
+#### `src/connection.rs`
+
+1. **New function `resolve_connection_for_status()`** — a thin wrapper around the existing `resolve_connection_with_reconnect` that is used by `connect --status`. Returns a `StatusReport` struct rather than a connected client, so the status command does not open a CDP WebSocket just to answer "is Chrome reachable?" It calls `query_version` (HTTP) and, if the stored `ws_url` is dead but the port is live, runs the same rediscovery pass as the runtime reconnect path and rewrites the session file. This reuses the reconnect plumbing from #185 (FR18 path audit).
+
+2. **New stderr warning surface `emit_stale_session_warning()`** — called from `resolve_connection_with_reconnect` on the branch where the session file exists, the stored port does not respond, and no fallback Chrome was found. Emits the structured JSON warning defined in AC41 / FR27 to stderr **before** the final error is written. Gated by a single call site so FR18's single-path invariant is preserved.
+
+#### `src/main.rs` — `execute_connect`
+
+1. The `--status` branch's exit-code contract changes: return `ExitCode::Success` (0) for both branches, with the JSON shape differing by `active: bool`. This is the only contract change inside the command layer; callers outside `execute_connect` are unaffected.
+
+2. The `--help` long-form text (`long_about` or `after_long_help`) gains a paragraph listing the session file path per platform and the resolution precedence. The text is a `const &str` so `agentchrome capabilities` can re-export it verbatim into the manifest.
+
+#### `src/cli/mod.rs` — capabilities manifest
+
+1. The `capabilities` JSON schema gains a `connect.session_file` object:
+   ```json
+   {
+     "session_file": {
+       "path_unix": "~/.agentchrome/session.json",
+       "path_windows": "%USERPROFILE%\\.agentchrome\\session.json",
+       "precedence": [
+         "--ws-url",
+         "--port",
+         "AGENTCHROME_PORT",
+         "session.json",
+         "default port 9222"
+       ]
+     }
+   }
+   ```
+   The strings are derived from the same `const` used by `connect --help`, keeping the two surfaces locked in sync without a separate source of truth.
+
+### Contract change: AC6 → AC39
+
+AC6 required `connect --status` to return a non-zero exit code when no session exists. AC39 redefines that to exit 0 with `{"active": false}`. This is a deliberate contract break because:
+
+- Scripted agents treat non-zero exit as an operational failure and surface noise in logs.
+- Rich's Windows repro specifically showed that agents want to use `--status` as a discovery probe, not as an assertion.
+- The `active` discriminator carries the semantics cleanly without needing exit-code inspection.
+
+**Migration impact:** any existing test encoding AC6's non-zero exit for the "no session" branch must be updated as part of the fix commit. There is no compatibility shim — the new contract is the one contract. The Change History row for `#226` documents the supersession so `/run-retro` can trace it later.
+
+### Alternatives Considered (#226)
+
+| Option | Chosen? | Reason |
+|--------|---------|--------|
+| **A1.** Migrate session file to `%LOCALAPPDATA%\agentchrome\session.json` on Windows | No | FR5 of the issue body is a "Could"; relocating the file is a separate, bigger change that affects backwards-compatible fallback reads and upgrade UX. #226 fixes the current path first. Tracked as out-of-scope and can ship as a follow-up |
+| **A2.** Silently swallow the session-file load error and fall back to default port 9222 (current behavior) | No | This is exactly the behavior the issue asks us to remove — the silent fallback is what made the Windows bug invisible |
+| **A3.** Add a daemon that holds the connection open | No | Remains out of scope per #185's prior decision; the amendment reaffirms it |
+| **A4.** Make AC39's exit-code change opt-in via a flag | No | Two exit-code contracts is worse than one. Breaking the contract cleanly, in one release, with a documented Change History row is preferable to long-lived divergence |
+| **A5.** Fold FR27 stale-session warning into the existing `chrome_terminated` error JSON on stderr rather than emitting a separate warning line | No | Two artifacts on stderr (warning + final error) let script consumers distinguish "we tried your stored port and it was dead" from "we then failed to recover" — one informational, one fatal. Collapsing them loses that signal |
+
+### Testing Strategy (#226 additions)
+
+| Layer | Type | Coverage |
+|-------|------|----------|
+| `session::session_file_path` on Windows | Unit | `USERPROFILE` set, unset with `HOMEDRIVE`+`HOMEPATH` fallback, all env vars absent (error case includes diagnostic) |
+| `session::write_session_atomic` retry loop | Unit (mock FS) | Rename fails N-1 times then succeeds; rename fails N times then falls back to direct write with WARN |
+| `session::read_session` error paths | Unit | Corrupted JSON includes resolved path in error |
+| `connection::resolve_connection_for_status` | Unit | Session present + reachable, session present + port dead / ws rotated (rediscovers + rewrites), session absent, stored port dead + no fallback (→ stale_session warning) |
+| `execute_connect --status` | BDD | AC39 both branches exit 0; AC40 reachability both branches; stderr contains no stray output on the happy path |
+| Cross-invocation two-shell | BDD (Windows CI) | AC37 — invocation A writes, invocation B reads; AC38 path-with-spaces/non-ASCII round-trip |
+| `connect --help` long form | BDD | AC42 strings present; `assert_cmd` grep for each precedence step |
+| `capabilities` manifest | BDD | AC43 — `connect.session_file` object matches `connect --help` strings |
+| Regression | BDD | AC44 — explicit flags / env var still win; session file not touched when explicit inputs resolve |
+
+> **Retrospective-backed note (environment variants):** Per the "headed vs headless" and "environment-specific defect" learnings, AC37 explicitly runs on Windows CI. The fix is not accepted until the Windows job is green, not just macOS/Linux.
+
+### Risks & Mitigations (#226 additions)
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| AC39 exit-code change breaks an unidentified downstream script relying on non-zero exit for "no session" | Medium | Low | Document the supersession prominently in Change History, CHANGELOG, and README; the `active: false` JSON is a strictly better discriminator and easy to migrate to |
+| Windows CI job flakes on NTFS temp-rename race | Low | Medium | The retry loop in `write_session_atomic` is the product fix for this; if CI itself flakes, test uses a per-worker temp HOME to eliminate shared-path contention |
+| `emit_stale_session_warning` fires in benign cases (e.g., first-ever `connect` with no prior session) | Low | Low | Warning only fires when a session file *exists* and its port is dead. First-time `connect` has no session file, so the warning is suppressed by construction |
+| Diagnostic path leaks sensitive username in CI logs | Low | Low | The resolved path already contains the username by design (it is under `%USERPROFILE%`); CI logs already expose this. No new exposure |
+
+### Open Questions (#226)
+
+- [ ] Should the `stale_session` warning be suppressed when the user has `--quiet` or equivalent? Proposed: suppress only when an explicit `--quiet` is passed; otherwise emit. Will confirm during implementation.
+- [ ] Should the Windows path-resolution fallback (`HOMEDRIVE`+`HOMEPATH`) also apply on Unix as a belt-and-suspenders measure? Proposed: no — Unix `$HOME` is near-universal; adding a fallback obscures real misconfigurations.
+
+### Validation Checklist (#226 additions)
+
+- [x] Windows auto-discovery root-cause hypotheses enumerated and traceable to an instrumentation pass before the fix
+- [x] AC39 exit-code contract change documented with migration impact and Change History row
+- [x] Stale-session stderr warning routed through the single FR18 resolution path (no bypass paths)
+- [x] `connect --help`, capabilities manifest, and man page all derive path+precedence strings from a single `const` source of truth
+- [x] Windows CI coverage required for AC37/AC38; fix not accepted until green
+- [x] Out of scope explicitly names `%LOCALAPPDATA%` migration as deferred, not abandoned

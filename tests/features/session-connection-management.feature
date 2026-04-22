@@ -62,11 +62,15 @@ Feature: Session and connection management
     Then the output should contain "reachable": false
     And the exit code should be 0
 
+  # Updated by issue #226 (AC39 supersedes AC6):
+  # --status now returns exit 0 with {"active": false} when no session exists,
+  # so scripts can poll it as a discovery probe without conflating
+  # "no session" with a genuine error.
   Scenario: Show connection status with no session
     Given no session file exists
     When I run "agentchrome connect --status"
-    Then stderr should contain "No active session"
-    And the exit code should be non-zero
+    Then the output should contain "active": false
+    And the exit code should be 0
 
   # --- Disconnect ---
 

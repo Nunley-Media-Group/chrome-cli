@@ -371,6 +371,9 @@ struct ConnectionInfo {
 
 #[derive(Serialize)]
 struct StatusInfo {
+    /// `true` when a session file was found, regardless of reachability.
+    /// Scripts use this as the no-error discriminator in place of exit codes.
+    active: bool,
     ws_url: String,
     port: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -383,6 +386,14 @@ struct StatusInfo {
     /// Cumulative auto-reconnects within this session file's lifetime.
     reconnect_count: u32,
     keepalive: KeepaliveStatus,
+}
+
+#[derive(Serialize)]
+struct NoSessionStatus {
+    /// Always `false`. Emitted when `connect --status` finds no session file.
+    /// Kept as a flat object rather than a variant so script consumers can
+    /// read `active` uniformly.
+    active: bool,
 }
 
 #[derive(Serialize)]
@@ -604,11 +615,18 @@ async fn execute_launch(args: &ConnectArgs, timeout: Duration) -> Result<(), App
 }
 
 async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
-    let session_data = session::read_session()?.ok_or_else(AppError::no_session)?;
+    // `--status` exits 0 whether or not a session exists so scripts can poll
+    // it as a discovery probe without conflating "no session" with an error.
+    let Some(session_data) = session::read_session()? else {
+        if global.output.plain {
+            println!("active: false");
+            return Ok(());
+        }
+        return output::print_output(&NoSessionStatus { active: false }, &global.output);
+    };
 
-    let reachable = connection::health_check(&global.host, session_data.port)
-        .await
-        .is_ok();
+    let report = connection::resolve_connection_for_status(&global.host, &session_data).await;
+    let session = report.session;
 
     let keepalive = output::build_keepalive(global);
     let interval_ms = keepalive
@@ -620,13 +638,14 @@ async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
     };
 
     let status = StatusInfo {
-        ws_url: session_data.ws_url,
-        port: session_data.port,
-        pid: session_data.pid,
-        timestamp: session_data.timestamp,
-        reachable,
-        last_reconnect_at: session_data.last_reconnect_at,
-        reconnect_count: session_data.reconnect_count,
+        active: true,
+        ws_url: session.ws_url,
+        port: session.port,
+        pid: session.pid,
+        timestamp: session.timestamp,
+        reachable: report.reachable,
+        last_reconnect_at: session.last_reconnect_at,
+        reconnect_count: session.reconnect_count,
         keepalive: keepalive_status,
     };
 
@@ -652,6 +671,7 @@ async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
 fn format_plain_status(status: &StatusInfo) -> String {
     use std::fmt::Write;
     let mut out = String::new();
+    let _ = writeln!(out, "active:    {}", status.active);
     let _ = writeln!(out, "ws_url:    {}", status.ws_url);
     let _ = writeln!(out, "port:      {}", status.port);
     match status.pid {

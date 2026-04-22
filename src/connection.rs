@@ -330,12 +330,75 @@ pub async fn resolve_connection_with_reconnect(
         });
     }
 
+    if let Ok(path) = session::session_file_path() {
+        emit_stale_session_warning(&path, session_data.port);
+    }
+
     Err(match classify_loss(session_data.pid) {
         LossKind::ChromeTerminated => AppError::chrome_terminated(),
         LossKind::Transient => AppError::transient_connection_loss(format!(
             "stored port unreachable; re-discovery exhausted ({rediscover_err})"
         )),
     })
+}
+
+/// Report returned by [`resolve_connection_for_status`].
+///
+/// Carries the (possibly rediscovered) `SessionData` and a `reachable` flag
+/// summarising whether Chrome is responding right now. Unlike
+/// [`resolve_connection_with_reconnect`], this does not open a CDP WebSocket —
+/// only an HTTP-level health check + optional rediscovery.
+#[derive(Debug)]
+pub struct StatusReport {
+    pub session: SessionData,
+    pub reachable: bool,
+}
+
+/// Status-path wrapper around the reconnect-aware resolution pipeline.
+///
+/// When the stored port responds but the `ws_url` has rotated, this
+/// rediscovers the current browser WebSocket URL and rewrites the session
+/// file via [`session::rewrite_preserving`]. When the stored port is
+/// unreachable, returns `reachable: false` without attempting a full
+/// WebSocket handshake.
+pub async fn resolve_connection_for_status(host: &str, stored: &SessionData) -> StatusReport {
+    match query_version(host, stored.port).await {
+        Ok(version) if version.ws_debugger_url == stored.ws_url => StatusReport {
+            session: stored.clone(),
+            reachable: true,
+        },
+        Ok(version) => {
+            let session = session::rewrite_preserving(stored, version.ws_debugger_url.clone())
+                .unwrap_or_else(|e| {
+                    eprintln!("warning: could not persist rediscovered ws_url: {e}");
+                    SessionData {
+                        ws_url: version.ws_debugger_url,
+                        ..stored.clone()
+                    }
+                });
+            StatusReport {
+                session,
+                reachable: true,
+            }
+        }
+        Err(_) => StatusReport {
+            session: stored.clone(),
+            reachable: false,
+        },
+    }
+}
+
+/// Emit the structured `stale_session` stderr warning. Precedes the terminal
+/// `chrome_terminated` / `transient` error so script consumers can tell "the
+/// stored port was dead" from "the recovery attempt also failed".
+fn emit_stale_session_warning(session_path: &std::path::Path, stored_port: u16) {
+    let warning = serde_json::json!({
+        "warning": "session file points to a port that is not responding",
+        "kind": "stale_session",
+        "session_file": session_path.display().to_string(),
+        "stored_port": stored_port,
+    });
+    eprintln!("{warning}");
 }
 
 /// A live CDP client paired with the resolution metadata used to obtain it.
