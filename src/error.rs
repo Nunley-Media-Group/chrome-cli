@@ -602,10 +602,6 @@ impl AppError {
         }
     }
 
-    /// Emitted when `form fill` / `form clear` targets an element whose tag/role
-    /// is not fillable (e.g., `<div>`, `<canvas>`, `<button>`, a non-editable
-    /// `role="combobox"`). Carries element-type context in `custom_json` so AI
-    /// agents can programmatically choose a compatible alternative command.
     #[must_use]
     pub fn form_fill_not_fillable(target: &str, tag: &str, role: Option<&str>) -> Self {
         let alternatives = suggest_fill_alternatives(tag, role);

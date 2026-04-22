@@ -4929,10 +4929,6 @@ async fn main() {
     // (argument validation errors, help/version, not-implemented stub).
     CliWorld::run("tests/features/98-fix-clap-validation-json-stderr.feature").await;
 
-    // Error-output consistency (issue #197) — all scenarios in the feature file are
-    // CLI-testable without a running Chrome. Chrome-dependent scenarios (form fill on
-    // non-fillable elements) are documented in the feature file as comments and
-    // verified via unit tests in src/error.rs + the manual smoke test in tasks.md.
     CliWorld::run("tests/features/197-improve-error-output-consistency.feature").await;
 
     run_dialog_features().await;

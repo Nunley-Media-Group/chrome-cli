@@ -389,8 +389,6 @@ fn is_text_input(node_name: &str, input_type: Option<&str>) -> bool {
     false
 }
 
-/// Returns true if the element can be driven by the `FILL_JS` / `CLEAR_JS` fallback:
-/// native `<select>` (option matching) or `<input type=checkbox|radio>` (checked state).
 fn is_fillable_via_js(node_name: &str, input_type: Option<&str>) -> bool {
     if node_name == "select" {
         return true;
