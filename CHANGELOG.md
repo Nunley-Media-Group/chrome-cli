@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.41.0] - 2026-04-22
+
+### Added
+
+- Add `agentchrome audit lighthouse --install-prereqs` flag that runs `npm install -g lighthouse` with the flag itself as consent and reports structured JSON on stdout/stderr; probes `npm --version` first and returns an actionable error naming Node.js as the upstream prerequisite when npm is absent. (#231)
+- Surface the `lighthouse` npm prerequisite in `audit lighthouse --help` (PREREQUISITES section above EXAMPLES) and in the `audit` group's one-line description on both `agentchrome --help` and `agentchrome audit --help`, so the advertised-but-broken first-run impression is neutralized. (#231)
+
+### Changed
+
+- Extend the `lighthouse` binary-not-found error to point at `--install-prereqs` alongside the existing `npm install -g lighthouse` hint, emitted as a single structured JSON error object per invocation. (#231)
+
 ## [1.40.0] - 2026-04-22
 
 ### Added
