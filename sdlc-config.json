@@ -1,6 +1,7 @@
 {
   "projectPath": "/Volumes/Fast Brick/source/repos/agentchrome",
-  "pluginsPath": "/Users/rnunley/.claude/plugins/marketplaces/nmg-plugins",
+  "pluginsPath": "/Users/rnunley/.claude/plugins/cache/nmg-plugins/nmg-sdlc/1.54.2",
+  "pluginRoot": "/Users/rnunley/.claude/plugins/cache/nmg-plugins/nmg-sdlc/1.54.2",
   "model": "opus",
   "discordChannelId": "",
   "logDir": "",
@@ -10,12 +11,12 @@
   },
   "steps": {
     "startCycle":   { "maxTurns": 5,   "timeoutMin": 5  },
-    "startIssue":   { "maxTurns": 15,  "timeoutMin": 5,  "skill": "starting-issues" },
-    "writeSpecs":   { "maxTurns": 40,  "timeoutMin": 15, "skill": "writing-specs" },
-    "implement":    { "maxTurns": 100, "timeoutMin": 30, "skill": "implementing-specs" },
-    "verify":       { "maxTurns": 100, "timeoutMin": 30, "skill": "verifying-specs" },
+    "startIssue":   { "maxTurns": 15,  "timeoutMin": 5,  "skill": "start-issue" },
+    "writeSpecs":   { "maxTurns": 40,  "timeoutMin": 15, "skill": "write-spec" },
+    "implement":    { "maxTurns": 100, "timeoutMin": 30, "skill": "write-code" },
+    "verify":       { "maxTurns": 100, "timeoutMin": 30, "skill": "verify-code" },
     "commitPush":   { "maxTurns": 10,  "timeoutMin": 5  },
-    "createPR":     { "maxTurns": 15,  "timeoutMin": 5,  "skill": "creating-prs" },
+    "createPR":     { "maxTurns": 15,  "timeoutMin": 5,  "skill": "open-pr" },
     "monitorCI":    { "maxTurns": 40,  "timeoutMin": 20 },
     "merge":        { "maxTurns": 5,   "timeoutMin": 5  }
   },

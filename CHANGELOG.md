@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-04-21
+
+### Added
+
+- Add structured JSON error output on all command failure paths with consistent `{"error", "code"}` schema on stderr, including optional `custom_json` context for enriched diagnostics (#197)
+- Add descriptive error for `form fill` on incompatible element types (e.g., `div`, `canvas`) identifying the element type and suggesting fillable alternatives (#197)
+- Add syntax-suggestion hints for common clap argument mistakes (e.g., `interact click --uid s6` → suggests `interact click s6`) (#197)
+- Add error-handling guidance to help documentation explaining the structured stderr format and exit codes (0=success, 1=general, 2=connection, 3=target, 4=timeout, 5=protocol) (#197)
+- Add BDD coverage in `tests/features/197-improve-error-output-consistency.feature` for all acceptance criteria covering silent-failure audits, form-fill element type errors, and syntax suggestions (#197)
+
+### Fixed
+
+- Fix silent failure paths in `form.rs`, `interact.rs`, and `page/wait.rs` that previously exited with code 1 without writing structured error output to stderr (#197)
+
 ## [1.33.1] - 2026-04-19
 
 ### Fixed

@@ -55,6 +55,19 @@ EXIT CODES:
   4  Timeout error (navigation or trace timeout)
   5  Protocol error (CDP protocol failure, dialog handling error)
 
+ERROR HANDLING:
+  Every non-zero exit emits exactly one JSON object on stderr. The stable
+  shape is:
+    {\"error\": \"<human-readable message>\", \"code\": <1..5>}
+  Some paths enrich the payload with optional fields (stable fields remain
+  present) — for example form fill against a non-fillable element:
+    {\"error\": \"...\", \"code\": 1, \"kind\": \"not_fillable\",
+     \"element_type\": {\"tag\": \"div\", \"role\": null},
+     \"suggested_alternatives\": [\"'agentchrome interact click'\"]}
+  Exit-code meanings: 0=success, 1=general, 2=connection, 3=target,
+  4=timeout, 5=protocol. Success-path stdout remains JSON and stderr stays
+  empty; stderr is reserved for the error object only.
+
 ENVIRONMENT VARIABLES:
   AGENTCHROME_PORT     CDP port number (default: 9222)
   AGENTCHROME_HOST     CDP host address (default: 127.0.0.1)

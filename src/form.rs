@@ -389,6 +389,16 @@ fn is_text_input(node_name: &str, input_type: Option<&str>) -> bool {
     false
 }
 
+fn is_fillable_via_js(node_name: &str, input_type: Option<&str>) -> bool {
+    if node_name == "select" {
+        return true;
+    }
+    if node_name == "input" {
+        return matches!(input_type, Some("checkbox" | "radio"));
+    }
+    false
+}
+
 /// Fill a text-type element using CDP keyboard simulation.
 ///
 /// Uses `DOM.focus` + `document.activeElement.select()` + `Input.dispatchKeyEvent` char
@@ -607,7 +617,7 @@ async fn fill_element(
         .await
     } else if is_text_input(&node_name, input_type.as_deref()) {
         fill_element_keyboard(session, backend_node_id, value).await
-    } else {
+    } else if is_fillable_via_js(&node_name, input_type.as_deref()) {
         let object_id = resolve_to_object_id(session, target).await?;
 
         let call_params = serde_json::json!({
@@ -621,6 +631,12 @@ async fn fill_element(
             .map_err(|e| AppError::interaction_failed("fill", &e.to_string()))?;
 
         Ok(())
+    } else {
+        Err(AppError::form_fill_not_fillable(
+            target,
+            &node_name,
+            role.as_deref(),
+        ))
     }
 }
 
@@ -628,11 +644,11 @@ async fn fill_element(
 /// select/checkbox/radio use the existing JS setter approach.
 async fn clear_element(session: &ManagedSession, target: &str) -> Result<(), AppError> {
     let backend_node_id = resolve_target_to_backend_node_id(session, target).await?;
-    let (node_name, input_type, _role) = describe_element(session, backend_node_id).await?;
+    let (node_name, input_type, role) = describe_element(session, backend_node_id).await?;
 
     if is_text_input(&node_name, input_type.as_deref()) {
         clear_element_keyboard(session, backend_node_id).await
-    } else {
+    } else if is_fillable_via_js(&node_name, input_type.as_deref()) {
         let object_id = resolve_to_object_id(session, target).await?;
 
         let call_params = serde_json::json!({
@@ -646,6 +662,12 @@ async fn clear_element(session: &ManagedSession, target: &str) -> Result<(), App
             .map_err(|e| AppError::interaction_failed("clear", &e.to_string()))?;
 
         Ok(())
+    } else {
+        Err(AppError::form_fill_not_fillable(
+            target,
+            &node_name,
+            role.as_deref(),
+        ))
     }
 }
 
@@ -1595,5 +1617,32 @@ mod tests {
     #[test]
     fn is_text_input_div() {
         assert!(!is_text_input("div", None));
+    }
+
+    #[test]
+    fn is_fillable_via_js_select() {
+        assert!(is_fillable_via_js("select", None));
+    }
+
+    #[test]
+    fn is_fillable_via_js_checkbox_and_radio() {
+        assert!(is_fillable_via_js("input", Some("checkbox")));
+        assert!(is_fillable_via_js("input", Some("radio")));
+    }
+
+    #[test]
+    fn is_fillable_via_js_rejects_non_fillable_tags() {
+        for tag in &["div", "canvas", "button", "a", "span", "textarea"] {
+            assert!(
+                !is_fillable_via_js(tag, None),
+                "expected false for tag={tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_fillable_via_js_rejects_text_inputs() {
+        assert!(!is_fillable_via_js("input", None));
+        assert!(!is_fillable_via_js("input", Some("text")));
     }
 }

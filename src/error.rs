@@ -603,6 +603,31 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn form_fill_not_fillable(target: &str, tag: &str, role: Option<&str>) -> Self {
+        let alternatives = suggest_fill_alternatives(tag, role);
+        let role_part = match role {
+            Some(r) if !r.is_empty() => format!(", role={r}"),
+            _ => String::new(),
+        };
+        let message = format!(
+            "Element '{target}' (tag={tag}{role_part}) is not fillable. Use {} instead.",
+            alternatives.join(" or "),
+        );
+        let custom = serde_json::json!({
+            "error": message,
+            "code": ExitCode::GeneralError as u8,
+            "kind": "not_fillable",
+            "element_type": { "tag": tag, "role": role },
+            "suggested_alternatives": alternatives,
+        });
+        Self {
+            message,
+            code: ExitCode::GeneralError,
+            custom_json: Some(custom.to_string()),
+        }
+    }
+
+    #[must_use]
     pub fn wait_timeout(timeout_ms: u64, condition: &str) -> Self {
         Self {
             message: format!("Wait timed out after {timeout_ms}ms: {condition}"),
@@ -638,6 +663,18 @@ impl AppError {
 struct ErrorOutput<'a> {
     error: &'a str,
     code: u8,
+}
+
+fn suggest_fill_alternatives(tag: &str, role: Option<&str>) -> Vec<&'static str> {
+    let tag_lower = tag.to_ascii_lowercase();
+    let role_lower = role.map(str::to_ascii_lowercase);
+    match (tag_lower.as_str(), role_lower.as_deref()) {
+        ("button" | "a", _) | (_, Some("button" | "link")) => {
+            vec!["'agentchrome interact click'"]
+        }
+        ("canvas", _) => vec!["'agentchrome js exec'"],
+        _ => vec!["'agentchrome interact click'", "'agentchrome js exec'"],
+    }
 }
 
 #[cfg(test)]
@@ -1061,6 +1098,92 @@ mod tests {
         assert!(err.message.contains("not found in any frame"));
         assert!(err.message.contains("page frames"));
         assert!(matches!(err.code, ExitCode::TargetError));
+    }
+
+    #[test]
+    fn form_fill_not_fillable_tag_only() {
+        let err = AppError::form_fill_not_fillable("s5", "div", None);
+        assert!(matches!(err.code, ExitCode::GeneralError));
+        assert!(err.message.contains("tag=div"));
+        assert!(!err.message.contains("role="));
+        assert!(err.message.contains("not fillable"));
+
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        assert_eq!(json["kind"], "not_fillable");
+        assert_eq!(json["code"], 1);
+        assert!(json["error"].as_str().unwrap().contains("tag=div"));
+        assert_eq!(json["element_type"]["tag"], "div");
+        assert!(json["element_type"]["role"].is_null());
+        let alts = json["suggested_alternatives"].as_array().unwrap();
+        assert!(!alts.is_empty());
+    }
+
+    #[test]
+    fn form_fill_not_fillable_role_only_button_suggests_click() {
+        let err = AppError::form_fill_not_fillable("s6", "span", Some("button"));
+        assert!(err.message.contains("role=button"));
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        let alts: Vec<&str> = json["suggested_alternatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(alts.contains(&"'agentchrome interact click'"));
+        assert!(!alts.contains(&"'agentchrome js exec'"));
+    }
+
+    #[test]
+    fn form_fill_not_fillable_tag_and_role() {
+        let err = AppError::form_fill_not_fillable("s7", "div", Some("combobox"));
+        assert!(err.message.contains("tag=div"));
+        assert!(err.message.contains("role=combobox"));
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        assert_eq!(json["element_type"]["tag"], "div");
+        assert_eq!(json["element_type"]["role"], "combobox");
+    }
+
+    #[test]
+    fn form_fill_not_fillable_canvas_suggests_js_exec() {
+        let err = AppError::form_fill_not_fillable("s8", "canvas", None);
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        let alts: Vec<&str> = json["suggested_alternatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(alts.contains(&"'agentchrome js exec'"));
+    }
+
+    #[test]
+    fn form_fill_not_fillable_unknown_tag_returns_generic_alternatives() {
+        let err = AppError::form_fill_not_fillable("s9", "aside", None);
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        let alts: Vec<&str> = json["suggested_alternatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(alts.contains(&"'agentchrome interact click'"));
+        assert!(alts.contains(&"'agentchrome js exec'"));
+    }
+
+    #[test]
+    fn form_fill_not_fillable_custom_json_preserves_stable_fields() {
+        let err = AppError::form_fill_not_fillable("s10", "div", None);
+        let json: serde_json::Value =
+            serde_json::from_str(err.custom_json.as_deref().unwrap()).unwrap();
+        assert!(json["error"].is_string());
+        assert!(!json["error"].as_str().unwrap().is_empty());
+        assert!(json["code"].is_i64());
+        assert!((1..=5).contains(&json["code"].as_i64().unwrap()));
     }
 
     #[test]
