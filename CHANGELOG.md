@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-04-21
+
+### Fixed
+
+- Fix dialog handling across separate `agentchrome` invocations: `interact` entry points (click, click_at, scroll, and other dialog-triggering actions) now install dialog interceptors via `setup_session_with_interceptors`, so Process 1 writes the `__agentchrome_dialog` cookie before exiting and Process 2's `dialog info` / `dialog handle` can observe the open dialog. `--auto-dismiss-dialogs` on click now awaits a bounded post-dispatch settle so the dismiss lands reliably on the clicking session. (#225)
+
 ## [1.37.0] - 2026-04-21
 
 ### Changed
