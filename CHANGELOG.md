@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.39.0] - 2026-04-21
+
+### Added
+
+- Add `agentchrome connect --status` subcommand that reports the active session as JSON `{active, ws_url, port, pid, timestamp, ...}` with exit code 0 whether a session exists or not, so scripts and agents can probe discovery state without conflating "no session" with an error. (#226)
+- Document session file path (`~/.agentchrome/session.json` on Unix; `%USERPROFILE%\.agentchrome\session.json` on Windows) and auto-discovery precedence (flag → env var → session file → default 9222) in `connect --help` long-form text. (#226)
+- Emit structured stderr warning when the persisted session file points to an unreachable port, rather than silently falling back to the default. (#226)
+
+### Fixed
+
+- Harden Windows auto-discovery so `connect --launch` persistence is reliably observed by subsequent invocations in new shells without `--port` / `AGENTCHROME_PORT`: verify `USERPROFILE` resolution, atomic writes, and round-trip JSON parsing. (#226)
+
 ## [1.38.0] - 2026-04-21
 
 ### Fixed
