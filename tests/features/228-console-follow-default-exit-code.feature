@@ -1,0 +1,44 @@
+# File: tests/features/228-console-follow-default-exit-code.feature
+#
+# Generated from: specs/bug-fix-console-follow-default-exit-code-on-error-messages/requirements.md
+# Issue: #228
+# Type: Defect regression
+
+@regression
+Feature: console follow default exit code on error messages
+  Previously, `agentchrome console follow --timeout <ms>` exited with code 1
+  whenever any error-level console message was observed during the window,
+  which was surprising for a tail-style monitoring command.
+  This was fixed by flipping the default to exit 0 and gating the non-zero
+  exit behavior behind a new opt-in `--fail-on-error` flag.
+
+  # --- Bug Is Fixed: default mode exits 0 even with console.error (requires Chrome) ---
+
+  # @regression
+  # Scenario: Default console follow exits 0 after timeout even when console.error is observed
+  #   Given Chrome is running with CDP enabled
+  #   And the target page will emit "console.error('err-msg')" during the follow window
+  #   When I run "agentchrome console follow --timeout 3000"
+  #   Then the exit code should be 0
+  #   And stderr should not contain "Error-level console messages were seen"
+
+  # --- Related Behavior Still Works: opt-in preserves the CI assertion contract (requires Chrome) ---
+
+  # @regression
+  # Scenario: --fail-on-error restores exit 1 and the JSON stderr contract
+  #   Given Chrome is running with CDP enabled
+  #   And the target page will emit "console.error('err-msg')" during the follow window
+  #   When I run "agentchrome console follow --timeout 3000 --fail-on-error"
+  #   Then the exit code should be 1
+  #   And stderr should contain "Error-level console messages were seen"
+  #   And stderr should contain "\"code\":1"
+
+  # --- Help Documents Both Modes (CLI-testable, no Chrome required) ---
+
+  @regression
+  Scenario: console follow help documents --fail-on-error
+    Given agentchrome is built
+    When I run "agentchrome console follow --help"
+    Then the exit code should be 0
+    And stdout should contain "--fail-on-error"
+    And stdout should contain "--timeout"

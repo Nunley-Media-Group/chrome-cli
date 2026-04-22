@@ -5237,6 +5237,12 @@ async fn main() {
         )
         .await;
 
+    // console follow default exit code regression (issue #228) — the Chrome-dependent
+    // scenarios (default mode and --fail-on-error assertion mode) are commented out in
+    // the feature file following the `console.feature` convention; the help-only scenario
+    // is the live regression gate for the documentation change.
+    CliWorld::run("tests/features/228-console-follow-default-exit-code.feature").await;
+
     // Emulate — only CLI-testable scenarios (argument validation, help text, conflicts).
     // Scenarios requiring a running Chrome instance are commented out in the feature file.
     CliWorld::cucumber()

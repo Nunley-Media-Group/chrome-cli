@@ -34,6 +34,7 @@ Feature: Console Message Reading with Filtering
     And stdout should contain "--type"
     And stdout should contain "--errors-only"
     And stdout should contain "--timeout"
+    And stdout should contain "--fail-on-error"
 
   Scenario: Conflicting flags --type and --errors-only on read
     Given agentchrome is built

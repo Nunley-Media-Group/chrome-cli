@@ -364,6 +364,12 @@ pub fn all_examples() -> Vec<CommandGroupSummary> {
                     description: "Stream errors for 10 seconds".into(),
                     flags: Some(vec!["--errors-only".into(), "--timeout".into()]),
                 },
+                ExampleEntry {
+                    cmd: "agentchrome console follow --timeout 10000 --fail-on-error".into(),
+                    description: "CI assertion: exit 1 if any console.error is seen within 10s"
+                        .into(),
+                    flags: Some(vec!["--timeout".into(), "--fail-on-error".into()]),
+                },
             ],
         },
         CommandGroupSummary {

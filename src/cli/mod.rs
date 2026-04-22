@@ -2935,17 +2935,25 @@ EXAMPLES:
         long_about = "Stream new console messages in real time as they are logged, similar to \
             'tail -f'. Each message is printed as a JSON line. Use --timeout to auto-exit \
             after a specified duration. Filter by type or use --errors-only to stream only \
-            error and assert messages.",
+            error and assert messages.\n\n\
+            By default, the command monitors output and exits 0 when the timeout elapses \
+            or Ctrl+C is pressed, regardless of log levels observed. Pass --fail-on-error \
+            to turn the stream into a CI assertion: if any error-level message is observed \
+            during the window, the command exits 1 with a JSON error on stderr \
+            ({\"error\":\"Error-level console messages were seen\",\"code\":1}).",
         after_long_help = "\
 EXAMPLES:
-  # Stream all console output
+  # Stream all console output (exit 0 on timeout / Ctrl+C)
   agentchrome console follow
 
-  # Stream errors only for 10 seconds
+  # Stream errors only for 10 seconds (monitoring — exit 0 even if errors are seen)
   agentchrome console follow --errors-only --timeout 10000
 
   # Stream specific message types
-  agentchrome console follow --type log,warn"
+  agentchrome console follow --type log,warn
+
+  # CI assertion — exit 1 if any console.error is observed during the window
+  agentchrome console follow --timeout 10000 --fail-on-error"
     )]
     Follow(ConsoleFollowArgs),
 }
@@ -2991,6 +2999,10 @@ pub struct ConsoleFollowArgs {
     /// Auto-exit after the specified number of milliseconds
     #[arg(long)]
     pub timeout: Option<u64>,
+
+    /// Exit with code 1 if any error-level console message is observed during the window
+    #[arg(long)]
+    pub fail_on_error: bool,
 }
 
 /// Arguments for the `network` subcommand group.

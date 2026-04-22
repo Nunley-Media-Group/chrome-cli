@@ -525,7 +525,7 @@ async fn execute_follow(global: &GlobalOpts, args: &ConsoleFollowArgs) -> Result
         }
     }
 
-    if saw_errors {
+    if args.fail_on_error && saw_errors {
         Err(AppError {
             message: "Error-level console messages were seen".to_string(),
             code: ExitCode::GeneralError,
