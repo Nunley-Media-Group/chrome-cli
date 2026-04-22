@@ -15,10 +15,6 @@ use crate::script::eval::eval_bool;
 use crate::script::parser::{LoopKind, Script, Step};
 use crate::script::result::{RunReport, StepResult, StepStatus};
 
-// =============================================================================
-// Runner options
-// =============================================================================
-
 /// Options controlling script execution behaviour.
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
@@ -27,10 +23,6 @@ pub struct RunOptions {
     /// Validate without dispatching to Chrome (dry-run mode).
     pub dry_run: bool,
 }
-
-// =============================================================================
-// Runner entry point
-// =============================================================================
 
 /// Execute a script and return a `RunReport`.
 ///
@@ -48,7 +40,7 @@ pub async fn run_script(
 ) -> Result<RunReport, AppError> {
     let total_start = Instant::now();
     let mut results: Vec<StepResult> = Vec::new();
-    let mut ctx = VarContext::new(std::path::PathBuf::from("."));
+    let mut ctx = VarContext::new();
 
     let mut index = 0usize;
 
@@ -67,18 +59,14 @@ pub async fn run_script(
         .await?;
     }
 
-    let executed = results
-        .iter()
-        .filter(|r| matches!(r.status, StepStatus::Ok))
-        .count();
-    let skipped = results
-        .iter()
-        .filter(|r| matches!(r.status, StepStatus::Skipped))
-        .count();
-    let failed = results
-        .iter()
-        .filter(|r| matches!(r.status, StepStatus::Error))
-        .count();
+    let (mut executed, mut skipped, mut failed) = (0usize, 0usize, 0usize);
+    for r in &results {
+        match r.status {
+            StepStatus::Ok => executed += 1,
+            StepStatus::Skipped => skipped += 1,
+            StepStatus::Error => failed += 1,
+        }
+    }
 
     #[allow(clippy::cast_possible_truncation)]
     let total_ms = total_start.elapsed().as_millis() as u64;
@@ -91,10 +79,6 @@ pub async fn run_script(
         total_ms,
     })
 }
-
-// =============================================================================
-// Step execution
-// =============================================================================
 
 /// Execute a single step, recursing for if/loop branches.
 ///
@@ -120,20 +104,12 @@ fn execute_step<'a>(
                 *index += 1;
                 let step_start = Instant::now();
 
-                // Perform argument substitution
-                let substituted =
-                    crate::script::context::substitute(&cmd_step.cmd, ctx).map_err(|e| {
-                        let err: AppError = e.into();
-                        err
-                    });
+                let substituted = crate::script::context::substitute(&cmd_step.cmd, ctx)
+                    .map_err(AppError::from);
 
                 let (status, output, error_msg) = match substituted {
-                    Err(sub_err) => {
-                        let msg = sub_err.message.clone();
-                        (StepStatus::Error, None, Some(msg))
-                    }
+                    Err(sub_err) => (StepStatus::Error, None, Some(sub_err.message)),
                     Ok(argv) if opts.dry_run => {
-                        // Dry-run: just validate the subcommand name
                         let sub = argv.first().map_or("", String::as_str);
                         if crate::script::dispatch::is_known_subcommand(sub) {
                             (
@@ -142,27 +118,23 @@ fn execute_step<'a>(
                                 None,
                             )
                         } else {
-                            let msg = format!("unknown subcommand: '{sub}'");
-                            (StepStatus::Error, None, Some(msg))
+                            (
+                                StepStatus::Error,
+                                None,
+                                Some(format!("unknown subcommand: '{sub}'")),
+                            )
                         }
                     }
-                    Ok(argv) => {
-                        match invoke(&argv, ctx, client, managed, global).await {
-                            Ok(value) => {
-                                // Update $prev
-                                ctx.set_prev(value.clone());
-                                // Bind to $vars if requested
-                                if let Some(bind_name) = &cmd_step.bind {
-                                    ctx.bind(bind_name, value.clone());
-                                }
-                                (StepStatus::Ok, Some(value), None)
+                    Ok(argv) => match invoke(&argv, ctx, client, managed, global).await {
+                        Ok(value) => {
+                            if let Some(bind_name) = &cmd_step.bind {
+                                ctx.bind(bind_name, value.clone());
                             }
-                            Err(e) => {
-                                let msg = e.message.clone();
-                                (StepStatus::Error, None, Some(msg))
-                            }
+                            ctx.set_prev(value.clone());
+                            (StepStatus::Ok, Some(value), None)
                         }
-                    }
+                        Err(e) => (StepStatus::Error, None, Some(e.message)),
+                    },
                 };
 
                 #[allow(clippy::cast_possible_truncation)]
@@ -202,15 +174,12 @@ fn execute_step<'a>(
                     (&if_step.r#else, &if_step.then)
                 };
 
-                // Execute active branch
                 for sub_step in active_branch {
                     execute_step(
                         sub_step, client, managed, global, opts, ctx, results, index, loop_index,
                     )
                     .await?;
                 }
-
-                // Emit skipped entries for inactive branch
                 for sub_step in skipped_branch {
                     emit_skipped_step(sub_step, results, index, loop_index);
                 }
@@ -240,7 +209,6 @@ fn execute_step<'a>(
                         let mut iterations = 0u64;
                         loop {
                             if iterations >= while_loop.max {
-                                // Emit max-iterations warning
                                 let warn = serde_json::json!({
                                     "warning": "loop max iterations reached",
                                     "max": while_loop.max
@@ -278,7 +246,7 @@ fn execute_step<'a>(
         }
 
         Ok(())
-    }) // end Box::pin
+    })
 }
 
 /// Emit a `skipped` result entry for a step that was not selected by an `if` branch.
@@ -317,10 +285,6 @@ fn emit_skipped_step(
         }
     }
 }
-
-// =============================================================================
-// Dry-run validation
-// =============================================================================
 
 /// Validate a script's schema and subcommand names without dispatching.
 ///
@@ -366,10 +330,6 @@ fn validate_dry_step(step: &Step, count: &mut usize) -> Result<(), AppError> {
     }
     Ok(())
 }
-
-// =============================================================================
-// Unit tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {

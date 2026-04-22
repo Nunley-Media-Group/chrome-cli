@@ -1,10 +1,6 @@
 /// Result types for script execution output.
 use serde::Serialize;
 
-// =============================================================================
-// Step result
-// =============================================================================
-
 /// Status of a single script step.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -39,10 +35,6 @@ pub struct StepResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loop_index: Option<u64>,
 }
-
-// =============================================================================
-// Run report (the output emitted to stdout)
-// =============================================================================
 
 /// The complete output of a script run, emitted as JSON to stdout.
 #[derive(Debug, Serialize)]

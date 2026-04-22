@@ -14,25 +14,16 @@ use clap::Parser as _;
 use crate::cli::{Cli, Command, GlobalOpts};
 use crate::script::context::VarContext;
 
-// =============================================================================
-// Known subcommand set (for dry-run validation)
-// =============================================================================
-
 /// Subcommands that the script dispatcher supports.
 pub const KNOWN_SUBCOMMANDS: &[&str] = &[
     "navigate", "page", "js", "form", "interact", "tabs", "console", "dialog", "dom", "network",
     "media", "emulate", "perf", "cookie",
 ];
 
-/// Return true if `name` is a known dispatchable subcommand.
 #[must_use]
 pub fn is_known_subcommand(name: &str) -> bool {
     KNOWN_SUBCOMMANDS.contains(&name)
 }
-
-// =============================================================================
-// Dispatch entry point
-// =============================================================================
 
 /// Invoke a command from an argv slice and return its JSON output.
 ///
@@ -73,23 +64,16 @@ pub async fn invoke(
         });
     }
 
-    // Build the full argv for clap: ["agentchrome", <subcommand>, <args...>]
-    let mut full_argv: Vec<String> = Vec::with_capacity(argv.len() + 1);
-    full_argv.push("agentchrome".to_string());
-    full_argv.extend_from_slice(argv);
-
-    // Parse through the full clap tree to get strongly-typed args
-    let cli = Cli::try_parse_from(&full_argv).map_err(|e| AppError {
+    let full_argv = std::iter::once("agentchrome").chain(argv.iter().map(String::as_str));
+    let cli = Cli::try_parse_from(full_argv).map_err(|e| AppError {
         message: format!("script step parse error for '{subcommand}': {e}"),
         code: ExitCode::GeneralError,
         custom_json: None,
     })?;
 
-    // Dispatch to the right adapter
     dispatch_command(&cli.command, client, session, global).await
 }
 
-/// Dispatch to the appropriate command adapter.
 async fn dispatch_command(
     command: &Command,
     client: &CdpClient,
@@ -118,10 +102,6 @@ async fn dispatch_command(
         }),
     }
 }
-
-// =============================================================================
-// Unit tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {

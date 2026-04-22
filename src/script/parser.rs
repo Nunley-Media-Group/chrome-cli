@@ -16,10 +16,6 @@
 use agentchrome::error::{AppError, ExitCode};
 use serde::{Deserialize, Serialize};
 
-// =============================================================================
-// Schema types
-// =============================================================================
-
 /// Top-level script container.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Script {
@@ -98,10 +94,6 @@ pub struct WhileLoop {
     pub max: u64,
 }
 
-// =============================================================================
-// Parser
-// =============================================================================
-
 /// Parse raw JSON bytes into a validated `Script`.
 ///
 /// # Errors
@@ -143,7 +135,6 @@ fn validate_step(step: &Step, index: usize) -> Result<(), AppError> {
                     custom_json: None,
                 });
             }
-            // Validate bind name if present
             if let Some(name) = &cmd_step.bind {
                 if !is_valid_identifier(name) {
                     return Err(AppError {
@@ -220,10 +211,6 @@ fn is_valid_identifier(s: &str) -> bool {
     }
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
-
-// =============================================================================
-// Unit tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {

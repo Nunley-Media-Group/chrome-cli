@@ -1,53 +1,33 @@
 /// Variable context for script execution.
 ///
-/// Holds `$prev` (previous step output) and `$vars` (bound variables),
-/// plus the script's working directory for future relative-path resolution.
+/// Holds `$prev` (previous step output) and `$vars` (bound variables).
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use agentchrome::error::{AppError, ExitCode};
 
-// =============================================================================
-// VarContext
-// =============================================================================
-
 /// In-process variable context threaded through a script run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VarContext {
     /// The output of the last non-skipped step (null initially).
     pub prev: serde_json::Value,
     /// Named variables bound by `bind:` on cmd steps.
     pub vars: HashMap<String, serde_json::Value>,
-    /// Script's working directory (reserved for future relative-path resolution).
-    #[allow(dead_code)]
-    pub cwd_script: PathBuf,
 }
 
 impl VarContext {
-    /// Create a new empty context.
     #[must_use]
-    pub fn new(cwd_script: PathBuf) -> Self {
-        Self {
-            prev: serde_json::Value::Null,
-            vars: HashMap::new(),
-            cwd_script,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Bind a named variable.
     pub fn bind(&mut self, name: &str, value: serde_json::Value) {
         self.vars.insert(name.to_string(), value);
     }
 
-    /// Update `prev` with the latest step output.
     pub fn set_prev(&mut self, value: serde_json::Value) {
         self.prev = value;
     }
 }
-
-// =============================================================================
-// Argument substitution
-// =============================================================================
 
 /// Error returned when substitution fails.
 #[derive(Debug)]
@@ -84,12 +64,9 @@ pub fn substitute(argv: &[String], ctx: &VarContext) -> Result<Vec<String>, Subs
 }
 
 fn substitute_token(token: &str, ctx: &VarContext) -> Result<String, SubstitutionError> {
-    // Whole-token $prev
     if token == "$prev" {
         return Ok(value_to_string(&ctx.prev));
     }
-
-    // Whole-token $vars.<name>
     if let Some(name) = token.strip_prefix("$vars.") {
         let value = ctx
             .vars
@@ -97,8 +74,6 @@ fn substitute_token(token: &str, ctx: &VarContext) -> Result<String, Substitutio
             .ok_or_else(|| SubstitutionError::Undefined(name.to_string()))?;
         return Ok(value_to_string(value));
     }
-
-    // No substitution needed
     Ok(token.to_string())
 }
 
@@ -114,16 +89,12 @@ fn value_to_string(value: &serde_json::Value) -> String {
     }
 }
 
-// =============================================================================
-// Unit tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn ctx() -> VarContext {
-        let mut c = VarContext::new(PathBuf::from("/tmp"));
+        let mut c = VarContext::new();
         c.set_prev(serde_json::json!("previous output"));
         c.bind("title", serde_json::json!("Example Domain"));
         c.bind("count", serde_json::json!(42));
@@ -183,7 +154,7 @@ mod tests {
 
     #[test]
     fn prev_null_serializes_as_null() {
-        let mut ctx = VarContext::new(PathBuf::from("/tmp"));
+        let mut ctx = VarContext::new();
         ctx.set_prev(serde_json::Value::Null);
         let argv = vec!["$prev".to_string()];
         let result = substitute(&argv, &ctx).expect("ok");
