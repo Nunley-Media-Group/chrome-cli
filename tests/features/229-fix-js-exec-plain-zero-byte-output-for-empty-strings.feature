@@ -1,0 +1,61 @@
+# File: tests/features/229-fix-js-exec-plain-zero-byte-output-for-empty-strings.feature
+#
+# Generated from: specs/bug-fix-js-exec-plain-zero-byte-output-for-empty-strings/requirements.md
+# Issue: #229
+# Type: Defect regression
+
+@regression
+Feature: js exec --plain distinguishes empty-string result from no output
+  The --plain formatter for `agentchrome js exec` previously emitted zero
+  bytes when the evaluated expression returned an empty JavaScript string,
+  making it indistinguishable from a command that silently produced no
+  output. This was fixed by emitting the two-byte JSON literal `""` whenever
+  the result is an empty string in --plain mode, while leaving all other
+  result types untouched.
+
+  # --- Bug Is Fixed ---
+
+  @regression
+  Scenario: AC1 — empty-string result emits the two-byte JSON literal ""
+    Given a page where expression "document.getElementById('result').innerText" evaluates to ""
+    When I run `agentchrome js exec "document.getElementById('result').innerText" --plain`
+    Then the command exits with code 0
+    And stdout is exactly the two-byte payload `""`
+    And stderr is empty
+
+  # --- Related Behavior Still Works ---
+
+  @regression
+  Scenario: AC2 — non-empty strings still emit the raw value with no added quoting or newline
+    Given a page where expression "document.getElementById('greeting').innerText" evaluates to "hello"
+    When I run `agentchrome js exec "document.getElementById('greeting').innerText" --plain`
+    Then the command exits with code 0
+    And stdout is exactly `hello` with no trailing newline and no surrounding quotes
+
+  @regression
+  Scenario Outline: AC3 — numbers, booleans, null, and undefined retain their current --plain output
+    Given a connected headless Chrome page
+    When I run `agentchrome js exec "<expression>" --plain`
+    Then the command exits with code 0
+    And stdout is exactly `<expected>`
+
+    Examples:
+      | expression       | expected  |
+      | 42               | 42        |
+      | true             | true      |
+      | null             | null      |
+      | (function(){})() | undefined |
+
+  @regression
+  Scenario: AC4 — --pretty mode still includes "result": "" for empty-string results
+    Given a page where expression "document.getElementById('result').innerText" evaluates to ""
+    When I run `agentchrome js exec "document.getElementById('result').innerText" --pretty`
+    Then the command exits with code 0
+    And stdout is valid JSON containing `"result": ""` and `"type": "string"`
+
+  @regression
+  Scenario: AC4 — default JSON mode unchanged for empty-string results
+    Given a page where expression "document.getElementById('result').innerText" evaluates to ""
+    When I run `agentchrome js exec "document.getElementById('result').innerText"`
+    Then the command exits with code 0
+    And stdout is valid JSON containing `"result":""` and `"type":"string"`
