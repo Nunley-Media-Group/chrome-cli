@@ -1,8 +1,8 @@
 # Requirements: Add `audit lighthouse` Command
 
-**Issues**: #169
-**Date**: 2026-03-15
-**Status**: Draft
+**Issues**: #169, #231
+**Date**: 2026-04-22
+**Status**: Amended
 **Author**: Claude
 
 ---
@@ -107,6 +107,65 @@ This issue adds a new `audit` command group with a `lighthouse` subcommand that 
 **When** the user runs `agentchrome --port 9333 audit lighthouse`
 **Then** Lighthouse is invoked with `--port 9333` to connect to the correct Chrome instance
 
+### AC9: Prereq surfaced in `audit lighthouse --help` (Issue #231)
+
+**Given** a user runs `agentchrome audit lighthouse --help` on a machine without lighthouse installed
+**When** the long-form help text renders
+**Then** the help text states the prerequisite (e.g., "requires the `lighthouse` npm package") above the examples section
+**And** the prerequisite line is present regardless of whether lighthouse is installed (help text is static)
+
+**Example**:
+- When: `agentchrome audit lighthouse --help`
+- Then: stdout contains "requires the `lighthouse` npm package" (or equivalent wording) positioned before any examples block
+
+### AC10: `--install-prereqs` helper (Issue #231)
+
+**Given** a user runs `agentchrome audit lighthouse --install-prereqs`
+**When** `npm` is available on the system
+**Then** the command runs `npm install -g lighthouse` with the flag itself serving as the user's explicit opt-in (no additional prompt)
+**And** success and failure are reported as structured JSON on stdout/stderr respectively per `tech.md` output contract
+**And** the process exits with code 0 on successful install
+**And** when `npm` is **not** available, stderr contains a structured JSON error naming the missing prerequisite (e.g., `"npm not found on PATH — install Node.js first"`) and the process exits non-zero
+
+**Example (success)**:
+- Given: npm is on PATH and lighthouse is not installed
+- When: `agentchrome audit lighthouse --install-prereqs`
+- Then: stdout contains `{"installed":"lighthouse","version":"<installed-version>"}`, exit code is 0, and a subsequent `agentchrome audit lighthouse --help` invocation still returns 0 (install did not corrupt the tool)
+
+**Example (npm missing)**:
+- Given: npm is not on PATH
+- When: `agentchrome audit lighthouse --install-prereqs`
+- Then: stderr contains `{"error":"npm not found on PATH — install Node.js first","code":1}` and the process exits non-zero
+
+**Cross-invocation persistence** (applies retrospective learning on multi-invocation state): after a successful `--install-prereqs` run, a subsequent independent invocation of `agentchrome audit lighthouse <URL>` in a new process MUST locate the newly installed binary on `PATH` without further user action — verifying the install produced observable state beyond the installing process.
+
+### AC11: First-run guidance when missing (Issue #231)
+
+**Given** lighthouse is not installed
+**When** a user runs `agentchrome audit lighthouse <URL>` without `--install-prereqs`
+**Then** the existing `"Install it with: npm install -g lighthouse"` error message is retained
+**And** the error message is extended with a one-liner: `"Or run 'agentchrome audit lighthouse --install-prereqs'"`
+**And** the error is emitted as a single JSON object on stderr (not two separate errors) — one invocation, one error object
+
+**Example**:
+- Given: lighthouse is not on PATH
+- When: `agentchrome audit lighthouse https://example.com`
+- Then: stderr contains exactly one JSON object whose `error` field mentions both `npm install -g lighthouse` and `--install-prereqs`, with exit code 1
+
+### AC12: `--help` surfaces the prerequisite (Issue #231)
+
+**Given** a user runs `agentchrome audit --help` or `agentchrome --help`
+**When** the audit command group is described
+**Then** the one-line `about` string for `audit` (or the `audit lighthouse` subcommand entry) mentions that lighthouse requires an external CLI — e.g., `"requires lighthouse CLI (see 'audit lighthouse --help')"`
+**And** this string renders identically in both the top-level `agentchrome --help` command list and the `agentchrome audit --help` subcommand list, so the advertised-but-broken impression is neutralized at both entry points
+
+### AC13: No regression when lighthouse is installed (Issue #231)
+
+**Given** a machine where `lighthouse` resolves on `PATH`
+**When** `agentchrome audit lighthouse <URL>` runs (without `--install-prereqs`)
+**Then** behavior matches the 1.33.1 contract exactly — output shape, categories present, exit codes, and stdout/stderr separation are unchanged from AC1–AC8
+**And** the new prerequisite help text (AC9, AC12) does not alter the JSON output of successful runs
+
 ---
 
 ## Functional Requirements
@@ -123,6 +182,11 @@ This issue adds a new `audit` command group with a `lighthouse` subcommand that 
 | FR8 | Respect `AGENTCHROME_PORT` / `--port` global flag when constructing the `--port` argument passed to Lighthouse | Must | Standard global opts resolution chain |
 | FR9 | Pass `--output json --chrome-flags="--headless"` to Lighthouse for machine-readable output | Must | Ensures structured JSON output from Lighthouse |
 | FR10 | Parse Lighthouse JSON output and extract category scores into the flat summary format | Must | Map `lhr.categories[name].score` to output fields |
+| FR11 | Add `--install-prereqs` flag on `audit lighthouse` that runs `npm install -g lighthouse` (the flag itself is the consent) and reports structured JSON on stdout/stderr | Must | Issue #231. Success: `{"installed":"lighthouse","version":"<v>"}`. Failure: structured JSON error with `error`/`code` |
+| FR12 | Extend the "binary not found" error to include a pointer to `--install-prereqs` alongside the existing `npm install -g lighthouse` hint, emitted as a single JSON error object per invocation | Must | Issue #231. Retrospective learning: one invocation = one error object |
+| FR13 | `agentchrome audit lighthouse --help` states the `lighthouse` npm prerequisite above the examples section; `agentchrome audit --help` and `agentchrome --help` reference the prerequisite in the `audit` group's one-line description | Must | Issue #231. Applies to both help entry points |
+| FR14 | Detect npm availability before attempting `--install-prereqs`; return a structured error naming Node.js as the upstream prerequisite when npm is absent | Must | Issue #231. Probe via `npm --version` (exit code 0 = available) |
+| FR15 | Explore bundling `lighthouse` or auto-installing on first use, deferred pending binary-size and cross-platform research | Could | Issue #231 FR4. Not implemented in this amendment; captured for later |
 
 ---
 
@@ -146,6 +210,7 @@ This issue adds a new `audit` command group with a `lighthouse` subcommand that 
 | `[URL]` | String (positional) | Must be a valid URL if provided | No — defaults to active page URL |
 | `--only` | Comma-separated string | Each value must be one of: performance, accessibility, best-practices, seo, pwa | No — defaults to all categories |
 | `--output-file` | File path | Parent directory must exist and be writable | No |
+| `--install-prereqs` | Boolean flag (no value) | None — flag name MUST NOT collide with any existing global flag | No — when present, short-circuits the audit run and installs the binary instead |
 
 ### Output Data (stdout — scores summary)
 
@@ -171,7 +236,8 @@ When `--only` is used, only the specified categories appear in the output. When 
 - [x] Error types (`error.rs`) — for structured JSON error output
 
 ### External Dependencies
-- [ ] `lighthouse` CLI binary — must be installed separately via `npm install -g lighthouse`
+- [ ] `lighthouse` CLI binary — must be installed separately via `npm install -g lighthouse` (or via `audit lighthouse --install-prereqs` as of Issue #231)
+- [ ] `npm` CLI — required for `--install-prereqs`; upstream dependency is Node.js
 
 ### Blocked By
 - None
@@ -181,7 +247,8 @@ When `--only` is used, only the specified categories appear in the output. When 
 ## Out of Scope
 
 - PageSpeed Insights (PSI) API integration
-- Bundling or auto-installing the `lighthouse` binary
+- Bundling the `lighthouse` binary into the `agentchrome` executable (tracked as FR15, deferred pending binary-size research)
+- Auto-installing `lighthouse` on first use without explicit `--install-prereqs` opt-in (Issue #231 requires the flag as the consent mechanism)
 - Custom Lighthouse configuration file support (`--config-path`)
 - Comparative / diff audits between runs
 - CI threshold assertions (pass/fail based on score cutoffs)
@@ -212,6 +279,7 @@ When `--only` is used, only the specified categories appear in the output. When 
 | Issue | Date | Summary |
 |-------|------|---------|
 | #169 | 2026-03-15 | Initial feature spec |
+| #231 | 2026-04-22 | Added `--install-prereqs` helper, help-text prerequisite surfacing, and extended not-found error to neutralize the advertised-but-broken first-run impression |
 
 ---
 

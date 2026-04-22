@@ -1,8 +1,8 @@
 # Technical Design: Add `audit lighthouse` Command
 
-**Issues**: #169
-**Date**: 2026-03-16
-**Status**: Draft
+**Issues**: #169, #231
+**Date**: 2026-04-22
+**Status**: Amended
 **Author**: Claude
 
 ---
@@ -277,8 +277,153 @@ Rejected: Adds an external dependency for a simple PATH lookup. A `Command::new(
 
 ---
 
+## Amendment: Prerequisite Handling (Issue #231)
+
+### Motivation
+
+On a fresh machine, `audit lighthouse` fails with `"lighthouse binary not found"`. The error is actionable, but because `audit` appears in `--help` as a first-class command group, the UX reads as "advertised feature that doesn't ship with the tool". This amendment adds three coordinated surfaces so the prerequisite is discoverable *before* failure, one-command-installable, and cross-referenced at failure time.
+
+### Component Additions
+
+#### CLI Layer (`src/cli/mod.rs`)
+
+Extend `AuditLighthouseArgs` with an opt-in install flag:
+
+```rust
+pub struct AuditLighthouseArgs {
+    pub url: Option<String>,
+    #[arg(long)] pub only: Option<String>,
+    #[arg(long)] pub output_file: Option<PathBuf>,
+
+    /// Install the `lighthouse` npm package (requires `npm` on PATH).
+    /// Running this flag constitutes explicit consent to run `npm install -g lighthouse`.
+    #[arg(long)] pub install_prereqs: bool,
+}
+```
+
+Update the `#[command(about = "...", long_about = "...")]` strings:
+
+- **Top-level `audit` group `about`** (shown by `agentchrome --help` and `agentchrome audit --help`): append `"(requires lighthouse CLI — see 'audit lighthouse --help')"`.
+- **`audit lighthouse` subcommand `long_about`**: lead with a `PREREQUISITES:` section above the `EXAMPLES:` block that states `"Requires the lighthouse npm package. Install with: npm install -g lighthouse (or run: agentchrome audit lighthouse --install-prereqs)"`.
+
+Flag-name collision check per retrospective learning: `--install-prereqs` does not conflict with any existing global flag (`--port`, `--host`, `--ws-url`, `--page-id`, `--tab`, `--json`, `--verbose`) or any `audit lighthouse` subcommand flag (`--only`, `--output-file`).
+
+#### Command Module (`src/audit.rs`)
+
+Branch `execute_lighthouse` at the top on the install flag:
+
+```rust
+if args.install_prereqs {
+    return install_lighthouse_prereqs();
+}
+// ... existing flow
+```
+
+New function:
+
+```rust
+fn install_lighthouse_prereqs() -> Result<(), AppError> {
+    // 1. Probe npm: `npm --version`
+    // 2. If npm missing → structured AppError with install-Node.js hint
+    // 3. Run `npm install -g lighthouse`, stream or capture output
+    // 4. On success, probe `lighthouse --version` and emit {"installed":"lighthouse","version":"<v>"}
+    // 5. On npm failure (non-zero exit), wrap stderr into AppError
+}
+```
+
+Extend the existing `find_lighthouse_binary` not-found error message:
+
+```
+"lighthouse binary not found. Install it with: npm install -g lighthouse
+Or run: agentchrome audit lighthouse --install-prereqs"
+```
+
+The error remains a single `AppError` → single JSON object on stderr (one invocation = one error object). The newline-separated hint inside the `error` string is acceptable because it is one field on one object.
+
+### Data Flow Additions
+
+```
+agentchrome audit lighthouse --install-prereqs
+    │
+    ▼
+Probe `npm --version`
+    │ Not found → AppError { "npm not found on PATH — install Node.js first", code: 1 }
+    ▼
+Execute `npm install -g lighthouse`, capture stdout+stderr+exit
+    │ Non-zero exit → AppError { "Failed to install lighthouse: <stderr>", code: 1 }
+    ▼
+Probe `lighthouse --version` (post-install verification)
+    │ Not found → AppError { "lighthouse installed but not on PATH — shell rehash required", code: 1 }
+    ▼
+Emit {"installed":"lighthouse","version":"<v>"} on stdout, exit 0
+```
+
+### npm Execution
+
+Use `std::process::Command::new("npm").args(["install", "-g", "lighthouse"])`. Inherit the current stdio so the user sees npm's own progress (npm writes to stderr/stdout in mixed form) — or capture both and relay structured progress via a log line. Preferred: inherit stdio for visibility during the install, then emit the structured success JSON on stdout once npm exits 0. This matches the approach of commands that wrap long-running subprocesses (see `perf.rs`).
+
+Windows: `npm` is typically `npm.cmd` on Windows. Use `Command::new("npm")` and rely on the OS PATHEXT resolution; if that proves insufficient, fall back to explicitly trying `npm.cmd` before erroring (standard Rust-on-Windows pattern).
+
+### Error Handling Additions
+
+| Condition | Error Message | Exit Code |
+|-----------|--------------|-----------|
+| `npm` not in PATH (during `--install-prereqs`) | `"npm not found on PATH — install Node.js first"` | 1 (GeneralError) |
+| `npm install -g lighthouse` exits non-zero | `"Failed to install lighthouse: <stderr>"` | 1 (GeneralError) |
+| Post-install `lighthouse --version` still fails | `"lighthouse installed but not on PATH — open a new shell and retry"` | 1 (GeneralError) |
+| Extended not-found hint (no install flag) | `"lighthouse binary not found. Install it with: npm install -g lighthouse\nOr run: agentchrome audit lighthouse --install-prereqs"` | 1 (GeneralError) |
+
+### Output Types
+
+New success payload for `--install-prereqs`:
+
+```rust
+#[derive(Serialize)]
+struct InstallPrereqsResult<'a> {
+    installed: &'a str,  // "lighthouse"
+    version: String,     // parsed from `lighthouse --version`
+}
+```
+
+### Help-Text Rendering
+
+`clap` derives help from `#[command(about = ...)]` and `#[command(long_about = ...)]`. The top-level short `about` appears in `agentchrome --help`'s command list AND in `agentchrome audit --help`'s parent description — a single edit covers both AC12 entry points. `long_about` only renders on `agentchrome audit lighthouse --help` (AC9).
+
+### Alternatives Considered (Amendment)
+
+#### 1. Auto-install on first failure (no flag required)
+
+Rejected: violates the issue's explicit "flag IS the consent" requirement. Silently running `npm install -g` is a side effect users should opt into; an automation context could easily trigger this repeatedly in CI.
+
+#### 2. Bundle `lighthouse` into the `agentchrome` binary
+
+Deferred per FR15. Lighthouse pulls in Chromium/Node.js dependencies that exceed the 10 MB binary-size target in `steering/tech.md`. Revisit once cross-platform packaging is explored.
+
+#### 3. Prompt interactively before running `npm install`
+
+Rejected: agentchrome is a non-interactive CLI. The `--install-prereqs` flag is the interaction — an additional prompt would break automation.
+
+#### 4. Add a `doctor` subcommand instead of a per-command `--install-prereqs`
+
+Considered for future work. A `agentchrome doctor` that inspects all prerequisites across all command groups is a cleaner long-term shape, but for Issue #231's scope (audit lighthouse specifically), a per-command flag is the minimal fix.
+
+### Testing Strategy (Amendment)
+
+**CLI-testable (no Chrome, no npm side-effect)**:
+- `agentchrome audit lighthouse --help` includes `"lighthouse npm package"` / install hint above examples
+- `agentchrome audit --help` and `agentchrome --help` mention the lighthouse prerequisite in the audit group line
+- `agentchrome audit lighthouse` when lighthouse missing emits extended error mentioning `--install-prereqs`
+
+**Mocked-subprocess tests**:
+- `install_lighthouse_prereqs` error path when `npm` is absent (stub `Command` via trait or dependency injection for the probe)
+
+**Manual smoke (side-effectful)**:
+- On a machine *without* lighthouse: run `--install-prereqs`, verify install succeeds, verify subsequent invocation locates the binary across a fresh shell
+- On a machine *without* npm: verify the npm-missing error fires and exit code is non-zero
+
 ## Change History
 
 | Issue | Date | Summary |
 |-------|------|---------|
 | #169 | 2026-03-16 | Initial technical design |
+| #231 | 2026-04-22 | Added `--install-prereqs` flag, help-text prerequisite surfacing (subcommand + group), extended not-found error with install-flag pointer, and npm-missing handling |

@@ -375,6 +375,17 @@ fn stdout_should_not_contain(world: &mut CliWorld, unexpected: String) {
     );
 }
 
+#[then(expr = "in stdout {string} appears before {string}")]
+fn stdout_ordering(world: &mut CliWorld, first: String, second: String) {
+    let a = world.stdout.find(&first);
+    let b = world.stdout.find(&second);
+    assert!(
+        matches!((a, b), (Some(ai), Some(bi)) if ai < bi),
+        "expected '{first}' before '{second}' in stdout\nstdout: {}",
+        world.stdout
+    );
+}
+
 #[then(expr = "stderr should contain {string}")]
 fn stderr_should_contain(world: &mut CliWorld, expected: String) {
     assert!(
@@ -4026,6 +4037,11 @@ const AUDIT_TESTABLE_SCENARIOS: &[&str] = &[
     "Audit lighthouse accepts --only flag",
     "Audit without subcommand exits with error",
     "Error when no Chrome session is connected",
+    // Issue #231
+    "Audit lighthouse help text states the lighthouse prerequisite above examples",
+    "Audit group help references the lighthouse CLI prerequisite",
+    "Top-level help references the lighthouse CLI prerequisite",
+    "Audit lighthouse exposes --install-prereqs flag",
 ];
 
 // =============================================================================

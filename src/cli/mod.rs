@@ -586,12 +586,13 @@ EXAMPLES:
     )]
     Media(MediaArgs),
 
-    /// Run audits against the current page (Lighthouse)
+    /// Run audits against the current page (requires lighthouse CLI — see 'audit lighthouse --help')
     #[command(
         long_about = "Run external audits against the current browser page. Currently supports \
             Google Lighthouse for measuring performance, accessibility, SEO, best practices, \
             and PWA scores. Connects Lighthouse to the managed Chrome session via the CDP port \
-            and returns structured JSON category scores on stdout.",
+            and returns structured JSON category scores on stdout. Requires the `lighthouse` \
+            CLI (see 'audit lighthouse --help' for installation).",
         after_long_help = "\
 EXAMPLES:
   # Run a full Lighthouse audit on the current page
@@ -1981,11 +1982,16 @@ pub enum AuditCommand {
     /// Run a Google Lighthouse audit
     #[command(
         long_about = "Run a Google Lighthouse audit against the current page (or a given URL). \
-            Requires the `lighthouse` CLI to be installed (`npm install -g lighthouse`). Connects \
-            Lighthouse to the managed Chrome session via the CDP port and returns structured JSON \
-            category scores on stdout. Use --only to limit which categories are measured. Use \
-            --output-file to save the full Lighthouse JSON report.",
+            Connects Lighthouse to the managed Chrome session via the CDP port and returns \
+            structured JSON category scores on stdout. Use --only to limit which categories \
+            are measured. Use --output-file to save the full Lighthouse JSON report.",
         after_long_help = "\
+PREREQUISITES:
+  Requires the lighthouse npm package. Install with:
+    npm install -g lighthouse
+  Or run:
+    agentchrome audit lighthouse --install-prereqs
+
 EXAMPLES:
   # Full audit on the current page
   agentchrome audit lighthouse
@@ -1997,7 +2003,10 @@ EXAMPLES:
   agentchrome audit lighthouse --only performance,accessibility
 
   # Save the full report
-  agentchrome audit lighthouse --output-file report.json"
+  agentchrome audit lighthouse --output-file report.json
+
+  # Install the lighthouse prerequisite (runs: npm install -g lighthouse)
+  agentchrome audit lighthouse --install-prereqs"
     )]
     Lighthouse(AuditLighthouseArgs),
 }
@@ -2015,6 +2024,10 @@ pub struct AuditLighthouseArgs {
     /// Save the full Lighthouse JSON report to this file
     #[arg(long)]
     pub output_file: Option<PathBuf>,
+
+    /// Install the `lighthouse` prerequisite via `npm install -g lighthouse` (no prompt — the flag is the consent)
+    #[arg(long)]
+    pub install_prereqs: bool,
 }
 
 /// Arguments for the `diagnose` subcommand.

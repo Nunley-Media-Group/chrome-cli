@@ -108,3 +108,57 @@ Feature: Audit Lighthouse
   #   When I run "agentchrome --port 9333 audit lighthouse"
   #   Then the Lighthouse process is invoked with --port 9333
   #   And the exit code should be 0
+
+  # =======================================================================
+  # Issue #231 — Prerequisite handling
+  # =======================================================================
+
+  # Added by issue #231 — AC9: prereq surfaced in `audit lighthouse --help`
+  Scenario: Audit lighthouse help text states the lighthouse prerequisite above examples
+    When I run "agentchrome audit lighthouse --help"
+    Then the exit code should be 0
+    And stdout should contain "PREREQUISITES"
+    And stdout should contain "lighthouse"
+    And stdout should contain "npm install -g lighthouse"
+    And stdout should contain "--install-prereqs"
+    And in stdout "PREREQUISITES" appears before "EXAMPLES"
+
+  # Added by issue #231 — AC12: audit group help mentions the prerequisite
+  Scenario: Audit group help references the lighthouse CLI prerequisite
+    When I run "agentchrome audit --help"
+    Then the exit code should be 0
+    And stdout should contain "lighthouse"
+
+  # Added by issue #231 — AC12: top-level help references the prerequisite
+  Scenario: Top-level help references the lighthouse CLI prerequisite
+    When I run "agentchrome --help"
+    Then the exit code should be 0
+    And stdout should contain "lighthouse"
+
+  # Added by issue #231 — AC10: --install-prereqs flag is wired through the CLI
+  Scenario: Audit lighthouse exposes --install-prereqs flag
+    When I run "agentchrome audit lighthouse --help"
+    Then the exit code should be 0
+    And stdout should contain "--install-prereqs"
+
+  # Added by issue #231 — AC11: not-found error points at both install paths
+  # (Scenario requires lighthouse binary to be absent from PATH — verified via
+  # manual smoke test when lighthouse is not installed.)
+  # Scenario: Not-found error lists both install paths in a single JSON object
+  #   Given lighthouse binary is not in PATH
+  #   And a connected Chrome session on a page
+  #   When I run "agentchrome audit lighthouse https://example.com"
+  #   Then the exit code should be nonzero
+  #   And stderr should be valid JSON
+  #   And stderr should contain "npm install -g lighthouse"
+  #   And stderr should contain "--install-prereqs"
+
+  # Added by issue #231 — AC10: --install-prereqs with npm missing (smoke-only;
+  # requires controlled PATH with npm absent, verified via manual smoke test)
+  # Scenario: --install-prereqs with npm missing emits Node.js error
+  #   Given npm is not in PATH
+  #   When I run "agentchrome audit lighthouse --install-prereqs"
+  #   Then the exit code should be nonzero
+  #   And stderr should be valid JSON
+  #   And stderr should contain "npm not found on PATH"
+  #   And stderr should contain "Node.js"
