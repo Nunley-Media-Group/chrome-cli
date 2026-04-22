@@ -2,15 +2,16 @@
 #
 # Generated from: .claude/specs/30-capabilities-manifest-subcommand/requirements.md
 # Issue: #30
+# Updated by: issue #218 — Progressive Disclosure retrofit
 
 Feature: Machine-Readable Capabilities Manifest Subcommand
   As a developer or AI agent integrating with agentchrome
   I want a capabilities subcommand that outputs a machine-readable manifest
   So that I can programmatically discover the full CLI surface
 
-  # --- Happy Path ---
+  # --- Happy Path (listing / progressive disclosure, #218) ---
 
-  Scenario: Full capabilities manifest output
+  Scenario: AC15 — Listing returns summaries only
     Given agentchrome is installed
     When I run "agentchrome capabilities"
     Then the output is valid JSON
@@ -18,26 +19,19 @@ Feature: Machine-Readable Capabilities Manifest Subcommand
     And the JSON has key "version"
     And the JSON has a "commands" array
     And the "commands" array is not empty
-    And the exit code is 0
-
-  Scenario: Command entries include full metadata
-    Given agentchrome is installed
-    When I run "agentchrome capabilities"
-    Then the output is valid JSON
     And every command has "name" and "description" fields
-    And commands with subcommands have a "subcommands" array
-
-  # --- Filtering ---
-
-  Scenario: Filter by specific command
-    Given agentchrome is installed
-    When I run "agentchrome capabilities --command navigate"
-    Then the output is valid JSON
-    And the "commands" array has exactly 1 entry
-    And the first command has name "navigate"
+    And no command has "subcommands"
     And the exit code is 0
 
-  Scenario: Compact output mode
+  Scenario: AC16 — Detail path returns full descriptor
+    Given agentchrome is installed
+    When I run "agentchrome capabilities navigate"
+    Then the output is valid JSON
+    And the JSON has key "name" with value "navigate"
+    And the JSON has key "description"
+    And the exit code is 0
+
+  Scenario: Compact output mode (listing)
     Given agentchrome is installed
     When I run "agentchrome capabilities --compact"
     Then the output is valid JSON
@@ -47,9 +41,9 @@ Feature: Machine-Readable Capabilities Manifest Subcommand
     And the JSON does not have key "exit_codes"
     And the exit code is 0
 
-  # --- Global Flags ---
+  # --- Global Flags (listing carries them) ---
 
-  Scenario: Global flags are included
+  Scenario: Global flags are included in the listing
     Given agentchrome is installed
     When I run "agentchrome capabilities"
     Then the output is valid JSON
@@ -62,9 +56,9 @@ Feature: Machine-Readable Capabilities Manifest Subcommand
     And "global_flags" includes "--pretty"
     And "global_flags" includes "--plain"
 
-  # --- Exit Codes ---
+  # --- Exit Codes (listing carries them) ---
 
-  Scenario: Exit codes are documented
+  Scenario: Exit codes are documented in the listing
     Given agentchrome is installed
     When I run "agentchrome capabilities"
     Then the output is valid JSON
@@ -76,15 +70,6 @@ Feature: Machine-Readable Capabilities Manifest Subcommand
     And "exit_codes" contains code 4 named "TimeoutError"
     And "exit_codes" contains code 5 named "ProtocolError"
 
-  # --- Enum Values ---
-
-  Scenario: Enum values are listed for flags
-    Given agentchrome is installed
-    When I run "agentchrome capabilities --command navigate"
-    Then the output is valid JSON
-    And a subcommand has flag "--wait-until" with type "enum"
-    And the "--wait-until" flag has values "load", "domcontentloaded", "networkidle", "none"
-
   # --- Output Formats ---
 
   Scenario: Pretty-printed JSON output
@@ -94,11 +79,11 @@ Feature: Machine-Readable Capabilities Manifest Subcommand
     And the output is multi-line
     And the exit code is 0
 
-  # --- Error Handling ---
+  # --- Error Handling (AC17) ---
 
-  Scenario: Error on unknown command filter
+  Scenario: AC17 — Unknown command in detail path is an error
     Given agentchrome is installed
-    When I run "agentchrome capabilities --command nonexistent"
+    When I run "agentchrome capabilities nonexistent"
     Then the exit code is 1
     And stderr contains "Unknown command"
 
@@ -126,27 +111,3 @@ Feature: Machine-Readable Capabilities Manifest Subcommand
     And the "commands" array contains entry "examples"
     And the "commands" array contains entry "capabilities"
     And the "commands" array contains entry "man"
-
-  # --- Data-Driven: Per-Command Subcommand Coverage ---
-
-  Scenario Outline: Commands with subcommands list them
-    Given agentchrome is installed
-    When I run "agentchrome capabilities --command <command>"
-    Then the output is valid JSON
-    And the first command has subcommands
-    And the exit code is 0
-
-    Examples:
-      | command  |
-      | tabs     |
-      | navigate |
-      | page     |
-      | js       |
-      | console  |
-      | network  |
-      | interact |
-      | form     |
-      | emulate  |
-      | perf     |
-      | dialog   |
-      | config   |

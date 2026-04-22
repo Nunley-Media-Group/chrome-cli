@@ -13,6 +13,21 @@ pub struct CommandGroupSummary {
     pub examples: Vec<ExampleEntry>,
 }
 
+#[derive(Serialize, Clone)]
+pub struct CommandGroupListing {
+    pub command: String,
+    pub description: String,
+}
+
+impl From<&CommandGroupSummary> for CommandGroupListing {
+    fn from(s: &CommandGroupSummary) -> Self {
+        Self {
+            command: s.command.clone(),
+            description: s.description.clone(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct ExampleEntry {
     pub cmd: String,
@@ -914,6 +929,42 @@ mod tests {
         assert!(
             !json.contains("flags"),
             "flags field should be omitted when None"
+        );
+    }
+
+    #[test]
+    fn command_group_listing_json_has_only_two_fields() {
+        let summary = CommandGroupSummary {
+            command: "navigate".into(),
+            description: "URL navigation".into(),
+            examples: vec![ExampleEntry {
+                cmd: "agentchrome navigate".into(),
+                description: "go".into(),
+                flags: None,
+            }],
+        };
+        let listing: CommandGroupListing = (&summary).into();
+        let json = serde_json::to_string(&listing).unwrap();
+        assert!(
+            !json.contains("examples"),
+            "listing must not contain examples key"
+        );
+        assert!(!json.contains("\"cmd\""));
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = parsed.as_object().unwrap();
+        assert_eq!(obj.len(), 2);
+        assert!(obj.contains_key("command"));
+        assert!(obj.contains_key("description"));
+    }
+
+    #[test]
+    fn all_examples_listing_under_4kb() {
+        let listings: Vec<CommandGroupListing> = all_examples().iter().map(Into::into).collect();
+        let json = serde_json::to_string(&listings).unwrap();
+        assert!(
+            json.len() < 4096,
+            "examples listing JSON should be < 4KB; got {} bytes",
+            json.len()
         );
     }
 

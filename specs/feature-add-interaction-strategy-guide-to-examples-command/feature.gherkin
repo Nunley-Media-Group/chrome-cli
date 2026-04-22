@@ -197,3 +197,81 @@ Feature: Interaction Strategy Guide in Examples Command
     And the output should be deterministic across invocations
     And stderr should be empty
     And the exit code should be 0
+
+  # =========================================================================
+  # Added by issue #218 — Progressive Disclosure retrofit for `examples` and
+  # `capabilities` top-level listings. Supersedes AC11d's assertion that each
+  # `examples --json` entry carries an `examples` array.
+  # =========================================================================
+
+  Scenario: AC13 - examples --json listing returns summaries only (supersedes AC11d)
+    When I run "agentchrome examples --json"
+    Then stdout should be a valid JSON array
+    And each JSON entry should have a "command" field
+    And each JSON entry should have a "description" field
+    And no JSON entry should have an "examples" field
+    And the JSON payload size should be less than 4096 bytes
+    And the exit code should be 0
+
+  Scenario: AC14 - examples <group> --json still returns full detail
+    When I run "agentchrome examples navigate --json"
+    Then stdout should be a valid JSON object
+    And the JSON object should have a "command" field
+    And the JSON object should have a "description" field
+    And the JSON object should have an "examples" field
+    And the JSON "examples" array should have at least 1 entry
+    And each examples entry should have a "cmd" field
+    And each examples entry should have a "description" field
+    And the exit code should be 0
+
+  Scenario: AC15 - capabilities --json listing returns summaries only
+    When I run "agentchrome capabilities --json"
+    Then stdout should be a valid JSON object
+    And the JSON object should have a "name" field
+    And the JSON object should have a "version" field
+    And the JSON object should have a "global_flags" field
+    And the JSON object should have an "exit_codes" field
+    And the JSON "commands" array should have at least 1 entry
+    And each commands entry should have a "name" field
+    And each commands entry should have a "description" field
+    And no commands entry should have a "subcommands" field
+    And no commands entry should have an "args" field
+    And no commands entry should have a "flags" field
+    And the JSON payload size should be less than 4096 bytes
+    And the exit code should be 0
+
+  Scenario: AC16 - capabilities <command> --json returns full descriptor
+    When I run "agentchrome capabilities page --json"
+    Then stdout should be a valid JSON object
+    And the JSON "name" field should be "page"
+    And the JSON object should have a "description" field
+    And the JSON object should have a "subcommands" field
+    And the JSON object should have an "args" field
+    And the JSON object should have a "flags" field
+    And the JSON "subcommands" array should have at least 1 entry
+    And the exit code should be 0
+
+  Scenario: AC17 - Unknown command in capabilities is an error
+    When I run "agentchrome capabilities nonexistent-command"
+    Then stderr should contain "Unknown command"
+    And stderr should contain "nonexistent-command"
+    And stdout should be empty
+    And the exit code should be 1
+
+  Scenario: AC18 - capabilities --help documents the new positional
+    When I run "agentchrome capabilities --help"
+    Then stdout should contain "capabilities"
+    And stdout should contain "<command>"
+    And the exit code should be 0
+
+  Scenario: Progressive disclosure guard - examples listing contains no detail keys
+    When I run "agentchrome examples --json"
+    Then stdout should not contain "\"cmd\""
+    And the exit code should be 0
+
+  Scenario: Progressive disclosure guard - capabilities listing contains no detail keys
+    When I run "agentchrome capabilities --json"
+    Then stdout should not contain "\"subcommands\""
+    And stdout should not contain "\"args\":"
+    And stdout should not contain "\"flags\":"
+    And the exit code should be 0

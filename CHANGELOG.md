@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: `agentchrome examples --json` top-level listing now returns only `{command, description}` per entry; the nested `examples` array is removed from the listing payload. Fetch individual command-group examples via `agentchrome examples <group> --json` (unchanged). (#218)
+- **BREAKING**: `agentchrome capabilities --json` listing now returns `{name, description}` per command entry; `subcommands`, `args`, and `flags` are no longer present on listing entries. (#218)
+- **BREAKING**: The `--command <name>` flag on `capabilities` has been replaced by a positional: `agentchrome capabilities <command>` returns the full `CommandDescriptor` (subcommands, args, flags) for the named command. (#218)
+
+### Added
+
+- Add `agentchrome capabilities <command>` detail path that returns the full descriptor for a single command, complementing the lightweight listing. (#218)
+
 ## [1.35.0] - 2026-04-21
 
 ### Added
