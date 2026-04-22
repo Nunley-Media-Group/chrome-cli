@@ -402,12 +402,7 @@ async fn execute_exec(
 
     // Output
     if global.output.plain {
-        // Plain mode: print raw value
-        let text = match &value {
-            serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Null => "undefined".to_string(),
-            other => serde_json::to_string(other).unwrap_or_default(),
-        };
+        let text = format_plain_text(&value);
         crate::output::emit_plain(&text, &global.output)?;
         return Ok(());
     }
@@ -421,6 +416,19 @@ async fn execute_exec(
             "size_bytes": size,
         })
     })
+}
+
+/// Format a CDP result value for `--plain` stdout.
+///
+/// Empty JS strings fall through to JSON serialization so stdout carries the
+/// two-byte literal `""` instead of zero bytes — otherwise an empty-string
+/// result is indistinguishable from "no output".
+fn format_plain_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) if !s.is_empty() => s.clone(),
+        serde_json::Value::Null => "undefined".to_string(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
 }
 
 /// Execute a JavaScript expression via Runtime.evaluate.
@@ -567,11 +575,7 @@ async fn execute_in_worker(
     let _ = managed; // session kept alive for the duration
 
     if global.output.plain {
-        let text = match &value {
-            serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Null => "undefined".to_string(),
-            other => serde_json::to_string(other).unwrap_or_default(),
-        };
+        let text = format_plain_text(&value);
         crate::output::emit_plain(&text, &global.output)?;
         return Ok(());
     }
@@ -908,6 +912,51 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
         assert_eq!(json["result"], true);
         assert_eq!(json["type"], "boolean");
+    }
+
+    // =========================================================================
+    // format_plain_text — --plain mode formatting (issue #229)
+    // =========================================================================
+
+    #[test]
+    fn format_plain_text_empty_string_emits_two_byte_json_literal() {
+        let out = format_plain_text(&serde_json::Value::String(String::new()));
+        assert_eq!(out, "\"\"");
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn format_plain_text_non_empty_string_is_raw() {
+        let out = format_plain_text(&serde_json::Value::String("hello".to_string()));
+        assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn format_plain_text_number_is_json_serialized() {
+        assert_eq!(format_plain_text(&serde_json::json!(42)), "42");
+    }
+
+    #[test]
+    fn format_plain_text_boolean_is_json_serialized() {
+        assert_eq!(format_plain_text(&serde_json::json!(true)), "true");
+    }
+
+    #[test]
+    fn format_plain_text_null_value_emits_undefined() {
+        assert_eq!(format_plain_text(&serde_json::Value::Null), "undefined");
+    }
+
+    #[test]
+    fn format_plain_text_object_is_json_serialized() {
+        assert_eq!(
+            format_plain_text(&serde_json::json!({"k": "v"})),
+            r#"{"k":"v"}"#
+        );
+    }
+
+    #[test]
+    fn format_plain_text_array_is_json_serialized() {
+        assert_eq!(format_plain_text(&serde_json::json!([1, 2, 3])), "[1,2,3]");
     }
 
     #[test]

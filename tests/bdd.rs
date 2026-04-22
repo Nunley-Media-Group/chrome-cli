@@ -5082,6 +5082,15 @@ async fn main() {
         )
         .await;
 
+    // JS exec --plain empty-string fix (issue #229) — all scenarios require a running Chrome
+    // instance. The fix is validated by the `format_plain_text` unit tests in js.rs.
+    JsWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/229-fix-js-exec-plain-zero-byte-output-for-empty-strings.feature",
+            |_feature, _rule, _scenario| false, // All scenarios require running Chrome
+        )
+        .await;
+
     // Clap validation JSON stderr fix (issue #98) — all scenarios are testable without Chrome
     // (argument validation errors, help/version, not-implemented stub).
     CliWorld::run("tests/features/98-fix-clap-validation-json-stderr.feature").await;
