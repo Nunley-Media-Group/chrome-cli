@@ -8,6 +8,7 @@ use agentchrome::connection::{resolve_connection, resolve_target};
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{AuditArgs, AuditCommand, AuditLighthouseArgs, GlobalOpts};
+use crate::output;
 
 /// Valid Lighthouse category names.
 const VALID_CATEGORIES: &[&str] = &[
@@ -17,6 +18,46 @@ const VALID_CATEGORIES: &[&str] = &[
     "seo",
     "pwa",
 ];
+
+// =============================================================================
+// Summary builder (T006)
+// =============================================================================
+
+/// Build a domain-appropriate `summary` for `audit lighthouse` large-response objects.
+///
+/// Shape: `{categories: [{id, score}], total_issues, failing_audit_ids}`
+///
+/// `value` is the serialized scores object from `extract_scores`.
+/// Unmeasurable fields serialize as `null` per retrospective.md:58.
+fn summary_of_audit(value: &Value) -> Value {
+    let Some(obj) = value.as_object() else {
+        return serde_json::json!({
+            "categories": Value::Null,
+            "total_issues": Value::Null,
+            "failing_audit_ids": Value::Null,
+        });
+    };
+
+    // Build categories array from all keys that are not "url" and are numeric/null.
+    let mut categories = Vec::new();
+    for (key, score) in obj {
+        if key == "url" {
+            continue;
+        }
+        categories.push(serde_json::json!({
+            "id": key,
+            "score": score,
+        }));
+    }
+
+    // total_issues and failing_audit_ids are not available in the scores-only object;
+    // set to null per retrospective.md:58 (unmeasurable = null, not omitted).
+    serde_json::json!({
+        "categories": categories,
+        "total_issues": Value::Null,
+        "failing_audit_ids": Value::Null,
+    })
+}
 
 pub async fn execute_audit(global: &GlobalOpts, args: &AuditArgs) -> Result<(), AppError> {
     match &args.command {
@@ -101,13 +142,13 @@ async fn execute_lighthouse(
         write_report(path, &output.stdout)?;
     }
 
-    // 8. Print scores JSON to stdout.
-    let json = serde_json::to_string(&scores).map_err(|e| AppError {
-        message: format!("serialization error: {e}"),
-        code: ExitCode::GeneralError,
-        custom_json: None,
-    })?;
-    println!("{json}");
+    // 8. Print scores JSON to stdout via the large-response gate.
+    output::emit(
+        &scores,
+        &global.output,
+        "audit lighthouse",
+        summary_of_audit,
+    )?;
 
     Ok(())
 }
@@ -453,5 +494,60 @@ mod tests {
         for cat in VALID_CATEGORIES {
             assert!(obj[*cat].is_null(), "expected null for {cat}");
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // summary_of_audit tests (T006)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn summary_of_audit_happy_path_shape() {
+        let scores = json!({
+            "url": "https://example.com",
+            "performance": 0.95,
+            "accessibility": 0.88,
+        });
+        let summary = summary_of_audit(&scores);
+        let obj = summary.as_object().unwrap();
+        assert!(obj.contains_key("categories"), "must have categories key");
+        assert!(
+            obj.contains_key("total_issues"),
+            "must have total_issues key"
+        );
+        assert!(
+            obj.contains_key("failing_audit_ids"),
+            "must have failing_audit_ids key"
+        );
+        // total_issues and failing_audit_ids are null (not measurable from scores object)
+        assert!(obj["total_issues"].is_null());
+        assert!(obj["failing_audit_ids"].is_null());
+        let cats = obj["categories"].as_array().unwrap();
+        // Should have 2 category entries (url key is excluded)
+        assert_eq!(cats.len(), 2);
+        for cat in cats {
+            assert!(cat["id"].is_string());
+            // score can be a number (measurable) or null
+        }
+    }
+
+    #[test]
+    fn summary_of_audit_null_score_is_preserved() {
+        let scores = json!({
+            "url": "https://example.com",
+            "pwa": null,
+        });
+        let summary = summary_of_audit(&scores);
+        let cats = summary["categories"].as_array().unwrap();
+        assert_eq!(cats.len(), 1);
+        assert_eq!(cats[0]["id"], "pwa");
+        assert!(cats[0]["score"].is_null());
+    }
+
+    #[test]
+    fn summary_of_audit_non_object_returns_null_fields() {
+        let summary = summary_of_audit(&json!([1, 2, 3]));
+        assert!(summary["categories"].is_null());
+        assert!(summary["total_issues"].is_null());
+        assert!(summary["failing_audit_ids"].is_null());
     }
 }

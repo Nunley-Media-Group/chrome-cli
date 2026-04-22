@@ -6,8 +6,9 @@ use agentchrome::connection::ManagedSession;
 use agentchrome::error::AppError;
 
 use crate::cli::GlobalOpts;
+use crate::output;
 
-use super::{get_page_info, print_output, setup_session};
+use super::{get_page_info, setup_session};
 
 // =============================================================================
 // Output types
@@ -91,6 +92,38 @@ pub struct AnalyzeSummary {
     pub has_media: bool,
     pub has_shadow_dom: bool,
     pub has_frameworks: bool,
+}
+
+// =============================================================================
+// Summary builder
+// =============================================================================
+
+/// Build a domain-specific summary for the `page analyze` large-response gate.
+///
+/// Fields:
+/// - `iframe_count`: number of child iframes detected
+/// - `overlay_count`: number of overlay/blocker elements detected
+/// - `framework`: first detected framework string, or `null` when none
+/// - `has_shadow_dom`: whether any shadow roots are present
+pub fn summary_of_analyze(result: &AnalyzeResult) -> serde_json::Value {
+    #[allow(clippy::cast_possible_truncation)]
+    let iframe_count = result.iframes.len() as u64;
+    #[allow(clippy::cast_possible_truncation)]
+    let overlay_count = result.overlays.len() as u64;
+    let framework = result
+        .frameworks
+        .first()
+        .map_or(serde_json::Value::Null, |s| {
+            serde_json::Value::String(s.clone())
+        });
+    let has_shadow_dom = result.shadow_dom.present;
+
+    serde_json::json!({
+        "iframe_count": iframe_count,
+        "overlay_count": overlay_count,
+        "framework": framework,
+        "has_shadow_dom": has_shadow_dom,
+    })
 }
 
 // =============================================================================
@@ -549,7 +582,7 @@ pub async fn execute_analyze(global: &GlobalOpts, frame: Option<&str>) -> Result
         summary,
     };
 
-    print_output(&result, &global.output)?;
+    output::emit(&result, &global.output, "page analyze", summary_of_analyze)?;
     Ok(())
 }
 
@@ -786,5 +819,108 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(&interactive).unwrap();
         assert!(json["frames"]["1"].is_null()); // AC5, AC7
         assert_eq!(json["frames"]["2"], 5);
+    }
+
+    // =========================================================================
+    // summary_of_analyze
+    // =========================================================================
+
+    #[allow(clippy::cast_possible_truncation, clippy::bool_to_int_with_if)]
+    fn make_result(
+        iframes: usize,
+        overlays: usize,
+        frameworks: Vec<String>,
+        shadow_present: bool,
+    ) -> AnalyzeResult {
+        AnalyzeResult {
+            scope: "main".to_string(),
+            url: "https://example.com".to_string(),
+            title: "Test".to_string(),
+            iframes: (0..iframes)
+                .map(|i| IframeInfo {
+                    index: i as u32,
+                    url: format!("https://child{i}.example.com"),
+                    name: format!("frame{i}"),
+                    visible: true,
+                    width: 100,
+                    height: 100,
+                    cross_origin: false,
+                })
+                .collect(),
+            frameworks,
+            interactive_elements: InteractiveElements {
+                main: 0,
+                frames: HashMap::new(),
+            },
+            media: vec![],
+            overlays: (0..overlays)
+                .map(|i| OverlayInfo {
+                    selector: format!("div#{i}"),
+                    z_index: 999,
+                    width: 1280,
+                    height: 720,
+                    covers_interactive: false,
+                })
+                .collect(),
+            shadow_dom: ShadowDomInfo {
+                present: shadow_present,
+                host_count: if shadow_present { 1 } else { 0 },
+            },
+            summary: AnalyzeSummary {
+                iframe_count: iframes as u32,
+                interactive_element_count: 0,
+                has_overlays: overlays > 0,
+                has_media: false,
+                has_shadow_dom: shadow_present,
+                has_frameworks: false,
+            },
+        }
+    }
+
+    #[test]
+    fn summary_of_analyze_no_iframes_no_overlays_no_framework() {
+        let result = make_result(0, 0, vec![], false);
+        let summary = summary_of_analyze(&result);
+        assert_eq!(summary["iframe_count"], 0);
+        assert_eq!(summary["overlay_count"], 0);
+        assert!(summary["framework"].is_null());
+        assert_eq!(summary["has_shadow_dom"], false);
+    }
+
+    #[test]
+    fn summary_of_analyze_with_iframes_and_overlays() {
+        let result = make_result(3, 2, vec![], false);
+        let summary = summary_of_analyze(&result);
+        assert_eq!(summary["iframe_count"], 3);
+        assert_eq!(summary["overlay_count"], 2);
+        assert!(summary["framework"].is_null());
+    }
+
+    #[test]
+    fn summary_of_analyze_framework_is_first_detected() {
+        let result = make_result(
+            0,
+            0,
+            vec!["React".to_string(), "Angular".to_string()],
+            false,
+        );
+        let summary = summary_of_analyze(&result);
+        assert_eq!(summary["framework"], "React");
+    }
+
+    #[test]
+    fn summary_of_analyze_framework_null_when_empty() {
+        // Unmeasurable field must be null, not omitted
+        let result = make_result(0, 0, vec![], false);
+        let summary = summary_of_analyze(&result);
+        assert!(summary.as_object().unwrap().contains_key("framework"));
+        assert!(summary["framework"].is_null());
+    }
+
+    #[test]
+    fn summary_of_analyze_has_shadow_dom() {
+        let result = make_result(0, 0, vec![], true);
+        let summary = summary_of_analyze(&result);
+        assert_eq!(summary["has_shadow_dom"], true);
     }
 }

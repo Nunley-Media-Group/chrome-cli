@@ -6,7 +6,7 @@ use serde::Serialize;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{ConsoleArgs, ConsoleCommand, ConsoleFollowArgs, ConsoleReadArgs, GlobalOpts};
-use crate::output::{print_output, setup_session};
+use crate::output::{self, print_output, setup_session};
 
 // =============================================================================
 // Output types
@@ -311,6 +311,41 @@ fn is_error_level(msg_type: &str) -> bool {
 }
 
 // =============================================================================
+// Summary builder
+// =============================================================================
+
+/// Build a domain-specific summary for the `console read` large-response gate.
+///
+/// Fields:
+/// - `message_count`: total number of messages
+/// - `error_count`: messages with type `error` or `assert`
+/// - `warning_count`: messages with type `warn`
+/// - `levels_seen`: distinct message types present
+fn summary_of_read(messages: &[ConsoleMessage]) -> serde_json::Value {
+    #[allow(clippy::cast_possible_truncation)]
+    let message_count = messages.len() as u64;
+    let error_count = messages
+        .iter()
+        .filter(|m| m.msg_type == "error" || m.msg_type == "assert")
+        .count() as u64;
+    let warning_count = messages.iter().filter(|m| m.msg_type == "warn").count() as u64;
+    let mut levels: Vec<String> = messages
+        .iter()
+        .map(|m| m.msg_type.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    levels.sort_unstable();
+
+    serde_json::json!({
+        "message_count": message_count,
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "levels_seen": levels,
+    })
+}
+
+// =============================================================================
 // Dispatcher
 // =============================================================================
 
@@ -431,7 +466,12 @@ async fn execute_read(global: &GlobalOpts, args: &ConsoleReadArgs) -> Result<(),
         print_read_plain(&messages);
         return Ok(());
     }
-    print_output(&messages, &global.output)
+    output::emit(
+        &messages,
+        &global.output,
+        "console read",
+        |v: &Vec<ConsoleMessage>| summary_of_read(v.as_slice()),
+    )
 }
 
 // =============================================================================
@@ -1056,6 +1096,84 @@ mod tests {
             timestamp_to_iso(1_767_225_600_000.0),
             "2026-01-01T00:00:00.000Z"
         );
+    }
+
+    // =========================================================================
+    // summary_of_read
+    // =========================================================================
+
+    fn make_msg(id: usize, msg_type: &str) -> ConsoleMessage {
+        ConsoleMessage {
+            id,
+            msg_type: msg_type.to_string(),
+            text: format!("msg {id}"),
+            timestamp: String::new(),
+            url: String::new(),
+            line: 0,
+            column: 0,
+        }
+    }
+
+    #[test]
+    fn summary_of_read_empty() {
+        let messages: Vec<ConsoleMessage> = vec![];
+        let summary = summary_of_read(&messages);
+        assert_eq!(summary["message_count"], 0);
+        assert_eq!(summary["error_count"], 0);
+        assert_eq!(summary["warning_count"], 0);
+        assert!(summary["levels_seen"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn summary_of_read_counts_errors_and_warnings() {
+        let messages = vec![
+            make_msg(0, "log"),
+            make_msg(1, "error"),
+            make_msg(2, "warn"),
+            make_msg(3, "assert"),
+            make_msg(4, "log"),
+        ];
+        let summary = summary_of_read(&messages);
+        assert_eq!(summary["message_count"], 5);
+        assert_eq!(summary["error_count"], 2); // error + assert
+        assert_eq!(summary["warning_count"], 1);
+    }
+
+    #[test]
+    fn summary_of_read_levels_seen_deduped_and_sorted() {
+        let messages = vec![
+            make_msg(0, "log"),
+            make_msg(1, "error"),
+            make_msg(2, "warn"),
+            make_msg(3, "log"),
+        ];
+        let summary = summary_of_read(&messages);
+        let levels: Vec<&str> = summary["levels_seen"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(levels.len(), 3);
+        // Must be sorted
+        let mut sorted = levels.clone();
+        sorted.sort_unstable();
+        assert_eq!(levels, sorted);
+        assert!(levels.contains(&"log"));
+        assert!(levels.contains(&"error"));
+        assert!(levels.contains(&"warn"));
+    }
+
+    #[test]
+    fn summary_of_read_all_same_type() {
+        let messages: Vec<ConsoleMessage> = (0..10).map(|i| make_msg(i, "log")).collect();
+        let summary = summary_of_read(&messages);
+        assert_eq!(summary["message_count"], 10);
+        assert_eq!(summary["error_count"], 0);
+        assert_eq!(summary["warning_count"], 0);
+        let levels = summary["levels_seen"].as_array().unwrap();
+        assert_eq!(levels.len(), 1);
+        assert_eq!(levels[0], "log");
     }
 
     // =========================================================================

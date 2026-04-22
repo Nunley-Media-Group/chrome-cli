@@ -4,8 +4,9 @@ use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{GlobalOpts, PageFindArgs};
+use crate::output;
 
-use super::{get_page_info, print_output, setup_session};
+use super::{get_page_info, setup_session};
 
 // =============================================================================
 // Output types
@@ -29,6 +30,32 @@ struct BoundingBox {
     y: f64,
     width: f64,
     height: f64,
+}
+
+// =============================================================================
+// Summary builder
+// =============================================================================
+
+/// Build a domain-specific summary for the `page find` large-response gate.
+///
+/// Fields:
+/// - `match_count`: total number of matches returned
+/// - `roles_seen`: distinct role values across all matches
+fn summary_of_find(matches: &[FindMatch]) -> serde_json::Value {
+    #[allow(clippy::cast_possible_truncation)]
+    let match_count = matches.len() as u64;
+    let mut roles: Vec<String> = matches
+        .iter()
+        .map(|m| m.role.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    roles.sort_unstable();
+
+    serde_json::json!({
+        "match_count": match_count,
+        "roles_seen": roles,
+    })
 }
 
 // =============================================================================
@@ -356,7 +383,12 @@ pub async fn execute_find(
         return Ok(());
     }
 
-    print_output(&matches, &global.output)
+    output::emit(
+        &matches,
+        &global.output,
+        "page find",
+        |v: &Vec<FindMatch>| summary_of_find(v.as_slice()),
+    )
 }
 
 // =============================================================================
@@ -570,5 +602,77 @@ mod tests {
         };
         assign_uid_from_snapshot(&tree, &mut m);
         assert_eq!(m.uid.as_deref(), Some("s1"));
+    }
+
+    // =========================================================================
+    // summary_of_find
+    // =========================================================================
+
+    fn make_find_match(role: &str, name: &str) -> FindMatch {
+        FindMatch {
+            uid: None,
+            role: role.to_string(),
+            name: name.to_string(),
+            bounding_box: None,
+        }
+    }
+
+    #[test]
+    fn summary_of_find_empty_matches() {
+        let matches: Vec<FindMatch> = vec![];
+        let summary = summary_of_find(&matches);
+        assert_eq!(summary["match_count"], 0);
+        let roles = summary["roles_seen"].as_array().unwrap();
+        assert!(roles.is_empty());
+    }
+
+    #[test]
+    fn summary_of_find_counts_matches() {
+        let matches = vec![
+            make_find_match("button", "OK"),
+            make_find_match("button", "Cancel"),
+            make_find_match("link", "Home"),
+        ];
+        let summary = summary_of_find(&matches);
+        assert_eq!(summary["match_count"], 3);
+    }
+
+    #[test]
+    fn summary_of_find_deduplicates_roles() {
+        let matches = vec![
+            make_find_match("button", "OK"),
+            make_find_match("button", "Cancel"),
+            make_find_match("link", "Home"),
+        ];
+        let summary = summary_of_find(&matches);
+        let roles: Vec<&str> = summary["roles_seen"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(roles.len(), 2);
+        assert!(roles.contains(&"button"));
+        assert!(roles.contains(&"link"));
+    }
+
+    #[test]
+    fn summary_of_find_roles_sorted() {
+        let matches = vec![
+            make_find_match("link", "Home"),
+            make_find_match("button", "OK"),
+            make_find_match("heading", "Title"),
+        ];
+        let summary = summary_of_find(&matches);
+        let roles: Vec<&str> = summary["roles_seen"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        // Must be sorted
+        let mut sorted = roles.clone();
+        sorted.sort_unstable();
+        assert_eq!(roles, sorted);
     }
 }

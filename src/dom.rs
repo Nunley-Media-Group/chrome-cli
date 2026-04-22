@@ -10,7 +10,7 @@ use crate::cli::{
     DomArgs, DomCommand, DomGetAttributeArgs, DomGetStyleArgs, DomNodeIdArgs, DomSelectArgs,
     DomSetAttributeArgs, DomSetStyleArgs, DomSetTextArgs, DomTreeArgs, GlobalOpts,
 };
-use crate::output::{print_output, setup_session_with_interceptors as setup_session};
+use crate::output::{self, print_output, setup_session_with_interceptors as setup_session};
 use crate::snapshot;
 
 // =============================================================================
@@ -641,6 +641,91 @@ async fn find_in_shadow_dom(
     Ok(node_ids)
 }
 
+// =============================================================================
+// Summary builders (T006)
+// =============================================================================
+
+/// Build a domain-appropriate `summary` for `dom select` large-response objects.
+///
+/// Shape: `{match_count, first_match: {tag, role, uid}}`
+///
+/// `value` is the serialized `Vec<DomElement>` list.
+fn summary_of_select(value: &serde_json::Value) -> serde_json::Value {
+    let Some(items) = value.as_array() else {
+        return serde_json::json!({
+            "match_count": serde_json::Value::Null,
+            "first_match": serde_json::Value::Null,
+        });
+    };
+    let match_count = items.len();
+    let first_match = items.first().map(|el| {
+        serde_json::json!({
+            "tag": el["tag"],
+            "role": serde_json::Value::Null,
+            "uid": el["nodeId"],
+        })
+    });
+    serde_json::json!({
+        "match_count": match_count,
+        "first_match": first_match.unwrap_or(serde_json::Value::Null),
+    })
+}
+
+/// Build a domain-appropriate `summary` for `dom attributes` large-response objects.
+///
+/// Shape: `{attribute_count, keys_seen}`
+///
+/// `value` is the serialized `StyleResult` (all computed styles map).
+fn summary_of_attributes(value: &serde_json::Value) -> serde_json::Value {
+    // StyleResult serializes as `{"styles": {key: value, ...}}`
+    let styles_obj = value.get("styles").and_then(|s| s.as_object());
+    match styles_obj {
+        Some(styles) => {
+            let keys: Vec<serde_json::Value> = styles
+                .keys()
+                .map(|k| serde_json::Value::String(k.clone()))
+                .collect();
+            serde_json::json!({
+                "attribute_count": styles.len(),
+                "keys_seen": keys,
+            })
+        }
+        None => serde_json::json!({
+            "attribute_count": serde_json::Value::Null,
+            "keys_seen": serde_json::Value::Null,
+        }),
+    }
+}
+
+/// Build a domain-appropriate `summary` for `dom events` large-response objects.
+///
+/// Shape: `{listener_count, event_types}`
+///
+/// `value` is the serialized `EventListenersResult`.
+fn summary_of_events(value: &serde_json::Value) -> serde_json::Value {
+    let Some(listeners) = value.get("listeners").and_then(|l| l.as_array()) else {
+        return serde_json::json!({
+            "listener_count": serde_json::Value::Null,
+            "event_types": serde_json::Value::Null,
+        });
+    };
+    let listener_count = listeners.len();
+    // Collect unique event types
+    let mut seen = std::collections::HashSet::new();
+    for listener in listeners {
+        if let Some(t) = listener["type"].as_str() {
+            seen.insert(t.to_string());
+        }
+    }
+    let mut event_types: Vec<serde_json::Value> =
+        seen.into_iter().map(serde_json::Value::String).collect();
+    event_types.sort_by(|a, b| a.as_str().unwrap_or("").cmp(b.as_str().unwrap_or("")));
+    serde_json::json!({
+        "listener_count": listener_count,
+        "event_types": event_types,
+    })
+}
+
 /// Execute the `dom` subcommand group.
 pub async fn execute_dom(global: &GlobalOpts, args: &DomArgs) -> Result<(), AppError> {
     let frame = args.frame.as_deref();
@@ -829,7 +914,9 @@ async fn execute_select(
         return Ok(());
     }
 
-    print_output(&elements, &global.output)
+    output::emit(&elements, &global.output, "dom select", |v| {
+        summary_of_select(&serde_json::to_value(v).unwrap_or_default())
+    })
 }
 
 // =============================================================================
@@ -1322,7 +1409,9 @@ async fn execute_get_style(
     }
 
     let result = StyleResult { styles };
-    print_output(&result, &global.output)
+    output::emit(&result, &global.output, "dom attributes", |v| {
+        summary_of_attributes(&serde_json::to_value(v).unwrap_or_default())
+    })
 }
 
 // =============================================================================
@@ -1901,7 +1990,9 @@ async fn execute_events(
         return Ok(());
     }
 
-    print_output(&result, &global.output)
+    output::emit(&result, &global.output, "dom events", |v| {
+        summary_of_events(&serde_json::to_value(v).unwrap_or_default())
+    })
 }
 
 // =============================================================================
@@ -2444,5 +2535,94 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
         let listeners = json["listeners"].as_array().unwrap();
         assert!(listeners.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Summary builder tests (T006)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn summary_of_select_happy_path() {
+        let value = serde_json::json!([
+            {"nodeId": 1, "tag": "button", "attributes": {}, "textContent": "Click me"},
+            {"nodeId": 2, "tag": "a", "attributes": {}, "textContent": "Link"},
+        ]);
+        let summary = summary_of_select(&value);
+        assert_eq!(summary["match_count"], 2);
+        assert_eq!(summary["first_match"]["tag"], "button");
+        assert_eq!(summary["first_match"]["uid"], 1);
+        assert!(summary["first_match"]["role"].is_null());
+    }
+
+    #[test]
+    fn summary_of_select_empty_array() {
+        let value = serde_json::json!([]);
+        let summary = summary_of_select(&value);
+        assert_eq!(summary["match_count"], 0);
+        assert!(summary["first_match"].is_null());
+    }
+
+    #[test]
+    fn summary_of_select_non_array_returns_null() {
+        let summary = summary_of_select(&serde_json::json!({"not": "array"}));
+        assert!(summary["match_count"].is_null());
+        assert!(summary["first_match"].is_null());
+    }
+
+    #[test]
+    fn summary_of_attributes_happy_path() {
+        let value = serde_json::json!({
+            "styles": {
+                "color": "red",
+                "font-size": "16px",
+                "margin": "0px",
+            }
+        });
+        let summary = summary_of_attributes(&value);
+        assert_eq!(summary["attribute_count"], 3);
+        let keys = summary["keys_seen"].as_array().unwrap();
+        assert_eq!(keys.len(), 3);
+    }
+
+    #[test]
+    fn summary_of_attributes_missing_styles_key_returns_null() {
+        let summary = summary_of_attributes(&serde_json::json!({"other": "data"}));
+        assert!(summary["attribute_count"].is_null());
+        assert!(summary["keys_seen"].is_null());
+    }
+
+    #[test]
+    fn summary_of_events_happy_path() {
+        let value = serde_json::json!({
+            "listeners": [
+                {"type": "click", "useCapture": false, "once": false, "passive": false,
+                 "handler": {"description": "onclick", "scriptId": null, "lineNumber": null, "columnNumber": null}},
+                {"type": "mouseover", "useCapture": false, "once": false, "passive": false,
+                 "handler": {"description": "onmouseover", "scriptId": null, "lineNumber": null, "columnNumber": null}},
+                {"type": "click", "useCapture": true, "once": false, "passive": false,
+                 "handler": {"description": "onclick2", "scriptId": null, "lineNumber": null, "columnNumber": null}},
+            ]
+        });
+        let summary = summary_of_events(&value);
+        assert_eq!(summary["listener_count"], 3);
+        let event_types = summary["event_types"].as_array().unwrap();
+        // Should be unique: click, mouseover
+        assert_eq!(event_types.len(), 2);
+    }
+
+    #[test]
+    fn summary_of_events_empty_returns_zero() {
+        let value = serde_json::json!({"listeners": []});
+        let summary = summary_of_events(&value);
+        assert_eq!(summary["listener_count"], 0);
+        let types = summary["event_types"].as_array().unwrap();
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn summary_of_events_missing_listeners_returns_null() {
+        let summary = summary_of_events(&serde_json::json!({"other": "data"}));
+        assert!(summary["listener_count"].is_null());
+        assert!(summary["event_types"].is_null());
     }
 }
