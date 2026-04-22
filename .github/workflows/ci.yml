@@ -28,3 +28,6 @@ jobs:
 
       - name: Build
         run: cargo build
+
+      - name: Man page determinism
+        run: cargo xtask man && git diff --exit-code man/

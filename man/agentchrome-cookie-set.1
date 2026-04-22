@@ -1,0 +1,100 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH set 1  "set " 
+.SH NAME
+set \- Set a browser cookie
+.SH SYNOPSIS
+\fBset\fR [\fB\-\-domain\fR] [\fB\-\-path\fR] [\fB\-\-secure\fR] [\fB\-\-http\-only\fR] [\fB\-\-same\-site\fR] [\fB\-\-expires\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> <\fIVALUE\fR> 
+.SH DESCRIPTION
+Set a browser cookie with the given name and value. The \-\-domain flag is strongly recommended to scope the cookie correctly. Additional flags control path, security attributes, SameSite policy, and expiry time.
+.SH OPTIONS
+.TP
+\fB\-\-domain\fR \fI<DOMAIN>\fR
+Cookie domain (strongly recommended)
+.TP
+\fB\-\-path\fR \fI<PATH>\fR [default: /]
+Cookie path
+.TP
+\fB\-\-secure\fR
+Set cookie as Secure (HTTPS only)
+.TP
+\fB\-\-http\-only\fR
+Set cookie as HttpOnly (not accessible via JavaScript)
+.TP
+\fB\-\-same\-site\fR \fI<POLICY>\fR
+SameSite attribute: Strict, Lax, or None
+.TP
+\fB\-\-expires\fR \fI<EXPIRES>\fR
+Expiry as Unix timestamp (seconds since epoch)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fINAME\fR>
+Cookie name
+.TP
+<\fIVALUE\fR>
+Cookie value
+.SH EXTRA
+EXAMPLES:
+  # Set a basic cookie
+  agentchrome cookie set session_id abc123 \-\-domain example.com
+
+  # Set a secure, HttpOnly cookie
+  agentchrome cookie set token xyz \-\-domain example.com \-\-secure \-\-http\-only
+
+  # Set a cookie with SameSite and expiry
+  agentchrome cookie set prefs dark \-\-domain example.com \-\-same\-site Lax \-\-expires 1735689600
+.SH CAPABILITIES
+.PP
+Browser cookie management (list, set, delete, clear)
+.TP
+.B cookie list
+List cookies for the current page or all cookies
+.TP
+.B --domain
+Filter cookies by domain
+.TP
+.B --all
+List all cookies (not scoped to current URL)
+.TP
+.B cookie set
+Set a browser cookie
+.TP
+.B name
+Cookie name
+.TP
+.B value
+Cookie value
+.TP
+.B --domain
+Cookie domain (strongly recommended)
+.TP
+.B --path
+Cookie path
+.TP
+.B --secure
+Set cookie as Secure (HTTPS only)
+.TP
+.B --http-only
+Set cookie as HttpOnly (not accessible via JavaScript)
+.TP
+.B --same-site
+SameSite attribute: Strict, Lax, or None
+.TP
+.B --expires
+Expiry as Unix timestamp (seconds since epoch)
+.TP
+.B --url
+.TP
+.B cookie delete
+Delete a specific cookie by name
+.TP
+.B name
+Cookie name to delete
+.TP
+.B --domain
+Scope deletion to a specific domain
+.TP
+.B cookie clear
+Clear all cookies

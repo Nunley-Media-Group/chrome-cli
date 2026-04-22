@@ -1,0 +1,104 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH cookie 1  "cookie " 
+.SH NAME
+cookie \- Browser cookie management (list, set, delete, clear)
+.SH SYNOPSIS
+\fBcookie\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Manage browser cookies via the Chrome DevTools Protocol. List cookies for the current page or all cookies, set new cookies with optional flags, delete specific cookies by name, or clear all cookies. Provides full access to HttpOnly and Secure cookies that are not accessible via document.cookie.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+cookie\-list(1)
+List cookies for the current page or all cookies
+.TP
+cookie\-set(1)
+Set a browser cookie
+.TP
+cookie\-delete(1)
+Delete a specific cookie by name
+.TP
+cookie\-clear(1)
+Clear all cookies
+.TP
+cookie\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # List cookies for the current page
+  agentchrome cookie list
+
+  # List all cookies (not scoped to current URL)
+  agentchrome cookie list \-\-all
+
+  # List cookies filtered by domain
+  agentchrome cookie list \-\-domain example.com
+
+  # Set a cookie
+  agentchrome cookie set session_id abc123 \-\-domain example.com
+
+  # Set a secure, HttpOnly cookie with expiry
+  agentchrome cookie set token xyz \-\-domain example.com \-\-secure \-\-http\-only \-\-same\-site Strict \-\-expires 1735689600
+
+  # Delete a specific cookie
+  agentchrome cookie delete session_id \-\-domain example.com
+
+  # Clear all cookies
+  agentchrome cookie clear
+.SH CAPABILITIES
+.PP
+Browser cookie management (list, set, delete, clear)
+.TP
+.B cookie list
+List cookies for the current page or all cookies
+.TP
+.B --domain
+Filter cookies by domain
+.TP
+.B --all
+List all cookies (not scoped to current URL)
+.TP
+.B cookie set
+Set a browser cookie
+.TP
+.B name
+Cookie name
+.TP
+.B value
+Cookie value
+.TP
+.B --domain
+Cookie domain (strongly recommended)
+.TP
+.B --path
+Cookie path
+.TP
+.B --secure
+Set cookie as Secure (HTTPS only)
+.TP
+.B --http-only
+Set cookie as HttpOnly (not accessible via JavaScript)
+.TP
+.B --same-site
+SameSite attribute: Strict, Lax, or None
+.TP
+.B --expires
+Expiry as Unix timestamp (seconds since epoch)
+.TP
+.B --url
+.TP
+.B cookie delete
+Delete a specific cookie by name
+.TP
+.B name
+Cookie name to delete
+.TP
+.B --domain
+Scope deletion to a specific domain
+.TP
+.B cookie clear
+Clear all cookies

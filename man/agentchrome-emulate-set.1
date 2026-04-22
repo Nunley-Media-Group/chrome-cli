@@ -1,0 +1,147 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH set 1  "set " 
+.SH NAME
+set \- Apply one or more emulation overrides
+.SH SYNOPSIS
+\fBset\fR [\fB\-\-network\fR] [\fB\-\-cpu\fR] [\fB\-\-geolocation\fR] [\fB\-\-no\-geolocation\fR] [\fB\-\-user\-agent\fR] [\fB\-\-no\-user\-agent\fR] [\fB\-\-color\-scheme\fR] [\fB\-\-viewport\fR] [\fB\-\-device\-scale\fR] [\fB\-\-mobile\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Apply one or more device or network emulation overrides. Multiple overrides can be combined in a single command (e.g., viewport + network + user agent). Overrides persist until \*(Aqemulate reset\*(Aq is called or the browser is closed. Note: \-\-geolocation and \-\-no\-geolocation are mutually exclusive, as are \-\-user\-agent and \-\-no\-user\-agent.
+.SH OPTIONS
+.TP
+\fB\-\-network\fR \fI<NETWORK>\fR
+Network condition profile: offline, slow\-4g, 4g, 3g, none
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+offline: Fully offline (no network)
+.IP \(bu 2
+slow\-4g: Slow 4G (150ms latency, 1.6 Mbps down, 750 Kbps up)
+.IP \(bu 2
+4g: 4G (20ms latency, 4 Mbps down, 3 Mbps up)
+.IP \(bu 2
+3g: 3G (100ms latency, 750 Kbps down, 250 Kbps up)
+.IP \(bu 2
+none: No throttling (disable network emulation)
+.RE
+.TP
+\fB\-\-cpu\fR \fI<CPU>\fR
+CPU throttling rate (1 = no throttling, 2\-20 = slowdown factor)
+.TP
+\fB\-\-geolocation\fR \fI<GEOLOCATION>\fR
+Set geolocation override as LAT,LONG (e.g. 37.7749,\-122.4194; conflicts with \-\-no\-geolocation)
+.TP
+\fB\-\-no\-geolocation\fR
+Clear geolocation override (conflicts with \-\-geolocation)
+.TP
+\fB\-\-user\-agent\fR \fI<USER_AGENT>\fR
+Set custom user agent string (conflicts with \-\-no\-user\-agent)
+.TP
+\fB\-\-no\-user\-agent\fR
+Reset user agent to browser default (conflicts with \-\-user\-agent)
+.TP
+\fB\-\-color\-scheme\fR \fI<COLOR_SCHEME>\fR
+Force color scheme: dark, light, auto
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+dark: Force dark mode
+.IP \(bu 2
+light: Force light mode
+.IP \(bu 2
+auto: Reset to browser default
+.RE
+.TP
+\fB\-\-viewport\fR \fI<VIEWPORT>\fR
+Set viewport dimensions as WIDTHxHEIGHT (e.g. 375x667)
+.TP
+\fB\-\-device\-scale\fR \fI<DEVICE_SCALE>\fR
+Set device pixel ratio (e.g. 2.0)
+.TP
+\fB\-\-mobile\fR
+Emulate mobile device (touch events, mobile viewport)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Emulate a mobile device
+  agentchrome emulate set \-\-viewport 375x667 \-\-device\-scale 2 \-\-mobile
+
+  # Simulate slow network
+  agentchrome emulate set \-\-network 3g
+
+  # Set geolocation (San Francisco)
+  agentchrome emulate set \-\-geolocation 37.7749,\-122.4194
+
+  # Force dark mode with custom user agent
+  agentchrome emulate set \-\-color\-scheme dark \-\-user\-agent "CustomBot/1.0"
+
+  # Throttle CPU (4x slowdown)
+  agentchrome emulate set \-\-cpu 4
+.SH CAPABILITIES
+.PP
+Device and network emulation
+.TP
+.B emulate set
+Apply one or more emulation overrides
+.TP
+.B --network
+Network condition profile: offline, slow-4g, 4g, 3g, none
+.TP
+.B --cpu
+CPU throttling rate (1 = no throttling, 2-20 = slowdown factor)
+.TP
+.B --geolocation
+Set geolocation override as LAT,LONG (e.g. 37.7749,-122.4194; conflicts with --no-geolocation)
+.TP
+.B --no-geolocation
+Clear geolocation override (conflicts with --geolocation)
+.TP
+.B --user-agent
+Set custom user agent string (conflicts with --no-user-agent)
+.TP
+.B --no-user-agent
+Reset user agent to browser default (conflicts with --user-agent)
+.TP
+.B --color-scheme
+Force color scheme: dark, light, auto
+.TP
+.B --viewport
+Set viewport dimensions as WIDTHxHEIGHT (e.g. 375x667)
+.TP
+.B --device-scale
+Set device pixel ratio (e.g. 2.0)
+.TP
+.B --mobile
+Emulate mobile device (touch events, mobile viewport)
+.TP
+.B emulate reset
+Clear all emulation overrides
+.TP
+.B emulate status
+Show current emulation settings
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome emulate set --viewport 375x667 --device-scale 2 --mobile\`
+Emulate a mobile device
+.TP
+.B \`agentchrome emulate set --network 3g\`
+Simulate slow 3G network
+.TP
+.B \`agentchrome emulate set --color-scheme dark\`
+Force dark mode
+.TP
+.B \`agentchrome emulate status\`
+Check current emulation settings
+.TP
+.B \`agentchrome emulate reset\`
+Clear all emulation overrides

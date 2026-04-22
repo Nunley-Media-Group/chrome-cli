@@ -1,0 +1,150 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH form 1  "form " 
+.SH NAME
+form \- Form input and submission
+.SH SYNOPSIS
+\fBform\fR [\fB\-\-frame\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Fill in form fields, select dropdown options, toggle checkboxes, and clear fields. Supports targeting fields by UID (from accessibility snapshot) or CSS selector (prefixed with \*(Aqcss:\*(Aq). Run \*(Aqpage snapshot\*(Aq first to discover field UIDs.
+.SH OPTIONS
+.TP
+\fB\-\-frame\fR \fI<FRAME>\fR
+Target frame by index, path (1/0), or \*(Aqauto\*(Aq
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+form\-fill(1)
+Fill a form field by UID or CSS selector
+.TP
+form\-fill\-many(1)
+Fill multiple form fields at once from JSON
+.TP
+form\-clear(1)
+Clear a form field\*(Aqs value
+.TP
+form\-upload(1)
+Upload files to a file input element
+.TP
+form\-submit(1)
+Submit a form programmatically
+.TP
+form\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # Fill a field by UID (from page snapshot)
+  agentchrome form fill s5 "hello@example.com"
+
+  # Fill by CSS selector
+  agentchrome form fill css:#email "user@example.com"
+
+  # Fill multiple fields at once
+  agentchrome form fill\-many \*(Aq[{"uid":"s5","value":"Alice"},{"uid":"s7","value":"alice@example.com"}]\*(Aq
+
+  # Clear a field
+  agentchrome form clear s5
+
+  # Upload a file
+  agentchrome form upload s10 ./photo.jpg
+.SH CAPABILITIES
+.PP
+Form input and submission
+.TP
+.B form fill
+Fill a form field by UID or CSS selector
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#email')
+.TP
+.B value
+Value to set on the form field
+.TP
+.B --confirm-key
+Key to confirm combobox selection (default: Enter)
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form fill-many
+Fill multiple form fields at once from JSON
+.TP
+.B input
+Inline JSON array of {uid, value} objects
+.TP
+.B --file
+Read JSON from a file instead of inline argument
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form clear
+Clear a form field's value
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#email')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form upload
+Upload files to a file input element
+.TP
+.B target
+Target file input element (UID like 's5' or CSS selector like 'css:#file-input')
+.TP
+.B files
+File paths to upload
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form submit
+Submit a form programmatically
+.TP
+.B target
+Target element (UID like 's3' or CSS selector like 'css:#login-form')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome form fill s5 "hello@example.com"\`
+Fill a form field by UID
+.TP
+.B \`agentchrome form fill css:#email "user@example.com"\`
+Fill a form field by CSS selector
+.TP
+.B \`agentchrome form clear s5\`
+Clear a form field
+.TP
+.B \`agentchrome form upload s10 ./photo.jpg\`
+Upload a file to a file input element
+.TP
+.B \`agentchrome form fill s5 "Acme Corp"\`
+Fill an ARIA combobox field (auto click-type-confirm)
+.TP
+.B \`agentchrome form fill --confirm-key Tab s5 "Acme Corp"\`
+Fill combobox with custom confirmation key
+.TP
+.B \`agentchrome form --frame 1 fill s2 "value"\`
+Fill a form field inside an iframe

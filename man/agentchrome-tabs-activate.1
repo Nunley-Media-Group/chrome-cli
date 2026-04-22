@@ -1,0 +1,79 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH activate 1  "activate " 
+.SH NAME
+activate \- Activate (focus) a tab
+.SH SYNOPSIS
+\fBactivate\fR [\fB\-\-quiet\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> 
+.SH DESCRIPTION
+Activate (bring to front) a specific browser tab by its ID. The tab becomes the active target for subsequent commands. Returns JSON confirming the activated tab.
+.SH OPTIONS
+.TP
+\fB\-\-quiet\fR
+Suppress output after activation
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fITARGET\fR>
+Tab ID or index to activate
+.SH EXTRA
+EXAMPLES:
+  # Activate a tab by ID
+  agentchrome tabs activate ABC123
+
+  # Activate silently
+  agentchrome tabs activate ABC123 \-\-quiet
+.SH CAPABILITIES
+.PP
+Tab management (list, create, close, activate)
+.TP
+.B tabs list
+List open tabs
+.TP
+.B --all
+Include internal Chrome pages (chrome://, chrome-extension://)
+.TP
+.B tabs create
+Create a new tab
+.TP
+.B url
+URL to open (defaults to about:blank)
+.TP
+.B --background
+Open the tab in the background without activating it
+.TP
+.B tabs close
+Close one or more tabs
+.TP
+.B targets
+Tab ID(s) or index(es) to close
+.TP
+.B --tab
+.TP
+.B tabs activate
+Activate (focus) a tab
+.TP
+.B target
+Tab ID or index to activate
+.TP
+.B --quiet
+Suppress output after activation
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome tabs list\`
+List all open tabs
+.TP
+.B \`agentchrome tabs create https://example.com\`
+Open a new tab with a URL
+.TP
+.B \`agentchrome tabs close ABC123\`
+Close a tab by its ID
+.TP
+.B \`agentchrome tabs activate ABC123\`
+Activate (focus) a tab by its ID
+.TP
+.B \`agentchrome tabs list --all\`
+List all tabs including internal Chrome pages

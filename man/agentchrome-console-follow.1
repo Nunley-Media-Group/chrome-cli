@@ -1,0 +1,97 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH follow 1  "follow " 
+.SH NAME
+follow \- Stream console messages in real\-time (tail \-f style)
+.SH SYNOPSIS
+\fBfollow\fR [\fB\-\-type\fR] [\fB\-\-errors\-only\fR] [\fB\-\-timeout\fR] [\fB\-\-fail\-on\-error\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Stream new console messages in real time as they are logged, similar to \*(Aqtail \-f\*(Aq. Each message is printed as a JSON line. Use \-\-timeout to auto\-exit after a specified duration. Filter by type or use \-\-errors\-only to stream only error and assert messages.
+.PP
+By default, the command monitors output and exits 0 when the timeout elapses or Ctrl+C is pressed, regardless of log levels observed. Pass \-\-fail\-on\-error to turn the stream into a CI assertion: if any error\-level message is observed during the window, the command exits 1 with a JSON error on stderr ({"error":"Error\-level console messages were seen","code":1}).
+.SH OPTIONS
+.TP
+\fB\-\-type\fR \fI<TYPES>\fR
+Filter by message type (comma\-separated: log,error,warn,info,debug,dir,table,trace,assert,count,timeEnd)
+.TP
+\fB\-\-errors\-only\fR
+Show only error and assert messages (shorthand for \-\-type error,assert)
+.TP
+\fB\-\-timeout\fR \fI<TIMEOUT>\fR
+Auto\-exit after the specified number of milliseconds
+.TP
+\fB\-\-fail\-on\-error\fR
+Exit with code 1 if any error\-level console message is observed during the window
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Stream all console output (exit 0 on timeout / Ctrl+C)
+  agentchrome console follow
+
+  # Stream errors only for 10 seconds (monitoring — exit 0 even if errors are seen)
+  agentchrome console follow \-\-errors\-only \-\-timeout 10000
+
+  # Stream specific message types
+  agentchrome console follow \-\-type log,warn
+
+  # CI assertion — exit 1 if any console.error is observed during the window
+  agentchrome console follow \-\-timeout 10000 \-\-fail\-on\-error
+.SH CAPABILITIES
+.PP
+Console message reading and monitoring
+.TP
+.B console read
+List console messages or get details of a specific message
+.TP
+.B msg_id
+Message ID to get detailed information about a specific message
+.TP
+.B --type
+Filter by message type (comma-separated: log,error,warn,info,debug,dir,table,trace,assert,count,timeEnd)
+.TP
+.B --errors-only
+Show only error and assert messages (shorthand for --type error,assert)
+.TP
+.B --limit
+Maximum number of messages to return
+.TP
+.B --page
+Pagination page number (0-based)
+.TP
+.B --include-preserved
+Include messages from previous navigations
+.TP
+.B console follow
+Stream console messages in real-time (tail -f style)
+.TP
+.B --type
+Filter by message type (comma-separated: log,error,warn,info,debug,dir,table,trace,assert,count,timeEnd)
+.TP
+.B --errors-only
+Show only error and assert messages (shorthand for --type error,assert)
+.TP
+.B --timeout
+Auto-exit after the specified number of milliseconds
+.TP
+.B --fail-on-error
+Exit with code 1 if any error-level console message is observed during the window
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome console read\`
+Read recent console messages
+.TP
+.B \`agentchrome console read --errors-only\`
+Show only error messages
+.TP
+.B \`agentchrome console follow\`
+Stream console messages in real time
+.TP
+.B \`agentchrome console follow --errors-only --timeout 10000\`
+Stream errors for 10 seconds
+.TP
+.B \`agentchrome console follow --timeout 10000 --fail-on-error\`
+CI assertion: exit 1 if any console.error is seen within 10s

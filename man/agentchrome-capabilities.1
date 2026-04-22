@@ -1,0 +1,47 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH capabilities 1  "capabilities " 
+.SH NAME
+capabilities \- Output a machine\-readable manifest of all CLI capabilities
+.SH SYNOPSIS
+\fBcapabilities\fR [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fICOMMAND\fR] 
+.SH DESCRIPTION
+Output a machine\-readable manifest of agentchrome CLI capabilities. Without arguments, returns a lightweight listing (name + description per command) for cheap discovery. With a command name, returns the full detail descriptor for that command — subcommands, args, flags, types. The manifest is generated at runtime from the clap command tree, so it is always in sync with the binary.
+.SH OPTIONS
+.TP
+\fB\-\-compact\fR
+Minimal output: command names and descriptions only
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+[\fICOMMAND\fR]
+Command name to show the full descriptor for (omit for the summary listing). Run `agentchrome capabilities` to list valid names
+.SH EXTRA
+EXAMPLES:
+  # Summary listing of all commands (progressive disclosure)
+  agentchrome capabilities
+
+  # Summary listing as JSON
+  agentchrome capabilities \-\-json
+
+  # Full detail for one command
+  agentchrome capabilities page
+
+  # Full detail for one command, as JSON
+  agentchrome capabilities page \-\-json
+
+  # Pretty\-printed for readability
+  agentchrome capabilities \-\-pretty
+.SH CAPABILITIES
+.PP
+Output a machine-readable manifest of all CLI capabilities
+.TP
+.B capabilities <COMMAND>
+Output a machine-readable manifest of all CLI capabilities
+.TP
+.B command
+Command name to show the full descriptor for (omit for the summary listing). Run `agentchrome capabilities` to list valid names
+.TP
+.B --compact
+Minimal output: command names and descriptions only

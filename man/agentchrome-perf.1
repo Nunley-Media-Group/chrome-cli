@@ -1,0 +1,87 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH perf 1  "perf " 
+.SH NAME
+perf \- Performance tracing and metrics
+.SH SYNOPSIS
+\fBperf\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Collect performance metrics, capture trace files, measure page load timing, and analyze runtime performance. Outputs metrics as structured JSON for analysis.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+perf\-record(1)
+Record a performance trace (long\-running, stops on Ctrl+C or \-\-duration)
+.TP
+perf\-analyze(1)
+Analyze a specific performance insight from a trace
+.TP
+perf\-vitals(1)
+Quick Core Web Vitals measurement
+.TP
+perf\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # Quick Core Web Vitals measurement
+  agentchrome perf vitals
+
+  # Record a trace until Ctrl+C
+  agentchrome perf record
+
+  # Record a trace for 5 seconds
+  agentchrome perf record \-\-duration 5000
+
+  # Record with page reload
+  agentchrome perf record \-\-reload \-\-duration 5000
+
+  # Analyze a trace for render\-blocking resources
+  agentchrome perf analyze RenderBlocking \-\-trace\-file trace.json
+.SH CAPABILITIES
+.PP
+Performance tracing and metrics
+.TP
+.B perf record
+Record a performance trace (long-running, stops on Ctrl+C or --duration)
+.TP
+.B --reload
+Reload the page before recording
+.TP
+.B --duration
+Auto-stop after this many milliseconds
+.TP
+.B --file
+Path to save the trace file (default: auto-generated)
+.TP
+.B perf analyze
+Analyze a specific performance insight from a trace
+.TP
+.B insight
+Insight to analyze: DocumentLatency, LCPBreakdown, RenderBlocking, LongTasks
+.TP
+.B --trace-file
+Path to a previously saved trace JSON file
+.TP
+.B perf vitals
+Quick Core Web Vitals measurement
+.TP
+.B --file
+Path to save the trace file (default: auto-generated temp)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome perf vitals\`
+Quick Core Web Vitals measurement
+.TP
+.B \`agentchrome perf record --duration 5000\`
+Record a trace for 5 seconds
+.TP
+.B \`agentchrome perf record --reload --duration 5000\`
+Record a trace with page reload
+.TP
+.B \`agentchrome perf analyze RenderBlocking --trace-file trace.json\`
+Analyze render-blocking resources from a trace

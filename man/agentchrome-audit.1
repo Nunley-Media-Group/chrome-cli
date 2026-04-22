@@ -1,0 +1,51 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH audit 1  "audit " 
+.SH NAME
+audit \- Run audits against the current page (requires lighthouse CLI — see \*(Aqaudit lighthouse \-\-help\*(Aq)
+.SH SYNOPSIS
+\fBaudit\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Run external audits against the current browser page. Currently supports Google Lighthouse for measuring performance, accessibility, SEO, best practices, and PWA scores. Connects Lighthouse to the managed Chrome session via the CDP port and returns structured JSON category scores on stdout. Requires the `lighthouse` CLI (see \*(Aqaudit lighthouse \-\-help\*(Aq for installation).
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+audit\-lighthouse(1)
+Run a Google Lighthouse audit
+.TP
+audit\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # Run a full Lighthouse audit on the current page
+  agentchrome audit lighthouse
+
+  # Audit a specific URL
+  agentchrome audit lighthouse https://example.com
+
+  # Only measure performance and accessibility
+  agentchrome audit lighthouse \-\-only performance,accessibility
+
+  # Save the full Lighthouse report to a file
+  agentchrome audit lighthouse \-\-output\-file report.json
+.SH CAPABILITIES
+.PP
+Run audits against the current page (requires lighthouse CLI — see 'audit lighthouse --help')
+.TP
+.B audit lighthouse
+Run a Google Lighthouse audit
+.TP
+.B url
+URL to audit (defaults to the active page URL)
+.TP
+.B --only
+Comma-separated list of categories to measure (e.g. performance,accessibility)
+.TP
+.B --output-file
+Save the full Lighthouse JSON report to this file
+.TP
+.B --install-prereqs
+Install the `lighthouse` prerequisite via `npm install -g lighthouse` (no prompt — the flag is the consent)

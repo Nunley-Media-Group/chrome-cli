@@ -1,0 +1,79 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH delete 1  "delete " 
+.SH NAME
+delete \- Delete a specific cookie by name
+.SH SYNOPSIS
+\fBdelete\fR [\fB\-\-domain\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> 
+.SH DESCRIPTION
+Delete a cookie by name. Use \-\-domain to scope the deletion to a specific domain when multiple cookies share the same name across different domains.
+.SH OPTIONS
+.TP
+\fB\-\-domain\fR \fI<DOMAIN>\fR
+Scope deletion to a specific domain
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fINAME\fR>
+Cookie name to delete
+.SH EXTRA
+EXAMPLES:
+  # Delete a cookie by name
+  agentchrome cookie delete session_id
+
+  # Delete a cookie scoped to a specific domain
+  agentchrome cookie delete session_id \-\-domain example.com
+.SH CAPABILITIES
+.PP
+Browser cookie management (list, set, delete, clear)
+.TP
+.B cookie list
+List cookies for the current page or all cookies
+.TP
+.B --domain
+Filter cookies by domain
+.TP
+.B --all
+List all cookies (not scoped to current URL)
+.TP
+.B cookie set
+Set a browser cookie
+.TP
+.B name
+Cookie name
+.TP
+.B value
+Cookie value
+.TP
+.B --domain
+Cookie domain (strongly recommended)
+.TP
+.B --path
+Cookie path
+.TP
+.B --secure
+Set cookie as Secure (HTTPS only)
+.TP
+.B --http-only
+Set cookie as HttpOnly (not accessible via JavaScript)
+.TP
+.B --same-site
+SameSite attribute: Strict, Lax, or None
+.TP
+.B --expires
+Expiry as Unix timestamp (seconds since epoch)
+.TP
+.B --url
+.TP
+.B cookie delete
+Delete a specific cookie by name
+.TP
+.B name
+Cookie name to delete
+.TP
+.B --domain
+Scope deletion to a specific domain
+.TP
+.B cookie clear
+Clear all cookies

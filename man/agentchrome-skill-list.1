@@ -1,0 +1,59 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH list 1  "list " 
+.SH NAME
+list \- List supported agentic tools and installation status
+.SH SYNOPSIS
+\fBlist\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+List all supported agentic coding tools with their detection method, install path, and whether a skill is currently installed.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # List all tools
+  agentchrome skill list
+.SH CAPABILITIES
+.PP
+Agentic tool skill installation and management
+.TP
+.B skill install
+Install the agentchrome skill for an agentic coding tool
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill uninstall
+Remove a previously installed agentchrome skill
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill update
+Update an installed skill to the current version
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill list
+List supported agentic tools and installation status
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome skill install\`
+Auto-detect agentic tool and install skill
+.TP
+.B \`agentchrome skill install --tool cursor\`
+Install skill for a specific tool
+.TP
+.B \`agentchrome skill list\`
+List supported tools and installation status
+.TP
+.B \`agentchrome skill update --tool claude-code\`
+Update installed skill to current version
+.TP
+.B \`agentchrome skill uninstall --tool aider\`
+Remove an installed skill

@@ -1,0 +1,128 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH list 1  "list " 
+.SH NAME
+list \- List network requests or get details of a specific request
+.SH SYNOPSIS
+\fBlist\fR [\fB\-\-type\fR] [\fB\-\-url\fR] [\fB\-\-status\fR] [\fB\-\-method\fR] [\fB\-\-limit\fR] [\fB\-\-page\fR] [\fB\-\-include\-preserved\fR] [\fB\-\-frame\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+List captured network requests from the current page. Returns JSON with each request\*(Aqs ID, method, URL, status, resource type, and timing. Filter by resource type, URL pattern, HTTP status code, or HTTP method. Use \-\-limit and \-\-page for pagination.
+.SH OPTIONS
+.TP
+\fB\-\-type\fR \fI<TYPES>\fR
+Filter by resource type (comma\-separated: document,stylesheet,image,media,font,script,xhr,fetch,websocket,manifest,other)
+.TP
+\fB\-\-url\fR \fI<URL>\fR
+Filter by URL pattern (substring match)
+.TP
+\fB\-\-status\fR \fI<STATUS>\fR
+Filter by HTTP status code (exact like 404 or wildcard like 4xx)
+.TP
+\fB\-\-method\fR \fI<METHOD>\fR
+Filter by HTTP method (GET, POST, etc.)
+.TP
+\fB\-\-limit\fR \fI<LIMIT>\fR [default: 50]
+Maximum number of requests to return
+.TP
+\fB\-\-page\fR \fI<PAGE>\fR [default: 0]
+Pagination page number (0\-based)
+.TP
+\fB\-\-include\-preserved\fR
+Include requests from previous navigations
+.TP
+\fB\-\-frame\fR \fI<FRAME>\fR
+Filter network requests by originating frame index
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # List recent requests
+  agentchrome network list
+
+  # Filter by resource type
+  agentchrome network list \-\-type xhr,fetch
+
+  # Filter by URL pattern
+  agentchrome network list \-\-url api.example.com
+
+  # Filter by status code
+  agentchrome network list \-\-status 4xx
+.SH CAPABILITIES
+.PP
+Network request monitoring and interception
+.TP
+.B network list
+List network requests or get details of a specific request
+.TP
+.B --type
+Filter by resource type (comma-separated: document,stylesheet,image,media,font,script,xhr,fetch,websocket,manifest,other)
+.TP
+.B --url
+Filter by URL pattern (substring match)
+.TP
+.B --status
+Filter by HTTP status code (exact like 404 or wildcard like 4xx)
+.TP
+.B --method
+Filter by HTTP method (GET, POST, etc.)
+.TP
+.B --limit
+Maximum number of requests to return
+.TP
+.B --page
+Pagination page number (0-based)
+.TP
+.B --include-preserved
+Include requests from previous navigations
+.TP
+.B --frame
+Filter network requests by originating frame index
+.TP
+.B network get
+Get detailed information about a specific network request
+.TP
+.B req_id
+Numeric request ID to inspect
+.TP
+.B --save-request
+Save request body to a file
+.TP
+.B --save-response
+Save response body to a file
+.TP
+.B network follow
+Stream network requests in real-time (tail -f style)
+.TP
+.B --type
+Filter by resource type (comma-separated: document,stylesheet,image,media,font,script,xhr,fetch,websocket,manifest,other)
+.TP
+.B --url
+Filter by URL pattern (substring match)
+.TP
+.B --method
+Filter by HTTP method (GET, POST, etc.)
+.TP
+.B --timeout
+Auto-exit after the specified number of milliseconds
+.TP
+.B --verbose
+Include request and response headers in stream output
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome network list\`
+List recent network requests
+.TP
+.B \`agentchrome network list --type xhr,fetch\`
+Filter requests by resource type
+.TP
+.B \`agentchrome network get 42\`
+Get details of a specific request by ID
+.TP
+.B \`agentchrome network follow --url api.example.com\`
+Stream network requests matching a URL pattern
+.TP
+.B \`agentchrome network list --frame 1\`
+List network requests from a specific frame

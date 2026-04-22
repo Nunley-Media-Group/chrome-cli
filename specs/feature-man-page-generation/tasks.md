@@ -1,9 +1,16 @@
 # Tasks: Man Page Generation
 
-**Issue**: #27
-**Date**: 2026-02-14
+**Issues**: #27, #232
+**Date**: 2026-04-22
 **Status**: Planning
 **Author**: Claude (writing-specs)
+
+## Change History
+
+| Issue | Date | Summary |
+|-------|------|---------|
+| #27 | 2026-02-14 | Initial task breakdown (T001–T008) |
+| #232 | 2026-04-22 | Appended enrichment phase (T012–T017): library accessors, xtask enrichment pipeline, determinism CI guard, BDD coverage |
 
 ---
 
@@ -15,7 +22,8 @@
 | Backend | 2 | [ ] |
 | Integration | 1 | [ ] |
 | Testing | 2 | [ ] |
-| **Total** | **8** | |
+| Enrichment (Issue #232) | 6 | [ ] |
+| **Total** | **14** | |
 
 ---
 
@@ -231,7 +239,101 @@ T002 (xtask workspace) ──────▶ T005 (xtask man cmd) ────�
                                                              │
                                                              ▼
                                                     T008 (step definitions)
+                                                             │
+                                                             ▼
+                                                    T012 (lib accessors)
+                                                             │
+                                                             ▼
+                                                    T013 (roff emitter) ──▶ T014 (xtask wiring)
+                                                                                     │
+                                                             T015 (runtime parity) ◀─┤
+                                                                                     │
+                                                             T016 (CI determinism)   │
+                                                                     │               │
+                                                                     └──▶ T017 (BDD coverage)
 ```
+
+<!-- Added by issue #232 -->
+
+## Phase 5: Enrichment (Issue #232)
+
+### T012: Expose capabilities and examples data to xtask via library accessors
+
+**File(s)**: `src/lib.rs`, `src/capabilities.rs`, `src/examples/mod.rs`
+**Type**: Modify
+**Depends**: T006
+**Acceptance**:
+- [ ] `pub fn build_manifest() -> CapabilitiesManifest` (or equivalent accessor) is reachable as `agentchrome::capabilities::build_manifest`
+- [ ] `pub fn all_examples() -> Vec<CommandGroupSummary>` is reachable as `agentchrome::examples::all_examples`
+- [ ] `CapabilitiesManifest`, `CommandDescriptor`, `SubcommandDescriptor`, `ArgDescriptor`, `FlagDescriptor`, `ExitCodeDescriptor`, `CommandGroupSummary`, `ExampleEntry` types are re-exported at the crate root (or a stable sub-path xtask can import)
+- [ ] `cargo check -p xtask` compiles against the new imports
+- [ ] No private-module warnings; widen visibility only for the types named above
+
+**Notes**: If a type must stay internal, add a thin view struct in `lib.rs` that xtask consumes instead of widening internal APIs.
+
+### T013: Implement deterministic roff emitter for CAPABILITIES and EXAMPLES sections
+
+**File(s)**: `xtask/src/enrich.rs` (new), `xtask/src/main.rs`
+**Type**: Create
+**Depends**: T012
+**Acceptance**:
+- [ ] `enrich_for(cmd_name: &str, manifest: &CapabilitiesManifest, examples: &[CommandGroupSummary]) -> String` returns roff-formatted text for the CAPABILITIES + EXAMPLES sections
+- [ ] Emits `.SH CAPABILITIES` with purpose / inputs / flags / exit codes sourced from the manifest entry whose name matches `cmd_name`
+- [ ] Emits `.SH EXAMPLES` containing every `ExampleEntry` (cmd + description) for the matching group
+- [ ] Iterates input `Vec`s in declared order — no `HashMap` walks, no `sort_unstable`
+- [ ] Returns empty string (not an error) when no matching entry exists, so top-level and leaf subcommands without enrichment data pass through cleanly
+- [ ] Unit tests cover: (a) a command present in both sources, (b) a command present only in examples, (c) a command present only in capabilities, (d) a command absent from both
+
+**Notes**: Keep roff emission manual and minimal — `.SH`, `.TP`, `.PP`, `.B`. Don't pull in a roff DSL crate; determinism risk is not worth the dependency.
+
+### T014: Wire enrichment into `generate_man_pages()` in xtask
+
+**File(s)**: `xtask/src/main.rs`
+**Type**: Modify
+**Depends**: T013
+**Acceptance**:
+- [ ] `render_man_page()` appends the output of `enrich::enrich_for(name, &manifest, &examples)` to the `buf` returned by `clap_mangen::Man::render`
+- [ ] Manifest and examples are built once at the top of `generate_man_pages()` and passed by reference into recursion
+- [ ] `clap_mangen::Man::date("")` (or the equivalent API) is used to suppress build-date drift if the default emits one
+- [ ] `cargo xtask man` runs end-to-end and produces enriched `.1` files in `man/`
+- [ ] `man -l man/agentchrome-dialog.1` (or equivalent on macOS: `man ./man/agentchrome-dialog.1`) renders a CAPABILITIES section and an EXAMPLES section showing every entry from `examples dialog`
+
+### T015: Runtime parity — `agentchrome man <cmd>` shows the same enrichment
+
+**File(s)**: `src/man.rs` (or wherever `execute_man` lives), `src/lib.rs`
+**Type**: Modify
+**Depends**: T013, T014
+**Acceptance**:
+- [ ] Decide Open Question O1 in design.md: either (a) runtime calls the shared enrichment helper so output matches the packaged file, or (b) runtime reads the packaged `.1` file
+- [ ] Document the decision inline with a one-line comment at the call site (no long rationale — the why lives in design.md)
+- [ ] `agentchrome man dialog` stdout contains every example from `agentchrome examples dialog`
+- [ ] `agentchrome man dialog` stdout contains the CAPABILITIES section content
+- [ ] Runtime startup time for `agentchrome man <cmd>` stays under 50 ms on a reference machine (verify with `/usr/bin/time -v` or equivalent; document the measurement in the PR description, not in the code)
+
+### T016: CI determinism guard
+
+**File(s)**: `.github/workflows/ci.yml` (or project's CI file), `xtask/src/main.rs` (if a dedicated `--check` flag is added)
+**Type**: Modify
+**Depends**: T014
+**Acceptance**:
+- [ ] CI runs `cargo xtask man` and then `git diff --exit-code man/`, failing the build if the committed files drift from what the xtask produces
+- [ ] The guard runs on every PR, not only on main
+- [ ] Running the guard twice in a row on a clean tree produces zero diff (true determinism, not coincidental)
+- [ ] If `man/` was previously gitignored (per #27 T006), revert that: man pages are now checked in so the determinism guard has something to diff against
+
+**Notes**: Flipping `man/` from gitignored to tracked is a deliberate scope expansion of this issue — record in the PR description. The alternative (check against a cached tarball) is strictly worse.
+
+### T017: BDD coverage for enriched content
+
+**File(s)**: `tests/features/man-page-generation.feature`, `tests/bdd.rs`
+**Type**: Modify
+**Depends**: T014, T015
+**Acceptance**:
+- [ ] New scenario: "Man page includes capabilities section" — asserts `agentchrome man dialog` stdout contains "CAPABILITIES"
+- [ ] New scenario: "Man page examples match examples subcommand" — runs `agentchrome examples dialog` and `agentchrome man dialog` and asserts every example command from the first appears as a substring in the second
+- [ ] New scenario: "Man generation is deterministic" — runs `cargo xtask man` twice, asserts `man/` is byte-identical between runs (suitable for local and CI execution)
+- [ ] New scenario (tagged `@requires-225`): "Dialog man page shows cross-process flow" — skipped until #225 lands
+- [ ] `cargo test --test bdd` passes with no regressions on existing #27 scenarios
 
 ---
 

@@ -1,0 +1,135 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH connect 1  "connect " 
+.SH NAME
+connect \- Connect to or launch a Chrome instance
+.SH SYNOPSIS
+\fBconnect\fR [\fB\-\-launch\fR] [\fB\-\-status\fR] [\fB\-\-disconnect\fR] [\fB\-\-headless\fR] [\fB\-\-channel\fR] [\fB\-\-chrome\-path\fR] [\fB\-\-chrome\-arg\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Connect to a running Chrome/Chromium instance via the Chrome DevTools Protocol, or launch a new one. Tests the connection and prints browser metadata (browser version, WebSocket URL, user agent). The session is persisted to a local file so subsequent commands reuse the same connection.
+.SH OPTIONS
+.TP
+\fB\-\-launch\fR
+Launch a new Chrome instance instead of connecting to an existing one
+.TP
+\fB\-\-status\fR
+Show current connection status (conflicts with \-\-launch, \-\-disconnect)
+.TP
+\fB\-\-disconnect\fR
+Disconnect and remove session file (conflicts with \-\-launch, \-\-status)
+.TP
+\fB\-\-headless\fR
+Launch Chrome in headless mode
+.TP
+\fB\-\-channel\fR \fI<CHANNEL>\fR [default: stable]
+Chrome release channel to launch [default: stable] [possible values: stable, canary, beta, dev]
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+stable
+.IP \(bu 2
+canary
+.IP \(bu 2
+beta
+.IP \(bu 2
+dev
+.RE
+.TP
+\fB\-\-chrome\-path\fR \fI<CHROME_PATH>\fR
+Path to a Chrome/Chromium executable (overrides channel\-based discovery)
+.TP
+\fB\-\-chrome\-arg\fR \fI<CHROME_ARG>\fR
+Additional arguments to pass to Chrome (can be repeated)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+SESSION FILE:
+  Connection state is persisted to a per\-user session file so subsequent
+  CLI invocations can reuse the same Chrome automatically:
+
+    Unix:    ~/.agentchrome/session.json
+    Windows: %USERPROFILE%\\.agentchrome\\session.json
+
+RESOLUTION PRECEDENCE (highest → lowest):
+  1. \-\-ws\-url
+  2. \-\-port
+  3. AGENTCHROME_PORT (env var)
+  4. session.json
+  5. default port 9222
+
+EXAMPLES:
+  # Connect to Chrome on the default port (9222)
+  agentchrome connect
+
+  # Launch a new headless Chrome instance
+  agentchrome connect \-\-launch \-\-headless
+
+  # Cross\-invocation auto\-discovery (no flags in shell B):
+  #   shell A
+  agentchrome connect \-\-launch \-\-headless
+  #   shell B, later
+  agentchrome tabs list
+
+  # Connect to a specific port
+  agentchrome connect \-\-port 9333
+
+  # Check connection status (exits 0 whether or not a session exists)
+  agentchrome connect \-\-status
+
+  # Disconnect and remove session file
+  agentchrome connect \-\-disconnect
+
+  # Run a long command with a custom keep\-alive interval
+  agentchrome \-\-keepalive\-interval 60000 console follow
+
+  # Disable keep\-alive entirely
+  agentchrome \-\-no\-keepalive page snapshot \-\-json
+.SH CAPABILITIES
+.PP
+Connect to or launch a Chrome instance
+.TP
+.B connect
+Connect to or launch a Chrome instance
+.TP
+.B --launch
+Launch a new Chrome instance instead of connecting to an existing one
+.TP
+.B --status
+Show current connection status (conflicts with --launch, --disconnect)
+.TP
+.B --disconnect
+Disconnect and remove session file (conflicts with --launch, --status)
+.TP
+.B --headless
+Launch Chrome in headless mode
+.TP
+.B --channel
+Chrome release channel to launch [default: stable] [possible values: stable, canary, beta, dev]
+.TP
+.B --chrome-path
+Path to a Chrome/Chromium executable (overrides channel-based discovery)
+.TP
+.B --chrome-arg
+Additional arguments to pass to Chrome (can be repeated)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome connect\`
+Connect to Chrome on the default port (9222)
+.TP
+.B \`agentchrome connect --launch --headless\`
+Launch a new headless Chrome instance
+.TP
+.B \`agentchrome connect --port 9333\`
+Connect to Chrome on a specific port
+.TP
+.B \`agentchrome connect --status\`
+Check current connection status
+.TP
+.B \`agentchrome connect --disconnect\`
+Disconnect and remove the session file

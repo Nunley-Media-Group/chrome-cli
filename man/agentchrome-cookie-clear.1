@@ -1,0 +1,70 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH clear 1  "clear " 
+.SH NAME
+clear \- Clear all cookies
+.SH SYNOPSIS
+\fBclear\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Remove all browser cookies. Returns the number of cookies that were cleared.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Clear all cookies
+  agentchrome cookie clear
+.SH CAPABILITIES
+.PP
+Browser cookie management (list, set, delete, clear)
+.TP
+.B cookie list
+List cookies for the current page or all cookies
+.TP
+.B --domain
+Filter cookies by domain
+.TP
+.B --all
+List all cookies (not scoped to current URL)
+.TP
+.B cookie set
+Set a browser cookie
+.TP
+.B name
+Cookie name
+.TP
+.B value
+Cookie value
+.TP
+.B --domain
+Cookie domain (strongly recommended)
+.TP
+.B --path
+Cookie path
+.TP
+.B --secure
+Set cookie as Secure (HTTPS only)
+.TP
+.B --http-only
+Set cookie as HttpOnly (not accessible via JavaScript)
+.TP
+.B --same-site
+SameSite attribute: Strict, Lax, or None
+.TP
+.B --expires
+Expiry as Unix timestamp (seconds since epoch)
+.TP
+.B --url
+.TP
+.B cookie delete
+Delete a specific cookie by name
+.TP
+.B name
+Cookie name to delete
+.TP
+.B --domain
+Scope deletion to a specific domain
+.TP
+.B cookie clear
+Clear all cookies

@@ -1,0 +1,104 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH seek 1  "seek " 
+.SH NAME
+seek \- Seek a media element to a specific time
+.SH SYNOPSIS
+\fBseek\fR [\fB\-\-all\fR] [\fB\-\-time\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fITARGET\fR] [\fITIME_POS\fR] 
+.SH DESCRIPTION
+Set the current playback position of a media element to a specific time in seconds. The time is clamped to the element\*(Aqs duration by the browser. Returns the updated playback state as JSON. Use \-\-all with \-\-time to seek all elements.
+.SH OPTIONS
+.TP
+\fB\-\-all\fR
+Apply to all media elements on the page
+.TP
+\fB\-\-time\fR \fI<TIME>\fR
+Time in seconds to seek to (use with \-\-all)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+[\fITARGET\fR]
+Media element index or CSS selector (not required with \-\-all)
+.TP
+[\fITIME_POS\fR]
+Time in seconds to seek to (positional for single target, \-\-time for \-\-all)
+.SH EXTRA
+EXAMPLES:
+  # Seek to 15.5 seconds
+  agentchrome media seek 0 15.5
+
+  # Seek all elements to 10 seconds
+  agentchrome media seek \-\-all \-\-time 10.0
+.SH CAPABILITIES
+.PP
+Media element control (list, play, pause, seek)
+.TP
+.B media list
+List all audio and video elements on the page
+.TP
+.B media play
+Play a media element
+.TP
+.B target
+Media element index (from 'media list') or CSS selector (prefixed with 'css:')
+.TP
+.B --all
+Apply to all media elements on the page
+.TP
+.B media pause
+Pause a media element
+.TP
+.B target
+Media element index (from 'media list') or CSS selector (prefixed with 'css:')
+.TP
+.B --all
+Apply to all media elements on the page
+.TP
+.B media seek
+Seek a media element to a specific time
+.TP
+.B target
+Media element index or CSS selector (not required with --all)
+.TP
+.B time_pos
+Time in seconds to seek to (positional for single target, --time for --all)
+.TP
+.B --all
+Apply to all media elements on the page
+.TP
+.B --time
+Time in seconds to seek to (use with --all)
+.TP
+.B media seek-end
+Seek a media element to its end (duration)
+.TP
+.B target
+Media element index (from 'media list') or CSS selector (prefixed with 'css:')
+.TP
+.B --all
+Apply to all media elements on the page
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome media list\`
+List all audio and video elements on the page
+.TP
+.B \`agentchrome media play 0\`
+Play the first media element
+.TP
+.B \`agentchrome media pause 0\`
+Pause the first media element
+.TP
+.B \`agentchrome media seek 0 15.5\`
+Seek a media element to 15.5 seconds
+.TP
+.B \`agentchrome media seek-end --all\`
+Seek all media elements to end (skip narration gates)
+.TP
+.B \`agentchrome media --frame 0 list\`
+List media elements inside a specific iframe
+.TP
+.B \`agentchrome media play css:audio.narration\`
+Play a media element by CSS selector

@@ -1,9 +1,16 @@
 # Design: Man Page Generation
 
-**Issue**: #27
-**Date**: 2026-02-14
+**Issues**: #27, #232
+**Date**: 2026-04-22
 **Status**: Draft
 **Author**: Claude (writing-specs)
+
+## Change History
+
+| Issue | Date | Summary |
+|-------|------|---------|
+| #27 | 2026-02-14 | Initial design — clap_mangen runtime + xtask generation |
+| #232 | 2026-04-22 | Added xtask-time enrichment pass that injects capabilities-manifest entries and all examples content into each generated man page, with the `examples` subcommand's data as the single source of truth |
 
 ---
 
@@ -246,6 +253,125 @@ agentchrome/
 - None
 
 ---
+
+<!-- Added by issue #232 -->
+
+## Addendum — Issue #232: Enriched Man Page Content
+
+### Overview
+
+Issue #27 established clap_mangen generation from `long_about` / `after_long_help` attributes. In practice this produced thin man pages — `agentchrome man dialog` on 1.33.1 showed only four example lines, while `agentchrome examples dialog` and `agentchrome capabilities` already carried much richer, maintained content. This addendum describes how `cargo xtask man` enriches each rendered page at build time by pulling the structured content from the existing `capabilities` and `examples` subcommands so there is exactly one source of truth per piece of content.
+
+The enrichment happens entirely inside the xtask binary. The runtime path (`agentchrome man <cmd>`) remains unchanged in shape: it still reads the generated man file (or renders from the in-memory clap tree) and performs no extra I/O. FR5 / FR7 and AC3 / AC5 from #27 are preserved verbatim.
+
+### Architecture — Enrichment Pipeline
+
+```
+cargo xtask man
+    ↓
+┌──────────────────────────┐
+│ 1. Build clap Command     │  agentchrome::command()
+└────────────┬─────────────┘
+             ↓
+┌──────────────────────────┐
+│ 2. Pull enrichment data   │  agentchrome::capabilities::build_manifest()
+│                           │  agentchrome::examples::all_examples()
+└────────────┬─────────────┘
+             ↓
+┌──────────────────────────┐
+│ 3. Per-command enricher   │  For each (top-level + nested) clap subcommand:
+│                           │    - look up its CommandDescriptor in the manifest
+│                           │    - look up its CommandGroupSummary in examples
+│                           │    - emit EXAMPLES + CAPABILITIES as roff sections
+└────────────┬─────────────┘
+             ↓
+┌──────────────────────────┐
+│ 4. Render + append        │  clap_mangen::Man::render(...)  →  in-memory buf
+│                           │  append enrichment roff         →  buf
+└────────────┬─────────────┘
+             ↓
+        man/*.1 (byte-deterministic)
+```
+
+### Data Sourcing
+
+| Concern | Source of Truth | Consumed by man-generation via |
+|---------|-----------------|--------------------------------|
+| Purpose / inputs / outputs / exit codes | `src/capabilities.rs` (`CommandDescriptor`, `SubcommandDescriptor`, `ExitCodeDescriptor`) | Library-level accessor: `agentchrome::capabilities::build_manifest()` (add if not already pub) |
+| Example commands and descriptions | `src/examples/commands.rs` (`CommandGroupSummary` / `ExampleEntry`) | Library-level accessor: `agentchrome::examples::all_examples()` (add if not already pub) |
+| Cross-process dialog flow (after #225) | A new multi-step entry in `src/examples/commands.rs` for the `dialog` group | Automatically picked up because the man generator iterates all example entries |
+
+`after_long_help` strings are no longer the canonical home for EXAMPLES content; they may be trimmed to a one-line pointer ("See EXAMPLES section.") in a follow-up pass but that cleanup is **not** required to close #232 — FR10's "single source of truth" constraint is about the *generated man page*, not about removing `after_long_help` entirely.
+
+### Interface Changes (Library-Facing)
+
+Two crate-level re-exports may need to be added so `xtask/src/main.rs` can read the structured data:
+
+| New / Widened API | Purpose |
+|--------------------|---------|
+| `pub fn agentchrome::capabilities::build_manifest() -> CapabilitiesManifest` (or equivalent already-pub accessor) | xtask-side manifest read |
+| `pub fn agentchrome::examples::all_examples() -> Vec<CommandGroupSummary>` | xtask-side examples read |
+
+If these accessors already exist as `pub(crate)`, widen to `pub` via a thin re-export in `src/lib.rs` rather than reshaping the modules.
+
+### Enriched Man Page Layout (per command)
+
+```
+NAME
+    agentchrome-dialog - Handle browser dialogs ...
+
+SYNOPSIS        (from clap_mangen)
+DESCRIPTION     (from clap_mangen — long_about)
+OPTIONS         (from clap_mangen)
+
+CAPABILITIES    (appended by xtask enricher — issue #232)
+    Purpose:    <from CommandDescriptor.description>
+    Inputs:     <from SubcommandDescriptor.args>
+    Flags:      <from SubcommandDescriptor.flags>
+    Exit codes: <from ExitCodeDescriptor list>
+
+EXAMPLES        (appended by xtask enricher — issue #232)
+    <every ExampleEntry in all_examples()[group=cmd].examples>
+```
+
+The CAPABILITIES header is a non-standard man section; this is acceptable for tool-specific man pages and mirrors how many Unix tools add custom sections (`git` uses `CONFIGURATION`, `docker` uses `REPORTING BUGS`, etc.).
+
+### Determinism (AC14)
+
+To guarantee byte-identical output across runs:
+
+1. **Sort order.** Iterate `CapabilitiesManifest.commands` and `all_examples()` in their declared `Vec` order (already deterministic — they are static builders, not `HashMap` walks). Any ad-hoc lookup must be done via `.iter().find(...)` to avoid hash-order non-determinism.
+2. **No timestamps.** Do not stamp the generated file with a build time. `clap_mangen` does include a date field in its header derived from `cmd.get_version()` metadata; verify the default path is date-free or explicitly pass `Man::date("")` / equivalent.
+3. **Stable paths.** File paths emitted in logs (`println!`) do not land inside the `.1` file; they are stdout-only.
+4. **CI verification.** Add a check: `cargo xtask man && git diff --exit-code man/` to assert no uncommitted drift. (This CI hook is the concrete mitigation for AC14 and is added as a task in Phase 3 below.)
+
+### Runtime Impact (AC15)
+
+The runtime `agentchrome man` subcommand is unchanged in code path and allocations. The enrichment is purely a build-time string-append inside xtask. The runtime path's two configurations:
+
+- **If** `agentchrome man <cmd>` in #27 reads the shipped `.1` file → it is larger, but still one `read()` syscall; well under 50 ms.
+- **If** `agentchrome man <cmd>` in #27 renders from the in-memory clap tree → the enrichment content is not visible via that path. This is a **known limitation** called out in Open Questions below. The two acceptable resolutions are (a) also run the enrichment in `execute_man()` at runtime (same accessors, same output — cost is a few hundred microseconds of string building), or (b) switch the runtime path to read the packaged `.1` file.
+
+### Alternatives Considered (Issue #232 additions)
+
+| Option | Description | Pros | Cons | Decision |
+|--------|-------------|------|------|----------|
+| **D: Duplicate content into `after_long_help`** | Copy capabilities/examples text into each subcommand's `after_long_help` doc string | Zero changes to xtask | Two sources of truth, guaranteed drift (the exact problem #232 is fixing) | Rejected |
+| **E: Generate `.md` from data, then convert to roff via `pandoc`** | Emit Markdown from capabilities/examples, pipe through pandoc | Very flexible formatting | Adds a pandoc build dependency; two-step pipeline; determinism harder to guarantee across pandoc versions | Rejected |
+| **F: Build-time xtask enrichment with xtask-side roff append (this design)** | xtask reads structured data and appends roff sections to each rendered man page | Single source of truth; no new build deps; deterministic | Adds ~100 LOC of roff-emission code in xtask | **Selected** |
+
+### Risks & Mitigations (Issue #232 additions)
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Runtime `agentchrome man` path diverges from file-based path (no enrichment visible at runtime) | Medium | Medium | Resolve Open Question §O1 below in Phase 3; chosen approach is covered by a task |
+| `clap_mangen` version emits a build date into the man header, breaking AC14 | Low | Medium | Explicitly set `Man::date("")` or equivalent; CI `git diff --exit-code man/` catches regressions |
+| Dialog cross-process example (AC13) lands before #225 ships, leaving a broken example | Low | High | Gate the dialog cross-process `ExampleEntry` behind the PR that closes #225; don't merge the example until #225 is green |
+| `HashMap`-backed capabilities lookup introduces non-deterministic ordering | Low | High | Iterate the source `Vec`s in declared order; code review to reject any hash-map-based enrichment lookup |
+
+### Open Questions (Issue #232)
+
+- **O1.** Should runtime `agentchrome man <cmd>` also emit the enrichment content, or should it read the packaged `.1` file? The spec's AC15 allows either path. Default proposal: runtime calls the same enrichment helpers (shared library code) so there is exactly one enrichment emitter and the runtime and build-time outputs match. Confirm during Phase 3 implementation planning.
 
 ## Validation Checklist
 

@@ -1,0 +1,317 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH mouseup-at 1  "mouseup-at " 
+.SH NAME
+mouseup\-at \- Release mouse button at coordinates
+.SH SYNOPSIS
+\fBmouseup\-at\fR [\fB\-\-relative\-to\fR] [\fB\-\-button\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIX\fR> <\fIY\fR> 
+.SH DESCRIPTION
+Dispatch only a mouseReleased event at specific viewport coordinates. No mousePressed event is sent, allowing decomposed mouse interactions such as completing a drag started by a prior mousedown\-at invocation. Use \-\-button to specify left, middle, or right mouse button.
+.SH OPTIONS
+.TP
+\fB\-\-relative\-to\fR \fI<RELATIVE_TO>\fR
+Resolve X/Y as offsets or percentages relative to this element\*(Aqs top\-left corner. Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit)
+.TP
+\fB\-\-button\fR \fI<BUTTON>\fR
+Mouse button to release
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+left: Left mouse button (default)
+.IP \(bu 2
+middle: Middle mouse button (scroll wheel)
+.IP \(bu 2
+right: Right mouse button (context menu)
+.RE
+.TP
+\fB\-\-include\-snapshot\fR
+Include updated accessibility snapshot in output
+.TP
+\fB\-\-compact\fR
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fIX\fR>
+X coordinate: absolute pixels or percentage (e.g., 50%) when \-\-relative\-to is set
+.TP
+<\fIY\fR>
+Y coordinate: absolute pixels or percentage (e.g., 50%) when \-\-relative\-to is set
+.SH EXTRA
+EXAMPLES:
+  # Mouseup at coordinates
+  agentchrome interact mouseup\-at 300 400
+
+  # Right\-button mouseup
+  agentchrome interact mouseup\-at 300 400 \-\-button right
+
+  # Mouseup inside an iframe
+  agentchrome interact \-\-frame 1 mouseup\-at 50 60
+.SH CAPABILITIES
+.PP
+Mouse, keyboard, and scroll interactions
+.TP
+.B interact click
+Click an element by UID or CSS selector
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#button')
+.TP
+.B --double
+Perform a double-click instead of single click (conflicts with --right)
+.TP
+.B --right
+Perform a right-click (context menu) instead of left click (conflicts with --double)
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B --wait-until
+Wait strategy after click (e.g., for SPA navigation). If omitted, click returns immediately with a brief navigation check
+.TP
+.B interact click-at
+Click at viewport coordinates
+.TP
+.B x
+X coordinate: absolute pixels (e.g., 100) or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B y
+Y coordinate: absolute pixels (e.g., 200) or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B --relative-to
+Resolve X/Y as offsets or percentages relative to this element's top-left corner. Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit)
+.TP
+.B --double
+Perform a double-click instead of single click (conflicts with --right)
+.TP
+.B --right
+Perform a right-click (context menu) instead of left click (conflicts with --double)
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B --wait-until
+Wait strategy after click (e.g., for SPA navigation). If omitted, click returns immediately after dispatching
+.TP
+.B interact hover
+Hover over an element
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#button')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B interact drag
+Drag from one element to another
+.TP
+.B from
+Source element to drag from (UID or CSS selector)
+.TP
+.B to
+Target element to drag to (UID or CSS selector)
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B interact drag-at
+Drag from coordinates to coordinates
+.TP
+.B from_x
+Source X coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B from_y
+Source Y coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B to_x
+Target X coordinate: absolute pixels or percentage (e.g., 100%) when --relative-to is set
+.TP
+.B to_y
+Target Y coordinate: absolute pixels or percentage (e.g., 100%) when --relative-to is set
+.TP
+.B --relative-to
+Resolve from/to coordinates as offsets or percentages relative to this element. Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit)
+.TP
+.B --steps
+Number of intermediate mousemove steps for interpolated drag movement
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B interact mousedown-at
+Press mouse button at coordinates (no release)
+.TP
+.B x
+X coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B y
+Y coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B --relative-to
+Resolve X/Y as offsets or percentages relative to this element's top-left corner. Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit)
+.TP
+.B --button
+Mouse button to press
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B interact mouseup-at
+Release mouse button at coordinates
+.TP
+.B x
+X coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B y
+Y coordinate: absolute pixels or percentage (e.g., 50%) when --relative-to is set
+.TP
+.B --relative-to
+Resolve X/Y as offsets or percentages relative to this element's top-left corner. Accepts a UID (e.g., s7) or CSS selector (e.g., css:#submit)
+.TP
+.B --button
+Mouse button to release
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B interact type
+Type text character-by-character into the focused element
+.TP
+.B text
+Text to type character-by-character
+.TP
+.B --delay
+Delay between keystrokes in milliseconds (default: 0 for instant)
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B interact key
+Press a key or key combination (e.g. Enter, Control+A)
+.TP
+.B keys
+Key or key combination to press (e.g. Enter, Control+A, Shift+ArrowDown)
+.TP
+.B --repeat
+Number of times to press the key
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B interact scroll
+Scroll the page or a container element
+.TP
+.B --direction
+Scroll direction
+.TP
+.B --amount
+Scroll distance in pixels (default: viewport height for vertical, viewport width for horizontal)
+.TP
+.B --to-element
+Scroll until a specific element is in view (UID like 's5' or CSS selector like 'css:#footer')
+.TP
+.B --to-top
+Scroll to the top of the page
+.TP
+.B --to-bottom
+Scroll to the bottom of the page
+.TP
+.B --smooth
+Use smooth scrolling behavior
+.TP
+.B --selector
+CSS selector to target a scrollable container (e.g., '.stage', '#panel')
+.TP
+.B --uid
+Accessibility UID to target a scrollable container (e.g., 's42', requires prior snapshot)
+.TP
+.B --container
+Scroll within a container element (UID like 's3' or CSS selector like 'css:.scrollable')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome interact click s5\`
+Click an element by UID
+.TP
+.B \`agentchrome interact click css:#submit-btn\`
+Click an element by CSS selector
+.TP
+.B \`agentchrome interact click s12 --wait-until networkidle\`
+Click and wait for network idle (for SPA navigation)
+.TP
+.B \`agentchrome interact type "Hello, world!"\`
+Type text into the focused element
+.TP
+.B \`agentchrome interact key Control+A\`
+Press a key combination
+.TP
+.B \`agentchrome interact scroll --to-bottom\`
+Scroll to the bottom of the page
+.TP
+.B \`agentchrome interact --frame 1 click s3\`
+Click an element inside an iframe
+.TP
+.B \`agentchrome interact --frame 1 click-at 100 200\`
+Click at coordinates inside an iframe
+.TP
+.B \`agentchrome interact drag-at 100 200 300 400\`
+Drag from coordinates to coordinates
+.TP
+.B \`agentchrome interact drag-at 0 0 500 500 --steps 10\`
+Drag with interpolated movement steps
+.TP
+.B \`agentchrome interact mousedown-at 100 200\`
+Press mouse button at coordinates (no release)
+.TP
+.B \`agentchrome interact mouseup-at 300 400\`
+Release mouse button at coordinates
+.TP
+.B \`agentchrome interact click-at 50% 50% --relative-to css:#submit\`
+Click the center of an element using percentage coordinates
+.TP
+.B \`agentchrome interact click-at 0% 0% --relative-to css:#submit\`
+Click the top-left corner of an element
+.TP
+.B \`agentchrome interact click-at 100% 100% --relative-to s7\`
+Click the bottom-right pixel of an element by UID
+.TP
+.B \`agentchrome interact drag-at 10% 50% 90% 50% --relative-to css:#track\`
+Drag a slider from 10% to 90% across an element

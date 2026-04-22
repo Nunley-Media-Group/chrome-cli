@@ -4,13 +4,16 @@
 
 mod cli;
 
+pub mod capabilities;
 pub mod cdp;
 pub mod chrome;
 pub mod config;
 pub mod connection;
 pub mod coords;
 pub mod error;
+pub mod examples_data;
 pub mod frame;
+pub mod man_enrichment;
 pub mod session;
 
 /// Returns the clap `Command` definition for man page and completion generation.

@@ -1,10 +1,4 @@
-use clap::CommandFactory;
 use serde::Serialize;
-
-use agentchrome::error::{AppError, ExitCode};
-
-use crate::cli::{CapabilitiesArgs, Cli, GlobalOpts};
-use crate::output::print_output;
 
 // =============================================================================
 // Output types — the manifest schema
@@ -12,26 +6,26 @@ use crate::output::print_output;
 
 #[derive(Serialize)]
 pub struct CapabilitiesManifest {
-    name: String,
-    version: String,
-    commands: Vec<CommandDescriptor>,
+    pub name: String,
+    pub version: String,
+    pub commands: Vec<CommandDescriptor>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    global_flags: Option<Vec<FlagDescriptor>>,
+    pub global_flags: Option<Vec<FlagDescriptor>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    exit_codes: Option<Vec<ExitCodeDescriptor>>,
+    pub exit_codes: Option<Vec<ExitCodeDescriptor>>,
 }
 
 #[derive(Serialize)]
 pub struct CommandDescriptor {
-    name: String,
-    description: String,
+    pub name: String,
+    pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    subcommands: Option<Vec<SubcommandDescriptor>>,
+    pub subcommands: Option<Vec<SubcommandDescriptor>>,
     /// Present only on the `connect` command — documents the session file
     /// path per platform and the connection-source precedence chain so
     /// consumers can render or validate it without re-parsing help text.
     #[serde(skip_serializing_if = "Option::is_none")]
-    session_file: Option<SessionFileDescriptor>,
+    pub session_file: Option<SessionFileDescriptor>,
 }
 
 #[derive(Serialize, Clone)]
@@ -84,42 +78,42 @@ impl From<&CapabilitiesManifest> for CapabilitiesManifestListing {
 
 #[derive(Serialize)]
 pub struct SubcommandDescriptor {
-    name: String,
-    description: String,
+    pub name: String,
+    pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    args: Option<Vec<ArgDescriptor>>,
+    pub args: Option<Vec<ArgDescriptor>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    flags: Option<Vec<FlagDescriptor>>,
+    pub flags: Option<Vec<FlagDescriptor>>,
 }
 
 #[derive(Serialize)]
 pub struct ArgDescriptor {
-    name: String,
+    pub name: String,
     #[serde(rename = "type")]
-    type_name: String,
-    required: bool,
-    description: String,
+    pub type_name: String,
+    pub required: bool,
+    pub description: String,
 }
 
 #[derive(Serialize, Clone)]
 pub struct FlagDescriptor {
-    name: String,
+    pub name: String,
     #[serde(rename = "type")]
-    type_name: String,
+    pub type_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    required: Option<bool>,
+    pub required: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    default: Option<serde_json::Value>,
+    pub default: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    values: Option<Vec<String>>,
-    description: String,
+    pub values: Option<Vec<String>>,
+    pub description: String,
 }
 
 #[derive(Serialize, Clone)]
 pub struct ExitCodeDescriptor {
-    code: u8,
-    name: String,
-    description: String,
+    pub code: u8,
+    pub name: String,
+    pub description: String,
 }
 
 // =============================================================================
@@ -127,6 +121,7 @@ pub struct ExitCodeDescriptor {
 // =============================================================================
 
 /// Build the full capabilities manifest from the clap command tree.
+#[must_use]
 pub fn build_manifest(cmd: &clap::Command, compact: bool) -> CapabilitiesManifest {
     let commands: Vec<CommandDescriptor> = cmd
         .get_subcommands()
@@ -494,37 +489,6 @@ fn is_internal_arg(arg: &clap::Arg) -> bool {
 }
 
 // =============================================================================
-// Dispatcher
-// =============================================================================
-
-pub fn execute_capabilities(global: &GlobalOpts, args: &CapabilitiesArgs) -> Result<(), AppError> {
-    let cmd = Cli::command();
-    let manifest = build_manifest(&cmd, args.compact);
-
-    match &args.command {
-        None => {
-            // Progressive-disclosure listing — summaries only.
-            let listing = CapabilitiesManifestListing::from(&manifest);
-            print_output(&listing, &global.output)
-        }
-        Some(name) => {
-            let available: Vec<String> = manifest.commands.iter().map(|c| c.name.clone()).collect();
-            let Some(descriptor) = manifest.commands.iter().find(|c| c.name == *name) else {
-                return Err(AppError {
-                    message: format!(
-                        "Unknown command: '{name}'. Available: {}",
-                        available.join(", ")
-                    ),
-                    code: ExitCode::GeneralError,
-                    custom_json: None,
-                });
-            };
-            print_output(descriptor, &global.output)
-        }
-    }
-}
-
-// =============================================================================
 // Tests
 // =============================================================================
 
@@ -535,7 +499,7 @@ mod tests {
     use super::*;
 
     fn root_cmd() -> clap::Command {
-        Cli::command()
+        crate::command()
     }
 
     #[test]
@@ -674,37 +638,6 @@ mod tests {
     }
 
     #[test]
-    fn execute_capabilities_unknown_command_returns_error() {
-        let global = GlobalOpts {
-            port: None,
-            host: "127.0.0.1".into(),
-            ws_url: None,
-            timeout: None,
-            tab: None,
-            page_id: None,
-            auto_dismiss_dialogs: false,
-            config: None,
-            keepalive_interval: None,
-            no_keepalive: false,
-            output: crate::cli::OutputFormat {
-                json: false,
-                pretty: false,
-                plain: false,
-                large_response_threshold: None,
-            },
-        };
-        let args = CapabilitiesArgs {
-            command: Some("nonexistent".into()),
-            compact: false,
-        };
-        let result = execute_capabilities(&global, &args);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.message.contains("Unknown command"));
-        assert!(err.message.contains("nonexistent"));
-    }
-
-    #[test]
     fn json_serialization_roundtrips() {
         let manifest = build_manifest(&root_cmd(), false);
         let json = serde_json::to_string(&manifest).unwrap();
@@ -782,41 +715,6 @@ mod tests {
         assert_eq!(obj.len(), 2);
         assert!(obj.contains_key("name"));
         assert!(obj.contains_key("description"));
-    }
-
-    #[test]
-    fn unknown_command_returns_error_with_available_list() {
-        let global = GlobalOpts {
-            port: None,
-            host: "127.0.0.1".into(),
-            ws_url: None,
-            timeout: None,
-            tab: None,
-            page_id: None,
-            auto_dismiss_dialogs: false,
-            config: None,
-            keepalive_interval: None,
-            no_keepalive: false,
-            output: crate::cli::OutputFormat {
-                json: false,
-                pretty: false,
-                plain: false,
-                large_response_threshold: None,
-            },
-        };
-        let args = CapabilitiesArgs {
-            command: Some("nonexistent".into()),
-            compact: false,
-        };
-        let err = execute_capabilities(&global, &args).unwrap_err();
-        assert!(err.message.contains("Unknown command"));
-        let known = ["navigate", "tabs", "page", "dom", "interact"];
-        let hit_count = known.iter().filter(|n| err.message.contains(*n)).count();
-        assert!(
-            hit_count >= 5,
-            "expected ≥5 known commands listed in error: {}",
-            err.message
-        );
     }
 
     #[test]

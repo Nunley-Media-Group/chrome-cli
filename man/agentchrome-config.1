@@ -1,0 +1,69 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH config 1  "config " 
+.SH NAME
+config \- Configuration file management (show, init, path)
+.SH SYNOPSIS
+\fBconfig\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Manage the agentchrome configuration file. Show the resolved configuration from all sources, create a default config file, or display the active config file path. Config files use TOML format and are searched in priority order: \-\-config flag, $AGENTCHROME_CONFIG env var, project\-local, XDG config dir, home directory.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+config\-show(1)
+Display the resolved configuration from all sources
+.TP
+config\-init(1)
+Create a default config file with commented example values
+.TP
+config\-path(1)
+Show the active config file path (or null if none)
+.TP
+config\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # Show the resolved configuration
+  agentchrome config show
+
+  # Create a default config file
+  agentchrome config init
+
+  # Create a config at a custom path
+  agentchrome config init \-\-path ./my\-config.toml
+
+  # Show the active config file path
+  agentchrome config path
+.SH CAPABILITIES
+.PP
+Configuration file management (show, init, path)
+.TP
+.B config show
+Display the resolved configuration from all sources
+.TP
+.B config init
+Create a default config file with commented example values
+.TP
+.B --path
+Create config file at a custom path instead of the default XDG location
+.TP
+.B config path
+Show the active config file path (or null if none)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome config show\`
+Show the resolved configuration from all sources
+.TP
+.B \`agentchrome config init\`
+Create a default config file
+.TP
+.B \`agentchrome config init --path ./my-config.toml\`
+Create a config at a custom path
+.TP
+.B \`agentchrome config path\`
+Show the active config file path

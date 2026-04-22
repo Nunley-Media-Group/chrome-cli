@@ -1,0 +1,38 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH man 1  "man " 
+.SH NAME
+man \- Display man pages for agentchrome commands
+.SH SYNOPSIS
+\fBman\fR [\fB\-h\fR|\fB\-\-help\fR] [\fICOMMAND\fR] 
+.SH DESCRIPTION
+Display man pages for agentchrome commands. Without arguments, displays the main agentchrome man page. With a subcommand name, displays the man page for that specific command. Output is in roff format, suitable for piping to a pager.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+[\fICOMMAND\fR]
+Subcommand to display man page for (omit for top\-level)
+.SH EXTRA
+EXAMPLES:
+  # Display the main agentchrome man page
+  agentchrome man
+
+  # Display the man page for the connect command
+  agentchrome man connect
+
+  # Display the man page for the tabs command
+  agentchrome man tabs
+
+  # Pipe to a pager
+  agentchrome man navigate | less
+.SH CAPABILITIES
+.PP
+Display man pages for agentchrome commands
+.TP
+.B man <COMMAND>
+Display man pages for agentchrome commands
+.TP
+.B command
+Subcommand to display man page for (omit for top-level)

@@ -1,0 +1,65 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH lighthouse 1  "lighthouse " 
+.SH NAME
+lighthouse \- Run a Google Lighthouse audit
+.SH SYNOPSIS
+\fBlighthouse\fR [\fB\-\-only\fR] [\fB\-\-output\-file\fR] [\fB\-\-install\-prereqs\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIURL\fR] 
+.SH DESCRIPTION
+Run a Google Lighthouse audit against the current page (or a given URL). Connects Lighthouse to the managed Chrome session via the CDP port and returns structured JSON category scores on stdout. Use \-\-only to limit which categories are measured. Use \-\-output\-file to save the full Lighthouse JSON report.
+.SH OPTIONS
+.TP
+\fB\-\-only\fR \fI<ONLY>\fR
+Comma\-separated list of categories to measure (e.g. performance,accessibility)
+.TP
+\fB\-\-output\-file\fR \fI<OUTPUT_FILE>\fR
+Save the full Lighthouse JSON report to this file
+.TP
+\fB\-\-install\-prereqs\fR
+Install the `lighthouse` prerequisite via `npm install \-g lighthouse` (no prompt — the flag is the consent)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+[\fIURL\fR]
+URL to audit (defaults to the active page URL)
+.SH EXTRA
+PREREQUISITES:
+  Requires the lighthouse npm package. Install with:
+    npm install \-g lighthouse
+  Or run:
+    agentchrome audit lighthouse \-\-install\-prereqs
+
+EXAMPLES:
+  # Full audit on the current page
+  agentchrome audit lighthouse
+
+  # Audit a specific URL
+  agentchrome audit lighthouse https://example.com
+
+  # Only performance and accessibility
+  agentchrome audit lighthouse \-\-only performance,accessibility
+
+  # Save the full report
+  agentchrome audit lighthouse \-\-output\-file report.json
+
+  # Install the lighthouse prerequisite (runs: npm install \-g lighthouse)
+  agentchrome audit lighthouse \-\-install\-prereqs
+.SH CAPABILITIES
+.PP
+Run audits against the current page (requires lighthouse CLI — see 'audit lighthouse --help')
+.TP
+.B audit lighthouse
+Run a Google Lighthouse audit
+.TP
+.B url
+URL to audit (defaults to the active page URL)
+.TP
+.B --only
+Comma-separated list of categories to measure (e.g. performance,accessibility)
+.TP
+.B --output-file
+Save the full Lighthouse JSON report to this file
+.TP
+.B --install-prereqs
+Install the `lighthouse` prerequisite via `npm install -g lighthouse` (no prompt — the flag is the consent)

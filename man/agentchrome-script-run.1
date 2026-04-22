@@ -1,0 +1,70 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH run 1  "run " 
+.SH NAME
+run \- Run a JSON batch script
+.SH SYNOPSIS
+\fBrun\fR [\fB\-\-fail\-fast\fR] [\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> 
+.SH DESCRIPTION
+Run a JSON batch script against the active CDP session. The script file should contain a JSON object with a \*(Aqcommands\*(Aq array. Each command is an argv\-style array of strings. Use \*(Aq\-\*(Aq as the file path to read from stdin.
+.PP
+Supports conditional branching (if/then/else), count and while loops, and variable binding (bind: "name") with $vars.name substitution in later steps.
+.SH OPTIONS
+.TP
+\fB\-\-fail\-fast\fR
+Stop execution at the first failing step and exit non\-zero
+.TP
+\fB\-\-dry\-run\fR
+Parse and validate the script without executing any commands
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fIFILE\fR>
+Path to a JSON script file; use \*(Aq\-\*(Aq to read from stdin
+.SH EXTRA
+EXAMPLES:
+  # Run a script file
+  agentchrome script run workflow.json
+
+  # Read a script from stdin (\- means stdin)
+  cat workflow.json | agentchrome script run \-
+
+  # Stop at the first failing step and exit non\-zero
+  agentchrome script run \-\-fail\-fast workflow.json
+
+  # Validate the script without dispatching commands (offline)
+  agentchrome script run \-\-dry\-run workflow.json
+
+  # Pretty\-print the result JSON
+  agentchrome script run \-\-pretty workflow.json
+.SH CAPABILITIES
+.PP
+Execute a batch script of agentchrome commands
+.TP
+.B script run
+Run a JSON batch script
+.TP
+.B file
+Path to a JSON script file; use '-' to read from stdin
+.TP
+.B --fail-fast
+Stop execution at the first failing step and exit non-zero
+.TP
+.B --dry-run
+Parse and validate the script without executing any commands
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome script run script.json\`
+Execute all commands in script.json sequentially
+.TP
+.B \`agentchrome script run script.json --fail-fast\`
+Stop on the first failing step and exit non-zero
+.TP
+.B \`agentchrome script run script.json --dry-run\`
+Validate the script schema without dispatching to Chrome
+.TP
+.B \`agentchrome script run -\`
+Read the script from stdin instead of a file

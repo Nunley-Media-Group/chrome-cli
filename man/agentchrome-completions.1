@@ -1,0 +1,57 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH completions 1  "completions " 
+.SH NAME
+completions \- Generate shell completion scripts
+.SH SYNOPSIS
+\fBcompletions\fR [\fB\-h\fR|\fB\-\-help\fR] <\fISHELL\fR> 
+.SH DESCRIPTION
+Generate shell completion scripts for tab\-completion of commands, flags, and enum values. Pipe the output to the appropriate file for your shell.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fISHELL\fR>
+Shell to generate completions for (bash, zsh, fish, powershell, elvish)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+bash
+.IP \(bu 2
+elvish
+.IP \(bu 2
+fish
+.IP \(bu 2
+powershell
+.IP \(bu 2
+zsh
+.RE
+.SH EXTRA
+EXAMPLES:
+  # Bash
+  agentchrome completions bash > /etc/bash_completion.d/agentchrome
+
+  # Zsh
+  agentchrome completions zsh > ~/.zfunc/_agentchrome
+
+  # Fish
+  agentchrome completions fish > ~/.config/fish/completions/agentchrome.fish
+
+  # PowerShell
+  agentchrome completions powershell >> $PROFILE
+
+  # Elvish
+  agentchrome completions elvish >> ~/.elvish/rc.elv
+.SH CAPABILITIES
+.PP
+Generate shell completion scripts
+.TP
+.B completions <SHELL>
+Generate shell completion scripts
+.TP
+.B shell
+Shell to generate completions for (bash, zsh, fish, powershell, elvish)

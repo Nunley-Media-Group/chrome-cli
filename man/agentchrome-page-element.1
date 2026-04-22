@@ -1,0 +1,215 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH element 1  "element " 
+.SH NAME
+element \- Query a single element\*(Aqs properties by UID or CSS selector
+.SH SYNOPSIS
+\fBelement\fR [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> 
+.SH DESCRIPTION
+Query a single element\*(Aqs state by accessibility UID (from \*(Aqpage snapshot\*(Aq) or CSS selector. Returns role, name, tag name, bounding box, accessibility properties, and viewport visibility as JSON.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fITARGET\fR>
+Element target: UID (s1, s2, ...) or CSS selector (css:#id, css:.class)
+.SH EXTRA
+EXAMPLES:
+  # Query by UID
+  agentchrome page element s10
+
+  # Query by CSS selector
+  agentchrome page element "css:#checkout"
+
+  # Plain text output
+  agentchrome page element s10 \-\-plain
+.SH CAPABILITIES
+.PP
+Page inspection (screenshot, text, accessibility tree, find)
+.TP
+.B page text
+Extract visible text from the page
+.TP
+.B --selector
+CSS selector to extract text from a specific element
+.TP
+.B --deep
+Extract text from main frame, all iframes, and all open shadow DOM roots (mutually exclusive with --frame)
+.TP
+.B page snapshot
+Capture the accessibility tree of the page
+.TP
+.B --verbose
+Include additional element properties (checked, disabled, level, etc.)
+.TP
+.B --file
+Save snapshot to file instead of stdout
+.TP
+.B --compact
+Return only interactive and semantically meaningful elements (reduces token usage for AI agents)
+.TP
+.B --pierce-shadow
+Include shadow DOM content in the accessibility tree
+.TP
+.B --include-iframes
+Aggregate every iframe's accessibility tree into a single tree (mutually exclusive with --frame)
+.TP
+.B page find
+Find elements by text, CSS selector, or accessibility role
+.TP
+.B query
+Text to search for (searches accessible names, text content, labels)
+.TP
+.B --selector
+Find by CSS selector instead of text
+.TP
+.B --role
+Filter by accessibility role (button, link, textbox, etc.)
+.TP
+.B --exact
+Require exact text match (default: case-insensitive substring)
+.TP
+.B --limit
+Maximum results to return
+.TP
+.B page screenshot
+Capture a screenshot of the page, an element, or a region
+.TP
+.B --full-page
+Capture the entire scrollable page, not just the visible viewport
+.TP
+.B --selector
+Capture a specific element by CSS selector (conflicts with --full-page)
+.TP
+.B --uid
+Capture a specific element by UID from 'page snapshot' (conflicts with --full-page)
+.TP
+.B --scroll-container
+CSS selector for the inner scrollable element (requires --full-page)
+.TP
+.B --format
+Image format [default: png] [possible values: png, jpeg, webp]
+.TP
+.B --quality
+JPEG/WebP compression quality, 0-100 (ignored for PNG)
+.TP
+.B --file
+Save screenshot to a file instead of base64-encoded stdout
+.TP
+.B --clip
+Capture a specific viewport region as X,Y,WIDTH,HEIGHT (e.g. 10,20,200,100)
+.TP
+.B page resize
+Resize the viewport to the given dimensions
+.TP
+.B size
+Viewport size as WIDTHxHEIGHT (e.g. 1280x720)
+.TP
+.B page element
+Query a single element's properties by UID or CSS selector
+.TP
+.B target
+Element target: UID (s1, s2, ...) or CSS selector (css:#id, css:.class)
+.TP
+.B page wait
+Wait until a condition is met on the current page
+.TP
+.B --url
+Wait for the page URL to match a glob pattern
+.TP
+.B --text
+Wait for text to appear in the page content
+.TP
+.B --selector
+Wait for a CSS selector to match an element in the DOM
+.TP
+.B --network-idle
+Wait for network activity to settle (no requests for 500ms)
+.TP
+.B --js-expression
+Wait for a JavaScript expression to evaluate to a truthy value
+.TP
+.B --count
+Minimum number of elements that must match the selector (requires --selector)
+.TP
+.B --interval
+Poll interval in milliseconds (for --url, --text, --selector, --js-expression)
+.TP
+.B page frames
+List all frames (iframes, framesets) in the page hierarchy
+.TP
+.B page workers
+List all workers (service, shared, dedicated) associated with the page
+.TP
+.B page hittest
+Hit test at viewport coordinates to identify click targets and overlays
+.TP
+.B x
+X viewport coordinate
+.TP
+.B y
+Y viewport coordinate
+.TP
+.B page analyze
+Analyze page structure: iframes, frameworks, overlays, media, shadow DOM
+.TP
+.B page coords
+Resolve a selector to frame-local and page-global coordinates
+.TP
+.B --selector
+Element target: UID from 'page snapshot' (e.g., s7) or CSS selector (e.g., css:#submit)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome page text\`
+Extract all visible text from the page
+.TP
+.B \`agentchrome page snapshot\`
+Capture the accessibility tree with element UIDs
+.TP
+.B \`agentchrome page snapshot --compact\`
+Compact snapshot with only interactive and landmark elements
+.TP
+.B \`agentchrome page screenshot --full-page --file page.png\`
+Take a full-page screenshot
+.TP
+.B \`agentchrome page find "Sign in"\`
+Find elements by text
+.TP
+.B \`agentchrome page resize 1280x720\`
+Resize the viewport to specific dimensions
+.TP
+.B \`agentchrome page frames\`
+List all iframes and frames in the page hierarchy
+.TP
+.B \`agentchrome page snapshot --frame 1\`
+Capture accessibility tree of a specific iframe
+.TP
+.B \`agentchrome page snapshot --pierce-shadow\`
+Include shadow DOM elements in the accessibility tree
+.TP
+.B \`agentchrome page workers\`
+List service workers, shared workers, and web workers
+.TP
+.B \`agentchrome page hittest 100 200\`
+Hit test at viewport coordinates to identify click targets
+.TP
+.B \`agentchrome page hittest 50 50 --frame 1\`
+Hit test within a specific iframe
+.TP
+.B \`agentchrome page coords --selector css:#submit\`
+Get frame-local and page-global bounding box for a CSS selector
+.TP
+.B \`agentchrome page coords --selector s7\`
+Get bounding box for a snapshot UID
+.TP
+.B \`agentchrome page --frame 1 coords --selector css:#inner\`
+Get bounding box for an element inside an iframe, reporting both frame-local and page-global coordinates
+.TP
+.B \`agentchrome page analyze\`
+Analyze page structure: iframes, frameworks, overlays, media
+.TP
+.B \`agentchrome page analyze --frame 1\`
+Analyze structure within a specific iframe

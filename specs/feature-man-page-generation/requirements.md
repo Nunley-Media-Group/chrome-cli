@@ -1,9 +1,16 @@
 # Requirements: Man Page Generation
 
-**Issue**: #27
-**Date**: 2026-02-14
+**Issues**: #27, #232
+**Date**: 2026-04-22
 **Status**: Draft
 **Author**: Claude (writing-specs)
+
+## Change History
+
+| Issue | Date | Summary |
+|-------|------|---------|
+| #27 | 2026-02-14 | Initial feature spec — clap_mangen-based generation + runtime `agentchrome man` subcommand |
+| #232 | 2026-04-22 | Enrich generated man pages with capabilities-manifest entries and all examples at xtask build time (single source of truth: the `capabilities` and `examples` subcommands) |
 
 ---
 
@@ -95,6 +102,44 @@ Issue #26 (comprehensive help text) has been completed, meaning all commands now
 **Then** the help text explains how to display man pages for commands
 **And** lists available subcommand names
 
+<!-- Added by issue #232 -->
+
+### AC11: Man pages include capabilities manifest entry
+
+**Given** a user runs `agentchrome man <cmd>` for any command
+**When** the man page renders
+**Then** the man page includes the capabilities-manifest entry for that command — purpose, inputs, outputs, and exit codes — rendered in man-page format (roff)
+**And** the entry content is sourced from the same structured data that powers `agentchrome capabilities`, not hand-maintained in `after_long_help`
+
+### AC12: Man pages reflect every example from the examples subcommand
+
+**Given** a user runs `agentchrome man <cmd>`
+**When** the man page renders
+**Then** the EXAMPLES section contains every entry that `agentchrome examples <cmd>` returns for that command
+**And** no example shown by `examples <cmd>` is missing from the man page
+**And** the set of examples in the man page is not a hand-curated subset of `after_long_help`
+
+### AC13: Dialog man page shows cross-process flow (after #225 ships)
+
+**Given** issue #225 has landed with the cross-process dialog API (either `dialog watch` or composite `interact click --expect-dialog`)
+**When** a user runs `agentchrome man dialog`
+**Then** the EXAMPLES section includes a worked multi-step flow demonstrating the cross-process use case end-to-end
+**And** the worked flow is sourced from the shared examples data so `agentchrome examples dialog` renders the same flow
+
+### AC14: Man generation stays deterministic in CI
+
+**Given** the `cargo xtask man` pipeline
+**When** the pipeline runs twice in CI against the same source tree
+**Then** every generated `.1` file is byte-identical across runs
+**And** no timestamp, hostname, path, or non-deterministic iteration order appears in the output
+
+### AC15: No runtime overhead from enrichment
+
+**Given** man-page enrichment happens at xtask build time, not at runtime
+**When** a user runs `agentchrome man <cmd>`
+**Then** command startup stays within the <50ms product target
+**And** the command performs no extra I/O beyond reading the shipped man file (or rendering the in-memory clap tree, matching #27's current runtime path)
+
 ### Generated Gherkin Preview
 
 ```gherkin
@@ -149,6 +194,10 @@ Feature: Man Page Generation
 | FR6 | Use `clap_mangen` crate for generation | Must | Keeps docs in sync with CLI definition |
 | FR7 | Include help text, examples, and options in generated pages | Should | Leverages long_about and after_long_help from #26 |
 | FR8 | Man pages included in release archives | Could | Under `man/` directory in release tarballs |
+| FR9 | `cargo xtask man` pulls structured `capabilities` and `examples` content into each subcommand's generated man page at build time | Must | Added by #232 — closes the thin-man-page gap observed on 1.33.1 |
+| FR10 | The single source of truth for each command's examples remains the `examples` subcommand's data; man pages are a derived artifact | Must | Added by #232 — prevents drift between `examples` and `man` outputs |
+| FR11 | After #225 lands, the dialog man page includes a worked cross-process example wired into the shared examples data so both `examples dialog` and `man dialog` render it from one source | Must | Added by #232 — depends on #225 |
+| FR12 | Investigation: evaluate whether a future `agentchrome man gotchas` topic-man page is worth building so the shipped Claude Code skill can defer to it | Could | Added by #232 — decision: defer; track as a separate follow-up issue |
 
 ---
 
@@ -213,6 +262,10 @@ Reference `structure.md` and `product.md` for project-specific design standards.
 - HTML or Markdown generation from man pages
 - Man pages for section other than 1 (user commands)
 - Colored/styled output for `agentchrome man` (plain roff rendering)
+- Building the `agentchrome man gotchas` topic-man page (deferred per #232 FR12; tracked as a future follow-up issue)
+- Rewriting the `examples` or `capabilities` subcommands themselves (#232)
+- Changing the packaged Claude Code skill (`~/.claude/skills/agentchrome/SKILL.md`) — it stays thin and keeps deferring to CLI self-documentation (#232)
+- Internationalization of man pages (#232)
 
 ---
 

@@ -1,0 +1,131 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH upload 1  "upload " 
+.SH NAME
+upload \- Upload files to a file input element
+.SH SYNOPSIS
+\fBupload\fR [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> <\fIFILES\fR> 
+.SH DESCRIPTION
+Upload one or more files to a file input element identified by UID or CSS selector. The element must be an <input type="file">. Multiple file paths can be specified for multi\-file upload inputs.
+.SH OPTIONS
+.TP
+\fB\-\-include\-snapshot\fR
+Include updated accessibility snapshot in output
+.TP
+\fB\-\-compact\fR
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fITARGET\fR>
+Target file input element (UID like \*(Aqs5\*(Aq or CSS selector like \*(Aqcss:#file\-input\*(Aq)
+.TP
+<\fIFILES\fR>
+File paths to upload
+.SH EXTRA
+EXAMPLES:
+  # Upload a single file
+  agentchrome form upload s10 ./photo.jpg
+
+  # Upload multiple files
+  agentchrome form upload css:#file\-input ./doc1.pdf ./doc2.pdf
+.SH CAPABILITIES
+.PP
+Form input and submission
+.TP
+.B form fill
+Fill a form field by UID or CSS selector
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#email')
+.TP
+.B value
+Value to set on the form field
+.TP
+.B --confirm-key
+Key to confirm combobox selection (default: Enter)
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form fill-many
+Fill multiple form fields at once from JSON
+.TP
+.B input
+Inline JSON array of {uid, value} objects
+.TP
+.B --file
+Read JSON from a file instead of inline argument
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form clear
+Clear a form field's value
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#email')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form upload
+Upload files to a file input element
+.TP
+.B target
+Target file input element (UID like 's5' or CSS selector like 'css:#file-input')
+.TP
+.B files
+File paths to upload
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form submit
+Submit a form programmatically
+.TP
+.B target
+Target element (UID like 's3' or CSS selector like 'css:#login-form')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome form fill s5 "hello@example.com"\`
+Fill a form field by UID
+.TP
+.B \`agentchrome form fill css:#email "user@example.com"\`
+Fill a form field by CSS selector
+.TP
+.B \`agentchrome form clear s5\`
+Clear a form field
+.TP
+.B \`agentchrome form upload s10 ./photo.jpg\`
+Upload a file to a file input element
+.TP
+.B \`agentchrome form fill s5 "Acme Corp"\`
+Fill an ARIA combobox field (auto click-type-confirm)
+.TP
+.B \`agentchrome form fill --confirm-key Tab s5 "Acme Corp"\`
+Fill combobox with custom confirmation key
+.TP
+.B \`agentchrome form --frame 1 fill s2 "value"\`
+Fill a form field inside an iframe

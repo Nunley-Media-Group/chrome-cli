@@ -1,0 +1,161 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH siblings 1  "siblings " 
+.SH NAME
+siblings \- List sibling elements
+.SH SYNOPSIS
+\fBsiblings\fR [\fB\-h\fR|\fB\-\-help\fR] <\fINODE_ID\fR> 
+.SH DESCRIPTION
+List the sibling elements of a DOM node (other children of the same parent, excluding the target element itself).
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fINODE_ID\fR>
+Target element (node ID, UID like \*(Aqs1\*(Aq, or CSS selector like \*(Aqcss:#el\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # List siblings by UID
+  agentchrome dom siblings s3
+
+  # List siblings by CSS selector
+  agentchrome dom siblings css:li.active
+.SH CAPABILITIES
+.PP
+DOM inspection and manipulation
+.TP
+.B dom select
+Select elements by CSS selector or XPath
+.TP
+.B selector
+CSS selector or XPath expression to query
+.TP
+.B --xpath
+Interpret the selector as an XPath expression instead of CSS
+.TP
+.B dom get-attribute
+Get a single attribute value from an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B attribute
+Attribute name to read
+.TP
+.B dom get-text
+Get the text content of an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B dom get-html
+Get the outer HTML of an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B dom set-attribute
+Set an attribute on an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B attribute
+Attribute name to set
+.TP
+.B value
+Attribute value
+.TP
+.B dom set-text
+Set the text content of an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B text
+Text content to set
+.TP
+.B dom remove
+Remove an element from the DOM
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B dom get-style
+Get computed CSS styles of an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B property
+CSS property name (omit for all computed styles)
+.TP
+.B dom set-style
+Set the inline style of an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B style
+CSS style text (e.g. "color: red; font-size: 24px")
+.TP
+.B dom parent
+Get the parent element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B dom children
+List direct child elements
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B dom siblings
+List sibling elements
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.TP
+.B dom tree
+Pretty-print the DOM tree
+.TP
+.B --depth
+Maximum tree depth to display
+.TP
+.B --root
+Start the tree from a specific element (node ID, UID, or CSS selector)
+.TP
+.B dom events
+List event listeners attached to an element
+.TP
+.B node_id
+Target element (node ID, UID like 's1', or CSS selector like 'css:#el')
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome dom select "h1"\`
+Select elements by CSS selector
+.TP
+.B \`agentchrome dom select "//a[@href]" --xpath\`
+Select elements by XPath expression
+.TP
+.B \`agentchrome dom get-attribute s3 href\`
+Get an element's attribute by UID
+.TP
+.B \`agentchrome dom get-text css:h1\`
+Get the text content of an element
+.TP
+.B \`agentchrome dom tree --depth 3\`
+View the DOM tree with limited depth
+.TP
+.B \`agentchrome dom --frame 1 select "css:button"\`
+Query elements inside an iframe
+.TP
+.B \`agentchrome dom --pierce-shadow select "css:#shadow-btn"\`
+Query elements inside shadow DOM
+.TP
+.B \`agentchrome dom events css:button\`
+List event listeners on an element

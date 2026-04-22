@@ -1,0 +1,116 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH exec 1  "exec " 
+.SH NAME
+exec \- Execute JavaScript in the page context
+.SH SYNOPSIS
+\fBexec\fR [\fB\-\-code\fR] [\fB\-\-stdin\fR] [\fB\-\-file\fR] [\fB\-\-uid\fR] [\fB\-\-no\-await\fR] [\fB\-\-timeout\fR] [\fB\-\-max\-size\fR] [\fB\-\-worker\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fICODE\fR] 
+.SH DESCRIPTION
+Execute a JavaScript expression or script in the page context and return the result as JSON. Code can be provided as an inline argument, via \-\-code (recommended for cross\-platform quoting), read from a file with \-\-file, or piped via stdin using \*(Aq\-\-stdin\*(Aq or \*(Aq\-\*(Aq. When \-\-uid is specified, the code is wrapped in a function that receives the element as its first argument. By default, promise results are awaited; use \-\-no\-await to return immediately.
+.SH OPTIONS
+.TP
+\fB\-\-code\fR \fI<code_flag>\fR
+JavaScript code as a named argument (avoids shell quoting issues on Windows)
+.TP
+\fB\-\-stdin\fR
+Read JavaScript code from stdin
+.TP
+\fB\-\-file\fR \fI<FILE>\fR
+Read JavaScript from a file instead of inline argument
+.TP
+\fB\-\-uid\fR \fI<UID>\fR
+Element UID from \*(Aqpage snapshot\*(Aq; code is wrapped in a function receiving the element
+.TP
+\fB\-\-no\-await\fR
+Return promise objects without awaiting them
+.TP
+\fB\-\-timeout\fR \fI<TIMEOUT>\fR
+Execution timeout in milliseconds (overrides global \-\-timeout)
+.TP
+\fB\-\-max\-size\fR \fI<MAX_SIZE>\fR
+Truncate result output exceeding this size in bytes
+.TP
+\fB\-\-worker\fR \fI<WORKER>\fR
+Worker index from \*(Aqpage workers\*(Aq for executing JS in a worker context
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+[\fICODE\fR]
+JavaScript code to execute (use \*(Aq\-\*(Aq to read from stdin)
+.SH EXTRA
+EXAMPLES:
+  # Evaluate an expression
+  agentchrome js exec "document.title"
+
+  # Use \-\-code for cross\-platform quoting (recommended on Windows)
+  agentchrome js exec \-\-code "document.querySelector(\*(Aqdiv\*(Aq)"
+
+  # Execute a script file
+  agentchrome js exec \-\-file script.js
+
+  # Run code on a specific element
+  agentchrome js exec \-\-uid s3 "(el) => el.textContent"
+
+  # Read from stdin
+  echo \*(Aqdocument.URL\*(Aq | agentchrome js exec \-\-stdin
+
+  # Legacy stdin syntax (also works)
+  echo \*(Aqdocument.URL\*(Aq | agentchrome js exec \-
+
+  # Skip awaiting promises
+  agentchrome js exec \-\-no\-await "fetch(\*(Aq/api/data\*(Aq)"
+.SH CAPABILITIES
+.PP
+JavaScript execution in page context
+.TP
+.B js exec
+Execute JavaScript in the page context
+.TP
+.B code
+JavaScript code to execute (use '-' to read from stdin)
+.TP
+.B --code
+JavaScript code as a named argument (avoids shell quoting issues on Windows)
+.TP
+.B --stdin
+Read JavaScript code from stdin
+.TP
+.B --file
+Read JavaScript from a file instead of inline argument
+.TP
+.B --uid
+Element UID from 'page snapshot'; code is wrapped in a function receiving the element
+.TP
+.B --no-await
+Return promise objects without awaiting them
+.TP
+.B --timeout
+Execution timeout in milliseconds (overrides global --timeout)
+.TP
+.B --max-size
+Truncate result output exceeding this size in bytes
+.TP
+.B --worker
+Worker index from 'page workers' for executing JS in a worker context
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome js exec "document.title"\`
+Get the page title
+.TP
+.B \`agentchrome js exec --file script.js\`
+Execute a JavaScript file
+.TP
+.B \`agentchrome js exec --uid s3 "(el) => el.textContent"\`
+Run code on a specific element by UID
+.TP
+.B \`echo 'document.URL' | agentchrome js exec -\`
+Read JavaScript from stdin
+.TP
+.B \`agentchrome js --frame 1 exec "document.title"\`
+Execute JavaScript inside an iframe
+.TP
+.B \`agentchrome js exec --worker 0 "self.registration.scope"\`
+Execute JavaScript in a Service Worker

@@ -1,0 +1,47 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH info 1  "info " 
+.SH NAME
+info \- Check whether a dialog is currently open
+.SH SYNOPSIS
+\fBinfo\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Check whether a JavaScript dialog (alert, confirm, prompt, or beforeunload) is currently open. Returns JSON with the dialog\*(Aqs type, message, and default prompt text if applicable. Returns {"open": false} when no dialog is present.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Check for open dialog
+  agentchrome dialog info
+.SH CAPABILITIES
+.PP
+Browser dialog handling (alert, confirm, prompt, beforeunload)
+.TP
+.B dialog handle
+Accept or dismiss the current browser dialog
+.TP
+.B action
+Action to take: accept or dismiss
+.TP
+.B --text
+Response text for prompt dialogs (only used with 'accept' action)
+.TP
+.B dialog info
+Check whether a dialog is currently open
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome dialog info\`
+Check if a dialog is currently open
+.TP
+.B \`agentchrome dialog handle accept\`
+Accept an alert or confirm dialog
+.TP
+.B \`agentchrome dialog handle dismiss\`
+Dismiss a dialog
+.TP
+.B \`agentchrome dialog handle accept --text "my input"\`
+Accept a prompt dialog with text

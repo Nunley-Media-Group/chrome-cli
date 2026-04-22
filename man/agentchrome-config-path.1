@@ -1,0 +1,47 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH path 1  "path " 
+.SH NAME
+path \- Show the active config file path (or null if none)
+.SH SYNOPSIS
+\fBpath\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Show the path of the active configuration file. Searches in priority order: \-\-config flag, $AGENTCHROME_CONFIG env var, project\-local (.agentchrome.toml), XDG config dir, home directory (~/.agentchrome.toml). Returns JSON with {"path": "..."} or {"path": null} if no config file is found.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Show active config path
+  agentchrome config path
+.SH CAPABILITIES
+.PP
+Configuration file management (show, init, path)
+.TP
+.B config show
+Display the resolved configuration from all sources
+.TP
+.B config init
+Create a default config file with commented example values
+.TP
+.B --path
+Create config file at a custom path instead of the default XDG location
+.TP
+.B config path
+Show the active config file path (or null if none)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome config show\`
+Show the resolved configuration from all sources
+.TP
+.B \`agentchrome config init\`
+Create a default config file
+.TP
+.B \`agentchrome config init --path ./my-config.toml\`
+Create a config at a custom path
+.TP
+.B \`agentchrome config path\`
+Show the active config file path

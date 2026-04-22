@@ -1,0 +1,95 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH tabs 1  "tabs " 
+.SH NAME
+tabs \- Tab management (list, create, close, activate)
+.SH SYNOPSIS
+\fBtabs\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Tab management commands: list open tabs, create new tabs, close tabs, and activate (focus) a specific tab. Each operation returns structured JSON with tab IDs and metadata.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+tabs\-list(1)
+List open tabs
+.TP
+tabs\-create(1)
+Create a new tab
+.TP
+tabs\-close(1)
+Close one or more tabs
+.TP
+tabs\-activate(1)
+Activate (focus) a tab
+.TP
+tabs\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # List all open tabs
+  agentchrome tabs list
+
+  # Open a new tab and get its ID
+  agentchrome tabs create https://example.com
+
+  # Close tabs by ID
+  agentchrome tabs close ABC123 DEF456
+
+  # Activate a specific tab
+  agentchrome tabs activate ABC123
+.SH CAPABILITIES
+.PP
+Tab management (list, create, close, activate)
+.TP
+.B tabs list
+List open tabs
+.TP
+.B --all
+Include internal Chrome pages (chrome://, chrome-extension://)
+.TP
+.B tabs create
+Create a new tab
+.TP
+.B url
+URL to open (defaults to about:blank)
+.TP
+.B --background
+Open the tab in the background without activating it
+.TP
+.B tabs close
+Close one or more tabs
+.TP
+.B targets
+Tab ID(s) or index(es) to close
+.TP
+.B --tab
+.TP
+.B tabs activate
+Activate (focus) a tab
+.TP
+.B target
+Tab ID or index to activate
+.TP
+.B --quiet
+Suppress output after activation
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome tabs list\`
+List all open tabs
+.TP
+.B \`agentchrome tabs create https://example.com\`
+Open a new tab with a URL
+.TP
+.B \`agentchrome tabs close ABC123\`
+Close a tab by its ID
+.TP
+.B \`agentchrome tabs activate ABC123\`
+Activate (focus) a tab by its ID
+.TP
+.B \`agentchrome tabs list --all\`
+List all tabs including internal Chrome pages

@@ -1,0 +1,68 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH vitals 1  "vitals " 
+.SH NAME
+vitals \- Quick Core Web Vitals measurement
+.SH SYNOPSIS
+\fBvitals\fR [\fB\-\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Perform a quick Core Web Vitals measurement. Automatically starts a trace, reloads the page, collects vitals (LCP, FID, CLS), and stops the trace. Returns structured JSON with the web vitals metrics.
+.SH OPTIONS
+.TP
+\fB\-\-file\fR \fI<FILE>\fR
+Path to save the trace file (default: auto\-generated temp)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Measure web vitals
+  agentchrome perf vitals
+
+  # Save the underlying trace file
+  agentchrome perf vitals \-\-file vitals\-trace.json
+.SH CAPABILITIES
+.PP
+Performance tracing and metrics
+.TP
+.B perf record
+Record a performance trace (long-running, stops on Ctrl+C or --duration)
+.TP
+.B --reload
+Reload the page before recording
+.TP
+.B --duration
+Auto-stop after this many milliseconds
+.TP
+.B --file
+Path to save the trace file (default: auto-generated)
+.TP
+.B perf analyze
+Analyze a specific performance insight from a trace
+.TP
+.B insight
+Insight to analyze: DocumentLatency, LCPBreakdown, RenderBlocking, LongTasks
+.TP
+.B --trace-file
+Path to a previously saved trace JSON file
+.TP
+.B perf vitals
+Quick Core Web Vitals measurement
+.TP
+.B --file
+Path to save the trace file (default: auto-generated temp)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome perf vitals\`
+Quick Core Web Vitals measurement
+.TP
+.B \`agentchrome perf record --duration 5000\`
+Record a trace for 5 seconds
+.TP
+.B \`agentchrome perf record --reload --duration 5000\`
+Record a trace with page reload
+.TP
+.B \`agentchrome perf analyze RenderBlocking --trace-file trace.json\`
+Analyze render-blocking resources from a trace

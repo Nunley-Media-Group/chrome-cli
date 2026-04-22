@@ -1,0 +1,65 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH back 1  "back " 
+.SH NAME
+back \- Go back in browser history
+.SH SYNOPSIS
+\fBback\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Navigate back one step in the browser\*(Aqs session history, equivalent to clicking the browser\*(Aqs back button. Returns JSON with the new URL after navigation.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Go back
+  agentchrome navigate back
+.SH CAPABILITIES
+.PP
+URL navigation and history
+.TP
+.B navigate <URL>
+URL navigation and history
+.TP
+.B url
+URL to navigate to
+.TP
+.B --wait-until
+Wait strategy after navigation
+.TP
+.B --timeout
+Navigation timeout in milliseconds
+.TP
+.B --ignore-cache
+Bypass the browser cache
+.TP
+.B --wait-for-selector
+Wait for a CSS selector to appear after the page loads. Useful for SPA sites where content renders asynchronously after the load event. Example: --wait-for-selector "div.email-list"
+.TP
+.B navigate back
+Go back in browser history
+.TP
+.B navigate forward
+Go forward in browser history
+.TP
+.B navigate reload
+Reload the current page
+.TP
+.B --ignore-cache
+Bypass the browser cache on reload
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome navigate https://example.com\`
+Navigate to a URL and wait for load
+.TP
+.B \`agentchrome navigate https://app.example.com --wait-until networkidle\`
+Navigate and wait for network idle (for SPAs)
+.TP
+.B \`agentchrome navigate back\`
+Go back in browser history
+.TP
+.B \`agentchrome navigate reload --ignore-cache\`
+Reload the page without cache

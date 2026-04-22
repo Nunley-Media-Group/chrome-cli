@@ -1,0 +1,53 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH examples 1  "examples " 
+.SH NAME
+examples \- Show usage examples for commands
+.SH SYNOPSIS
+\fBexamples\fR [\fB\-h\fR|\fB\-\-help\fR] [\fICOMMAND\fR] [\fINAME\fR] 
+.SH DESCRIPTION
+Show usage examples for agentchrome commands. Without arguments, lists all command groups with a brief description and one example each. With a command name, shows detailed examples for that specific command group. With "strategies" as the first positional, shows scenario\-based interaction strategy guides — use `agentchrome examples strategies` to list all guides, or `agentchrome examples strategies <name>` to see the full guide for one strategy.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+[\fICOMMAND\fR]
+Command group to show examples for (e.g., navigate, tabs, page), or the literal "strategies" to access scenario\-based interaction guides
+.TP
+[\fINAME\fR]
+When `command` is "strategies", the strategy name to show in detail. Run `agentchrome examples strategies` to see valid strategy names (e.g., iframes, overlays, scorm, drag\-and\-drop, shadow\-dom, spa\-navigation\-waits, react\-controlled\-inputs, debugging\-failed\-interactions, authentication\-cookie\-reuse, multi\-tab\-workflows)
+.SH EXTRA
+EXAMPLES:
+  # List all command groups with summary examples
+  agentchrome examples
+
+  # Show detailed examples for the navigate command
+  agentchrome examples navigate
+
+  # List all interaction strategy guides
+  agentchrome examples strategies
+
+  # Show the iframe strategy guide
+  agentchrome examples strategies iframes
+
+  # Get all strategies as JSON (for programmatic use)
+  agentchrome examples strategies \-\-json
+
+  # Get a single strategy as JSON
+  agentchrome examples strategies iframes \-\-json
+
+  # Pretty\-printed JSON output
+  agentchrome examples \-\-pretty
+.SH CAPABILITIES
+.PP
+Show usage examples for commands
+.TP
+.B examples <COMMAND> <NAME>
+Show usage examples for commands
+.TP
+.B command
+Command group to show examples for (e.g., navigate, tabs, page), or the literal "strategies" to access scenario-based interaction guides
+.TP
+.B name
+When `command` is "strategies", the strategy name to show in detail. Run `agentchrome examples strategies` to see valid strategy names (e.g., iframes, overlays, scorm, drag-and-drop, shadow-dom, spa-navigation-waits, react-controlled-inputs, debugging-failed-interactions, authentication-cookie-reuse, multi-tab-workflows)

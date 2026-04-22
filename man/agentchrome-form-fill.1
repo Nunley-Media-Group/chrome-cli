@@ -1,0 +1,143 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH fill 1  "fill " 
+.SH NAME
+fill \- Fill a form field by UID or CSS selector
+.SH SYNOPSIS
+\fBfill\fR [\fB\-\-confirm\-key\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> <\fIVALUE\fR> 
+.SH DESCRIPTION
+Set the value of a form field identified by UID (from \*(Aqpage snapshot\*(Aq, e.g., \*(Aqs5\*(Aq) or CSS selector (prefixed with \*(Aqcss:\*(Aq, e.g., \*(Aqcss:#email\*(Aq). Works with text inputs, textareas, select dropdowns, checkboxes, and ARIA combobox elements (role="combobox"). Combobox elements are automatically detected and filled using a click\-type\-confirm sequence. Dispatches change and input events to trigger form validation.
+.SH OPTIONS
+.TP
+\fB\-\-confirm\-key\fR \fI<CONFIRM_KEY>\fR
+Key to confirm combobox selection (default: Enter)
+.TP
+\fB\-\-include\-snapshot\fR
+Include updated accessibility snapshot in output
+.TP
+\fB\-\-compact\fR
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fITARGET\fR>
+Target element (UID like \*(Aqs1\*(Aq or CSS selector like \*(Aqcss:#email\*(Aq)
+.TP
+<\fIVALUE\fR>
+Value to set on the form field
+.SH EXTRA
+EXAMPLES:
+  # Fill by UID
+  agentchrome form fill s5 "hello@example.com"
+
+  # Fill by CSS selector
+  agentchrome form fill css:#email "user@example.com"
+
+  # Select a dropdown option
+  agentchrome form fill s8 "Option B"
+
+  # Fill an ARIA combobox
+  agentchrome form fill s5 "Acme Corp"
+
+  # Custom confirmation key for combobox
+  agentchrome form fill \-\-confirm\-key Tab s5 "Acme Corp"
+.SH CAPABILITIES
+.PP
+Form input and submission
+.TP
+.B form fill
+Fill a form field by UID or CSS selector
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#email')
+.TP
+.B value
+Value to set on the form field
+.TP
+.B --confirm-key
+Key to confirm combobox selection (default: Enter)
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form fill-many
+Fill multiple form fields at once from JSON
+.TP
+.B input
+Inline JSON array of {uid, value} objects
+.TP
+.B --file
+Read JSON from a file instead of inline argument
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form clear
+Clear a form field's value
+.TP
+.B target
+Target element (UID like 's1' or CSS selector like 'css:#email')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form upload
+Upload files to a file input element
+.TP
+.B target
+Target file input element (UID like 's5' or CSS selector like 'css:#file-input')
+.TP
+.B files
+File paths to upload
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.TP
+.B form submit
+Submit a form programmatically
+.TP
+.B target
+Target element (UID like 's3' or CSS selector like 'css:#login-form')
+.TP
+.B --include-snapshot
+Include updated accessibility snapshot in output
+.TP
+.B --compact
+Use compact mode for the included snapshot (only interactive and landmark elements)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome form fill s5 "hello@example.com"\`
+Fill a form field by UID
+.TP
+.B \`agentchrome form fill css:#email "user@example.com"\`
+Fill a form field by CSS selector
+.TP
+.B \`agentchrome form clear s5\`
+Clear a form field
+.TP
+.B \`agentchrome form upload s10 ./photo.jpg\`
+Upload a file to a file input element
+.TP
+.B \`agentchrome form fill s5 "Acme Corp"\`
+Fill an ARIA combobox field (auto click-type-confirm)
+.TP
+.B \`agentchrome form fill --confirm-key Tab s5 "Acme Corp"\`
+Fill combobox with custom confirmation key
+.TP
+.B \`agentchrome form --frame 1 fill s2 "value"\`
+Fill a form field inside an iframe

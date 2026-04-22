@@ -1,5 +1,5 @@
 mod audit;
-mod capabilities;
+mod capabilities_cli;
 mod cli;
 mod console;
 mod cookie;
@@ -27,6 +27,7 @@ mod skill;
 mod snapshot;
 mod tabs;
 
+use std::io::Write as _;
 use std::time::Duration;
 
 use clap::{
@@ -188,7 +189,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Diagnose(args) => diagnose::execute_diagnose(&global, args).await,
         Command::Skill(args) => skill::execute_skill(&global, args),
         Command::Examples(args) => examples::execute_examples(&global, args),
-        Command::Capabilities(args) => capabilities::execute_capabilities(&global, args),
+        Command::Capabilities(args) => capabilities_cli::execute_capabilities(&global, args),
         Command::Completions(args) => execute_completions(args),
         Command::Man(args) => execute_man(args),
         Command::Script(args) => execute_script(&global, args).await,
@@ -331,8 +332,9 @@ fn execute_completions(args: &CompletionsArgs) -> Result<(), AppError> {
 fn execute_man(args: &ManArgs) -> Result<(), AppError> {
     let cmd = Cli::command();
 
+    let short_name = args.command.as_deref().unwrap_or("agentchrome");
     let target = match &args.command {
-        None => cmd,
+        None => cmd.clone(),
         Some(name) => find_subcommand(&cmd, name).ok_or_else(|| AppError {
             message: format!("unknown command: {name}"),
             code: ExitCode::GeneralError,
@@ -340,9 +342,17 @@ fn execute_man(args: &ManArgs) -> Result<(), AppError> {
         })?,
     };
 
-    let man = clap_mangen::Man::new(target);
-    man.render(&mut std::io::stdout()).map_err(|e| AppError {
-        message: format!("failed to render man page: {e}"),
+    let manifest = agentchrome::capabilities::build_manifest(&cmd, false);
+    let examples = agentchrome::examples_data::all_examples();
+    let buf = agentchrome::man_enrichment::render_enriched(target, short_name, &manifest, &examples)
+        .map_err(|e| AppError {
+            message: format!("failed to render man page: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+
+    std::io::stdout().write_all(&buf).map_err(|e| AppError {
+        message: format!("failed to write man page: {e}"),
         code: ExitCode::GeneralError,
         custom_json: None,
     })?;

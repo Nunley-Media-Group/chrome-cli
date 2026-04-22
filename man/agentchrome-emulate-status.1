@@ -1,0 +1,77 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH status 1  "status " 
+.SH NAME
+status \- Show current emulation settings
+.SH SYNOPSIS
+\fBstatus\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Display the current emulation state including viewport dimensions, user agent, device scale factor, network conditions, CPU throttling, and color scheme. Returns JSON with the active emulation configuration.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Check emulation status
+  agentchrome emulate status
+.SH CAPABILITIES
+.PP
+Device and network emulation
+.TP
+.B emulate set
+Apply one or more emulation overrides
+.TP
+.B --network
+Network condition profile: offline, slow-4g, 4g, 3g, none
+.TP
+.B --cpu
+CPU throttling rate (1 = no throttling, 2-20 = slowdown factor)
+.TP
+.B --geolocation
+Set geolocation override as LAT,LONG (e.g. 37.7749,-122.4194; conflicts with --no-geolocation)
+.TP
+.B --no-geolocation
+Clear geolocation override (conflicts with --geolocation)
+.TP
+.B --user-agent
+Set custom user agent string (conflicts with --no-user-agent)
+.TP
+.B --no-user-agent
+Reset user agent to browser default (conflicts with --user-agent)
+.TP
+.B --color-scheme
+Force color scheme: dark, light, auto
+.TP
+.B --viewport
+Set viewport dimensions as WIDTHxHEIGHT (e.g. 375x667)
+.TP
+.B --device-scale
+Set device pixel ratio (e.g. 2.0)
+.TP
+.B --mobile
+Emulate mobile device (touch events, mobile viewport)
+.TP
+.B emulate reset
+Clear all emulation overrides
+.TP
+.B emulate status
+Show current emulation settings
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome emulate set --viewport 375x667 --device-scale 2 --mobile\`
+Emulate a mobile device
+.TP
+.B \`agentchrome emulate set --network 3g\`
+Simulate slow 3G network
+.TP
+.B \`agentchrome emulate set --color-scheme dark\`
+Force dark mode
+.TP
+.B \`agentchrome emulate status\`
+Check current emulation settings
+.TP
+.B \`agentchrome emulate reset\`
+Clear all emulation overrides

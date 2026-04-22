@@ -1,7 +1,7 @@
 # File: tests/features/man-page-generation.feature
 #
-# Generated from: .claude/specs/27-man-page-generation/requirements.md
-# Issue: #27
+# Generated from: specs/feature-man-page-generation/requirements.md
+# Issues: #27, #232
 
 Feature: Man Page Generation
   As a developer or automation engineer using agentchrome
@@ -61,3 +61,38 @@ Feature: Man Page Generation
     When I run "agentchrome man --help"
     Then stdout should contain "man"
     And the exit code should be 0
+
+  # --- Enriched Content ---
+
+  Scenario: Man page includes CAPABILITIES section
+    Given agentchrome is built
+    When I run "agentchrome man dialog"
+    Then stdout should contain "CAPABILITIES"
+    And the exit code should be 0
+
+  Scenario: Man page EXAMPLES reflect every entry from examples subcommand
+    Given agentchrome is built
+    When I collect the example commands from "agentchrome examples dialog"
+    And I run "agentchrome man dialog"
+    Then every collected example command should appear in stdout
+    And the exit code should be 0
+
+  Scenario: Man generation is byte-deterministic
+    Given the agentchrome source tree is available
+    When I run cargo xtask man and snapshot the man directory
+    And I run cargo xtask man a second time
+    Then the man directory contents should be byte-identical to the snapshot
+
+  @regression
+  Scenario: No new runtime I/O from enrichment
+    Given agentchrome is built
+    When I run "agentchrome man navigate"
+    Then the exit code should be 0
+
+  @requires-225
+  Scenario: Dialog man page shows cross-process flow after #225 lands
+    Given issue #225 has shipped the cross-process dialog API
+    And agentchrome is built
+    When I run "agentchrome man dialog"
+    Then stdout should contain a worked multi-step cross-process dialog example
+    And the same example should appear in "agentchrome examples dialog"

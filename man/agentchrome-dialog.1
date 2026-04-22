@@ -1,0 +1,66 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH dialog 1  "dialog " 
+.SH NAME
+dialog \- Browser dialog handling (alert, confirm, prompt, beforeunload)
+.SH SYNOPSIS
+\fBdialog\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Detect and handle browser JavaScript dialogs (alert, confirm, prompt, beforeunload). Query whether a dialog is open, accept or dismiss it, and provide prompt text. Useful for automation scripts that need to respond to dialogs programmatically.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+dialog\-handle(1)
+Accept or dismiss the current browser dialog
+.TP
+dialog\-info(1)
+Check whether a dialog is currently open
+.TP
+dialog\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # Check if a dialog is open
+  agentchrome dialog info
+
+  # Accept an alert or confirm dialog
+  agentchrome dialog handle accept
+
+  # Dismiss a dialog
+  agentchrome dialog handle dismiss
+
+  # Accept a prompt with text
+  agentchrome dialog handle accept \-\-text "my input"
+.SH CAPABILITIES
+.PP
+Browser dialog handling (alert, confirm, prompt, beforeunload)
+.TP
+.B dialog handle
+Accept or dismiss the current browser dialog
+.TP
+.B action
+Action to take: accept or dismiss
+.TP
+.B --text
+Response text for prompt dialogs (only used with 'accept' action)
+.TP
+.B dialog info
+Check whether a dialog is currently open
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome dialog info\`
+Check if a dialog is currently open
+.TP
+.B \`agentchrome dialog handle accept\`
+Accept an alert or confirm dialog
+.TP
+.B \`agentchrome dialog handle dismiss\`
+Dismiss a dialog
+.TP
+.B \`agentchrome dialog handle accept --text "my input"\`
+Accept a prompt dialog with text

@@ -1,0 +1,204 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH agentchrome 1  "agentchrome 1.41.0" 
+.SH NAME
+agentchrome \- Browser automation via the Chrome DevTools Protocol
+.SH SYNOPSIS
+\fBagentchrome\fR [\fB\-\-port\fR] [\fB\-\-host\fR] [\fB\-\-ws\-url\fR] [\fB\-\-timeout\fR] [\fB\-\-tab\fR] [\fB\-\-page\-id\fR] [\fB\-\-auto\-dismiss\-dialogs\fR] [\fB\-\-config\fR] [\fB\-\-keepalive\-interval\fR] [\fB\-\-no\-keepalive\fR] [\fB\-\-json\fR] [\fB\-\-pretty\fR] [\fB\-\-plain\fR] [\fB\-\-large\-response\-threshold\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+agentchrome is a command\-line tool for browser automation via the Chrome DevTools Protocol (CDP). It provides subcommands for connecting to Chrome/Chromium instances, managing tabs, navigating pages, inspecting the DOM, executing JavaScript, monitoring console output, intercepting network requests, simulating user interactions, filling forms, emulating devices, and collecting performance metrics.
+.PP
+Designed for AI agents and shell scripting, every subcommand produces structured JSON output on stdout and structured JSON errors on stderr. Global flags control connection settings, output format, and target tab selection.
+.SH OPTIONS
+.TP
+\fB\-\-port\fR \fI<PORT>\fR
+Chrome DevTools Protocol port number [default: 9222]
+.RS
+May also be specified with the \fBAGENTCHROME_PORT\fR environment variable. 
+.RE
+.TP
+\fB\-\-host\fR \fI<HOST>\fR [default: 127.0.0.1]
+Chrome DevTools Protocol host address
+.RS
+May also be specified with the \fBAGENTCHROME_HOST\fR environment variable. 
+.RE
+.TP
+\fB\-\-ws\-url\fR \fI<WS_URL>\fR
+Direct WebSocket URL (overrides \-\-host and \-\-port)
+.TP
+\fB\-\-timeout\fR \fI<TIMEOUT>\fR
+Command timeout in milliseconds
+.RS
+May also be specified with the \fBAGENTCHROME_TIMEOUT\fR environment variable. 
+.RE
+.TP
+\fB\-\-tab\fR \fI<TAB>\fR
+Target tab ID (defaults to the active tab)
+.TP
+\fB\-\-page\-id\fR \fI<PAGE_ID>\fR
+Explicit page target ID (bypasses session state; conflicts with \-\-tab)
+.TP
+\fB\-\-auto\-dismiss\-dialogs\fR
+Automatically dismiss any dialogs that appear during command execution
+.TP
+\fB\-\-config\fR \fI<CONFIG>\fR
+Path to configuration file (overrides default search)
+.RS
+May also be specified with the \fBAGENTCHROME_CONFIG\fR environment variable. 
+.RE
+.TP
+\fB\-\-keepalive\-interval\fR \fI<MS>\fR
+WebSocket keep\-alive interval in milliseconds (default: 30000; 0 disables)
+.RS
+May also be specified with the \fBAGENTCHROME_KEEPALIVE_INTERVAL\fR environment variable. 
+.RE
+.TP
+\fB\-\-no\-keepalive\fR
+Disable WebSocket keep\-alive pings entirely
+.TP
+\fB\-\-json\fR
+Output as compact JSON (mutually exclusive with \-\-pretty, \-\-plain)
+.TP
+\fB\-\-pretty\fR
+Output as pretty\-printed JSON (mutually exclusive with \-\-json, \-\-plain)
+.TP
+\fB\-\-plain\fR
+Output as human\-readable plain text (mutually exclusive with \-\-json, \-\-pretty)
+.TP
+\fB\-\-large\-response\-threshold\fR \fI<LARGE_RESPONSE_THRESHOLD>\fR
+Byte threshold for large\-response detection (default: 16384)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+agentchrome\-connect(1)
+Connect to or launch a Chrome instance
+.TP
+agentchrome\-tabs(1)
+Tab management (list, create, close, activate)
+.TP
+agentchrome\-navigate(1)
+URL navigation and history
+.TP
+agentchrome\-page(1)
+Page inspection (screenshot, text, accessibility tree, find)
+.TP
+agentchrome\-dom(1)
+DOM inspection and manipulation
+.TP
+agentchrome\-js(1)
+JavaScript execution in page context
+.TP
+agentchrome\-console(1)
+Console message reading and monitoring
+.TP
+agentchrome\-network(1)
+Network request monitoring and interception
+.TP
+agentchrome\-interact(1)
+Mouse, keyboard, and scroll interactions
+.TP
+agentchrome\-form(1)
+Form input and submission
+.TP
+agentchrome\-emulate(1)
+Device and network emulation
+.TP
+agentchrome\-perf(1)
+Performance tracing and metrics
+.TP
+agentchrome\-cookie(1)
+Browser cookie management (list, set, delete, clear)
+.TP
+agentchrome\-dialog(1)
+Browser dialog handling (alert, confirm, prompt, beforeunload)
+.TP
+agentchrome\-media(1)
+Media element control (list, play, pause, seek)
+.TP
+agentchrome\-audit(1)
+Run audits against the current page (requires lighthouse CLI — see \*(Aqaudit lighthouse \-\-help\*(Aq)
+.TP
+agentchrome\-diagnose(1)
+Pre\-automation challenge scan (iframes, overlays, media gates, frameworks, patterns)
+.TP
+agentchrome\-skill(1)
+Agentic tool skill installation and management
+.TP
+agentchrome\-config(1)
+Configuration file management (show, init, path)
+.TP
+agentchrome\-completions(1)
+Generate shell completion scripts
+.TP
+agentchrome\-examples(1)
+Show usage examples for commands
+.TP
+agentchrome\-capabilities(1)
+Output a machine\-readable manifest of all CLI capabilities
+.TP
+agentchrome\-man(1)
+Display man pages for agentchrome commands
+.TP
+agentchrome\-script(1)
+Execute a batch script of agentchrome commands
+.TP
+agentchrome\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+QUICK START:
+  # Connect to a running Chrome instance
+  agentchrome connect
+
+  # Launch a new headless Chrome and connect
+  agentchrome connect \-\-launch \-\-headless
+
+  # List open tabs and navigate to a URL
+  agentchrome tabs list
+  agentchrome navigate https://example.com
+
+  # Take a full\-page screenshot
+  agentchrome page screenshot \-\-full\-page \-\-file shot.png
+
+  # Execute JavaScript and get the result
+  agentchrome js exec "document.title"
+
+  # Capture the accessibility tree and fill a form field
+  agentchrome page snapshot
+  agentchrome form fill s5 "hello@example.com"
+
+  # Monitor console output in real time
+  agentchrome console follow \-\-timeout 5000
+
+EXIT CODES:
+  0  Success
+  1  General error (invalid arguments, internal failure)
+  2  Connection error (Chrome not running, session expired)
+  3  Target error (tab not found, no page targets)
+  4  Timeout error (navigation or trace timeout)
+  5  Protocol error (CDP protocol failure, dialog handling error)
+
+ERROR HANDLING:
+  Every non\-zero exit emits exactly one JSON object on stderr. The stable
+  shape is:
+    {"error": "<human\-readable message>", "code": <1..5>}
+  Some paths enrich the payload with optional fields (stable fields remain
+  present) — for example form fill against a non\-fillable element:
+    {"error": "...", "code": 1, "kind": "not_fillable",
+     "element_type": {"tag": "div", "role": null},
+     "suggested_alternatives": ["\*(Aqagentchrome interact click\*(Aq"]}
+  Exit\-code meanings: 0=success, 1=general, 2=connection, 3=target,
+  4=timeout, 5=protocol. Success\-path stdout remains JSON and stderr stays
+  empty; stderr is reserved for the error object only.
+
+ENVIRONMENT VARIABLES:
+  AGENTCHROME_PORT     CDP port number (default: 9222)
+  AGENTCHROME_HOST     CDP host address (default: 127.0.0.1)
+  AGENTCHROME_TIMEOUT  Default command timeout in milliseconds
+  AGENTCHROME_CONFIG   Path to configuration file
+.SH VERSION
+v1.41.0

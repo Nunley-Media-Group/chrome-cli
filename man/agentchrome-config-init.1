@@ -1,0 +1,53 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH init 1  "init " 
+.SH NAME
+init \- Create a default config file with commented example values
+.SH SYNOPSIS
+\fBinit\fR [\fB\-\-path\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Create a new configuration file with all available settings documented as comments. By default, the file is created at the XDG config directory (~/.config/agentchrome/config.toml on Linux, ~/Library/Application Support/agentchrome/config.toml on macOS). Use \-\-path to specify a custom location. Will not overwrite an existing file.
+.SH OPTIONS
+.TP
+\fB\-\-path\fR \fI<PATH>\fR
+Create config file at a custom path instead of the default XDG location
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Create default config file
+  agentchrome config init
+
+  # Create at a custom path
+  agentchrome config init \-\-path ./my\-config.toml
+.SH CAPABILITIES
+.PP
+Configuration file management (show, init, path)
+.TP
+.B config show
+Display the resolved configuration from all sources
+.TP
+.B config init
+Create a default config file with commented example values
+.TP
+.B --path
+Create config file at a custom path instead of the default XDG location
+.TP
+.B config path
+Show the active config file path (or null if none)
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome config show\`
+Show the resolved configuration from all sources
+.TP
+.B \`agentchrome config init\`
+Create a default config file
+.TP
+.B \`agentchrome config init --path ./my-config.toml\`
+Create a config at a custom path
+.TP
+.B \`agentchrome config path\`
+Show the active config file path

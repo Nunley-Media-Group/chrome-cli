@@ -1,0 +1,85 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH install 1  "install " 
+.SH NAME
+install \- Install the agentchrome skill for an agentic coding tool
+.SH SYNOPSIS
+\fBinstall\fR [\fB\-\-tool\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Install a concise agentchrome skill/instruction file for the detected (or specified) agentic coding tool. The skill tells the AI agent what agentchrome is and how to discover its capabilities. Re\-running install overwrites the existing skill file (idempotent).
+.SH OPTIONS
+.TP
+\fB\-\-tool\fR \fI<TOOL>\fR
+Target tool (auto\-detected if omitted)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+claude\-code
+.IP \(bu 2
+windsurf
+.IP \(bu 2
+aider
+.IP \(bu 2
+continue
+.IP \(bu 2
+copilot\-jb
+.IP \(bu 2
+cursor
+.IP \(bu 2
+gemini
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Auto\-detect tool and install
+  agentchrome skill install
+
+  # Install for a specific tool
+  agentchrome skill install \-\-tool claude\-code
+.SH CAPABILITIES
+.PP
+Agentic tool skill installation and management
+.TP
+.B skill install
+Install the agentchrome skill for an agentic coding tool
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill uninstall
+Remove a previously installed agentchrome skill
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill update
+Update an installed skill to the current version
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill list
+List supported agentic tools and installation status
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome skill install\`
+Auto-detect agentic tool and install skill
+.TP
+.B \`agentchrome skill install --tool cursor\`
+Install skill for a specific tool
+.TP
+.B \`agentchrome skill list\`
+List supported tools and installation status
+.TP
+.B \`agentchrome skill update --tool claude-code\`
+Update installed skill to current version
+.TP
+.B \`agentchrome skill uninstall --tool aider\`
+Remove an installed skill

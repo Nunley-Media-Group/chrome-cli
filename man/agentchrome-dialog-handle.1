@@ -1,0 +1,69 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH handle 1  "handle " 
+.SH NAME
+handle \- Accept or dismiss the current browser dialog
+.SH SYNOPSIS
+\fBhandle\fR [\fB\-\-text\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIACTION\fR> 
+.SH DESCRIPTION
+Accept or dismiss the currently open browser dialog (alert, confirm, prompt, or beforeunload). A dialog must be open before this command can be used. For prompt dialogs, use \-\-text to provide the response text when accepting.
+.SH OPTIONS
+.TP
+\fB\-\-text\fR \fI<TEXT>\fR
+Response text for prompt dialogs (only used with \*(Aqaccept\*(Aq action)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+<\fIACTION\fR>
+Action to take: accept or dismiss
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+accept: Accept (OK) the dialog
+.IP \(bu 2
+dismiss: Dismiss (Cancel) the dialog
+.RE
+.SH EXTRA
+EXAMPLES:
+  # Accept an alert
+  agentchrome dialog handle accept
+
+  # Dismiss a confirm dialog
+  agentchrome dialog handle dismiss
+
+  # Accept a prompt with text
+  agentchrome dialog handle accept \-\-text "my response"
+.SH CAPABILITIES
+.PP
+Browser dialog handling (alert, confirm, prompt, beforeunload)
+.TP
+.B dialog handle
+Accept or dismiss the current browser dialog
+.TP
+.B action
+Action to take: accept or dismiss
+.TP
+.B --text
+Response text for prompt dialogs (only used with 'accept' action)
+.TP
+.B dialog info
+Check whether a dialog is currently open
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome dialog info\`
+Check if a dialog is currently open
+.TP
+.B \`agentchrome dialog handle accept\`
+Accept an alert or confirm dialog
+.TP
+.B \`agentchrome dialog handle dismiss\`
+Dismiss a dialog
+.TP
+.B \`agentchrome dialog handle accept --text "my input"\`
+Accept a prompt dialog with text

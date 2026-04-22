@@ -1,0 +1,87 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH skill 1  "skill " 
+.SH NAME
+skill \- Agentic tool skill installation and management
+.SH SYNOPSIS
+\fBskill\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Install, update, uninstall, or list agentchrome skill files for agentic coding tools (Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor). The skill file is a minimal signpost that tells the AI agent what agentchrome is and how to discover its capabilities via the CLI\*(Aqs built\-in help system. Auto\-detects the active agentic environment, or use \-\-tool to target a specific tool.
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH SUBCOMMANDS
+.TP
+skill\-install(1)
+Install the agentchrome skill for an agentic coding tool
+.TP
+skill\-uninstall(1)
+Remove a previously installed agentchrome skill
+.TP
+skill\-update(1)
+Update an installed skill to the current version
+.TP
+skill\-list(1)
+List supported agentic tools and installation status
+.TP
+skill\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # Auto\-detect and install
+  agentchrome skill install
+
+  # Install for a specific tool
+  agentchrome skill install \-\-tool claude\-code
+
+  # List supported tools and installation status
+  agentchrome skill list
+
+  # Update installed skill to current version
+  agentchrome skill update \-\-tool claude\-code
+
+  # Remove an installed skill
+  agentchrome skill uninstall \-\-tool claude\-code
+.SH CAPABILITIES
+.PP
+Agentic tool skill installation and management
+.TP
+.B skill install
+Install the agentchrome skill for an agentic coding tool
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill uninstall
+Remove a previously installed agentchrome skill
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill update
+Update an installed skill to the current version
+.TP
+.B --tool
+Target tool (auto-detected if omitted)
+.TP
+.B skill list
+List supported agentic tools and installation status
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome skill install\`
+Auto-detect agentic tool and install skill
+.TP
+.B \`agentchrome skill install --tool cursor\`
+Install skill for a specific tool
+.TP
+.B \`agentchrome skill list\`
+List supported tools and installation status
+.TP
+.B \`agentchrome skill update --tool claude-code\`
+Update installed skill to current version
+.TP
+.B \`agentchrome skill uninstall --tool aider\`
+Remove an installed skill

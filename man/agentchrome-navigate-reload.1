@@ -1,0 +1,71 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH reload 1  "reload " 
+.SH NAME
+reload \- Reload the current page
+.SH SYNOPSIS
+\fBreload\fR [\fB\-\-ignore\-cache\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Reload the current page. Use \-\-ignore\-cache to bypass the browser cache and force a full reload from the server. Returns JSON with the page URL after reload.
+.SH OPTIONS
+.TP
+\fB\-\-ignore\-cache\fR
+Bypass the browser cache on reload
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Reload the page
+  agentchrome navigate reload
+
+  # Reload bypassing cache
+  agentchrome navigate reload \-\-ignore\-cache
+.SH CAPABILITIES
+.PP
+URL navigation and history
+.TP
+.B navigate <URL>
+URL navigation and history
+.TP
+.B url
+URL to navigate to
+.TP
+.B --wait-until
+Wait strategy after navigation
+.TP
+.B --timeout
+Navigation timeout in milliseconds
+.TP
+.B --ignore-cache
+Bypass the browser cache
+.TP
+.B --wait-for-selector
+Wait for a CSS selector to appear after the page loads. Useful for SPA sites where content renders asynchronously after the load event. Example: --wait-for-selector "div.email-list"
+.TP
+.B navigate back
+Go back in browser history
+.TP
+.B navigate forward
+Go forward in browser history
+.TP
+.B navigate reload
+Reload the current page
+.TP
+.B --ignore-cache
+Bypass the browser cache on reload
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome navigate https://example.com\`
+Navigate to a URL and wait for load
+.TP
+.B \`agentchrome navigate https://app.example.com --wait-until networkidle\`
+Navigate and wait for network idle (for SPAs)
+.TP
+.B \`agentchrome navigate back\`
+Go back in browser history
+.TP
+.B \`agentchrome navigate reload --ignore-cache\`
+Reload the page without cache

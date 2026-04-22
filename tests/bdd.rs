@@ -574,6 +574,196 @@ fn script_file_at(world: &mut CliWorld, path: String) {
 }
 
 // =============================================================================
+// ManWorld — man page enrichment BDD tests
+// =============================================================================
+
+#[derive(Debug, Default, World)]
+struct ManWorld {
+    binary_path: Option<PathBuf>,
+    stdout: String,
+    exit_code: Option<i32>,
+    /// Example commands collected from `agentchrome examples <cmd>` for comparison.
+    collected_examples: Vec<String>,
+    /// Snapshot of man/ directory file contents (filename -> bytes) for determinism check.
+    man_snapshot: std::collections::HashMap<String, Vec<u8>>,
+}
+
+#[given("the agentchrome source tree is available")]
+fn source_tree_is_available(world: &mut ManWorld) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        root.join("Cargo.toml").exists(),
+        "Cargo.toml not found — not in the agentchrome source tree"
+    );
+    let bin = binary_path();
+    if bin.exists() {
+        world.binary_path = Some(bin);
+    }
+}
+
+#[given("agentchrome is built")]
+fn man_agentchrome_is_built(world: &mut ManWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+/// Collect the example `cmd` strings from `agentchrome examples <group>` plain output.
+#[when(expr = "I collect the example commands from {string}")]
+fn collect_example_commands(world: &mut ManWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given agentchrome is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "agentchrome") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    let plain = String::from_utf8_lossy(&output.stdout).to_string();
+
+    // Plain output of `agentchrome examples <cmd>` has lines like:
+    //   "  agentchrome dialog info"
+    // Collect any line that starts with "  agentchrome" as an example command.
+    world.collected_examples = plain
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("agentchrome") {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        !world.collected_examples.is_empty(),
+        "No example commands collected from: {command_line}\noutput: {plain}"
+    );
+}
+
+#[when(expr = "I run {string}")]
+fn man_i_run_command(world: &mut ManWorld, command_line: String) {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given agentchrome is built'?");
+
+    let parts: Vec<&str> = command_line.split_whitespace().collect();
+    let args = if parts.first().is_some_and(|&p| p == "agentchrome") {
+        &parts[1..]
+    } else {
+        &parts[..]
+    };
+
+    let output = std::process::Command::new(binary)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[when("I run cargo xtask man and snapshot the man directory")]
+fn run_xtask_man_and_snapshot(world: &mut ManWorld) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let status = std::process::Command::new("cargo")
+        .args(["xtask", "man"])
+        .current_dir(&root)
+        .status()
+        .expect("failed to run cargo xtask man");
+    assert!(status.success(), "cargo xtask man failed");
+
+    let man_dir = root.join("man");
+    let mut snapshot = std::collections::HashMap::new();
+    for entry in std::fs::read_dir(&man_dir).unwrap_or_else(|e| panic!("failed to read man/: {e}"))
+    {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let bytes = std::fs::read(entry.path()).unwrap();
+        snapshot.insert(name, bytes);
+    }
+    world.man_snapshot = snapshot;
+}
+
+#[when("I run cargo xtask man a second time")]
+fn run_xtask_man_second_time(_world: &mut ManWorld) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let status = std::process::Command::new("cargo")
+        .args(["xtask", "man"])
+        .current_dir(&root)
+        .status()
+        .expect("failed to run cargo xtask man (second run)");
+    assert!(status.success(), "cargo xtask man failed on second run");
+}
+
+#[then("every collected example command should appear in stdout")]
+fn collected_examples_in_stdout(world: &mut ManWorld) {
+    for example_cmd in &world.collected_examples {
+        assert!(
+            world.stdout.contains(example_cmd.as_str()),
+            "Man page stdout missing example command: '{example_cmd}'\nstdout: {}",
+            world.stdout
+        );
+    }
+}
+
+#[then("the man directory contents should be byte-identical to the snapshot")]
+fn man_dir_byte_identical(world: &mut ManWorld) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let man_dir = root.join("man");
+
+    for (name, snapshot_bytes) in &world.man_snapshot {
+        let current_bytes = std::fs::read(man_dir.join(name))
+            .unwrap_or_else(|e| panic!("failed to read man/{name}: {e}"));
+        assert_eq!(
+            snapshot_bytes, &current_bytes,
+            "man/{name} is not byte-identical across two xtask runs"
+        );
+    }
+}
+
+#[then(expr = "stdout should contain {string}")]
+fn man_stdout_should_contain(world: &mut ManWorld, expected: String) {
+    assert!(
+        world.stdout.contains(&expected),
+        "stdout does not contain '{expected}'\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then(expr = "the exit code should be {int}")]
+fn man_exit_code_should_be(world: &mut ManWorld, expected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, expected,
+        "Expected exit code {expected}, got {actual}\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then("the exit code should be 0")]
+fn man_exit_code_zero(world: &mut ManWorld) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, 0,
+        "Expected exit code 0, got {actual}\nstdout: {}",
+        world.stdout
+    );
+}
+
+// =============================================================================
 // CdpWorld — CDP WebSocket client BDD tests
 // =============================================================================
 
@@ -5290,8 +5480,14 @@ async fn main() {
     // Help text — all scenarios are CLI-testable (no Chrome needed, just --help output).
     CliWorld::run("tests/features/help-text.feature").await;
 
-    // Man page generation — all scenarios are CLI-testable (no Chrome needed).
-    CliWorld::run("tests/features/man-page-generation.feature").await;
+    // Man page generation enrichment scenarios use ManWorld.
+    // The @requires-225 scenario is skipped until issue #225 ships.
+    ManWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/man-page-generation.feature",
+            |_feature, _rule, scenario| !scenario.tags.iter().any(|t| t == "requires-225"),
+        )
+        .await;
 
     // Examples subcommand — all scenarios are CLI-testable (no Chrome needed).
     ExamplesWorld::run("tests/features/examples.feature").await;

@@ -1,9 +1,6 @@
 # Build artifacts
 target/
 
-# Generated man pages
-man/
-
 # Editor temps
 *.swp
 *~

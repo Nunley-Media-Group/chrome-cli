@@ -1,0 +1,116 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH navigate 1  "navigate " 
+.SH NAME
+navigate \- URL navigation and history
+.SH SYNOPSIS
+\fBnavigate\fR [\fB\-\-wait\-until\fR] [\fB\-\-timeout\fR] [\fB\-\-ignore\-cache\fR] [\fB\-\-wait\-for\-selector\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIURL\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+Navigate to URLs, reload pages, go back/forward in history, and wait for navigation events. Supports waiting for load, DOMContentLoaded, or network idle.
+.SH OPTIONS
+.TP
+\fB\-\-wait\-until\fR \fI<WAIT_UNTIL>\fR [default: load]
+Wait strategy after navigation
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+load: Wait for the load event
+.IP \(bu 2
+domcontentloaded: Wait for DOMContentLoaded event
+.IP \(bu 2
+networkidle: Wait until network is idle (no requests for 500ms)
+.IP \(bu 2
+none: Return immediately after initiating navigation
+.RE
+.TP
+\fB\-\-timeout\fR \fI<TIMEOUT>\fR
+Navigation timeout in milliseconds
+.TP
+\fB\-\-ignore\-cache\fR
+Bypass the browser cache
+.TP
+\fB\-\-wait\-for\-selector\fR \fI<WAIT_FOR_SELECTOR>\fR
+Wait for a CSS selector to appear after the page loads. Useful for SPA sites where content renders asynchronously after the load event. Example: \-\-wait\-for\-selector "div.email\-list"
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.TP
+[\fIURL\fR]
+URL to navigate to
+.SH SUBCOMMANDS
+.TP
+navigate\-back(1)
+Go back in browser history
+.TP
+navigate\-forward(1)
+Go forward in browser history
+.TP
+navigate\-reload(1)
+Reload the current page
+.TP
+navigate\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+EXAMPLES:
+  # Navigate to a URL and wait for page load
+  agentchrome navigate https://example.com
+
+  # Navigate and wait for network idle
+  agentchrome navigate https://example.com \-\-wait\-until networkidle
+
+  # Go back in browser history
+  agentchrome navigate back
+
+  # Reload the current page, bypassing cache
+  agentchrome navigate reload \-\-ignore\-cache
+.SH CAPABILITIES
+.PP
+URL navigation and history
+.TP
+.B navigate <URL>
+URL navigation and history
+.TP
+.B url
+URL to navigate to
+.TP
+.B --wait-until
+Wait strategy after navigation
+.TP
+.B --timeout
+Navigation timeout in milliseconds
+.TP
+.B --ignore-cache
+Bypass the browser cache
+.TP
+.B --wait-for-selector
+Wait for a CSS selector to appear after the page loads. Useful for SPA sites where content renders asynchronously after the load event. Example: --wait-for-selector "div.email-list"
+.TP
+.B navigate back
+Go back in browser history
+.TP
+.B navigate forward
+Go forward in browser history
+.TP
+.B navigate reload
+Reload the current page
+.TP
+.B --ignore-cache
+Bypass the browser cache on reload
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome navigate https://example.com\`
+Navigate to a URL and wait for load
+.TP
+.B \`agentchrome navigate https://app.example.com --wait-until networkidle\`
+Navigate and wait for network idle (for SPAs)
+.TP
+.B \`agentchrome navigate back\`
+Go back in browser history
+.TP
+.B \`agentchrome navigate reload --ignore-cache\`
+Reload the page without cache
