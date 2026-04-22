@@ -29,9 +29,8 @@ pub struct CommandDescriptor {
     subcommands: Option<Vec<SubcommandDescriptor>>,
 }
 
-// Progressive-disclosure listing types (#218). Separate types from the detail
-// descriptors above so the compiler guarantees the listing path cannot carry
-// `subcommands` / `args` / `flags`.
+// Separate listing types from the detail descriptors above so the compiler
+// guarantees the listing path cannot carry `subcommands` / `args` / `flags`.
 
 #[derive(Serialize, Clone)]
 pub struct CommandListing {
@@ -693,8 +692,6 @@ mod tests {
         assert!(parsed.get("global_flags").is_none());
         assert!(parsed.get("exit_codes").is_none());
     }
-
-    // T024 — Progressive-disclosure guard tests (#218)
 
     #[test]
     fn command_listing_json_has_only_two_fields() {

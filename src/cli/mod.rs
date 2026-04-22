@@ -3866,7 +3866,6 @@ mod tests {
         );
     }
 
-    // T021: capabilities positional parse tests
     #[test]
     fn capabilities_with_positional_parses() {
         let cli = try_parse("capabilities page").expect("capabilities page should parse");
@@ -3886,7 +3885,6 @@ mod tests {
         assert!(args.command.is_none());
     }
 
-    // T025: Clap help metadata steering compliance test for Capabilities
     #[test]
     fn capabilities_subcommand_carries_clap_help_metadata() {
         use clap::CommandFactory;
