@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-04-21
+
 ### Changed
 
 - **BREAKING**: `agentchrome examples --json` top-level listing now returns only `{command, description}` per entry; the nested `examples` array is removed from the listing payload. Fetch individual command-group examples via `agentchrome examples <group> --json` (unchanged). (#218)
