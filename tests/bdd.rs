@@ -460,6 +460,94 @@ fn exit_code_should_not_be(world: &mut CliWorld, rejected: i32) {
     );
 }
 
+/// Fixture content for script test files.
+/// Fixtures are written on demand because tests/fixtures/ is git-ignored.
+fn script_fixture_content(filename: &str) -> Option<&'static str> {
+    match filename {
+        "simple.json" => Some(
+            r#"{
+  "commands": [
+    { "cmd": ["navigate", "https://example.com"] },
+    { "cmd": ["page", "text"] },
+    { "cmd": ["js", "exec", "document.title"], "bind": "title" }
+  ]
+}
+"#,
+        ),
+        "bad-cmd.json" => Some(
+            r#"{
+  "commands": [
+    { "cmd": ["navigate", "https://example.com"] },
+    { "cmd": ["totally_unknown_subcommand", "some-arg"] }
+  ]
+}
+"#,
+        ),
+        "empty-commands.json" => Some(
+            r#"{"commands": []}
+"#,
+        ),
+        "conditional.json" => Some(
+            r#"{
+  "commands": [
+    { "cmd": ["js", "exec", "document.title"], "bind": "title" },
+    {
+      "if": "$vars.title.includes('Example')",
+      "then": [{ "cmd": ["js", "exec", "'then-branch'"] }],
+      "else": [{ "cmd": ["js", "exec", "'else-branch'"] }]
+    }
+  ]
+}
+"#,
+        ),
+        "count-loop.json" => Some(
+            r#"{
+  "commands": [
+    {
+      "loop": { "count": 3 },
+      "body": [{ "cmd": ["js", "exec", "$i"] }]
+    }
+  ]
+}
+"#,
+        ),
+        _ => None,
+    }
+}
+
+#[given(expr = "a script file at {string}")]
+fn script_file_at(world: &mut CliWorld, path: String) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let full_path = root.join(&path);
+
+    // Create the fixture if it does not exist — tests/fixtures/ is git-ignored so fixtures
+    // must be written at test time from embedded content.
+    if !full_path.exists() {
+        let filename = full_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let content = script_fixture_content(filename).unwrap_or_else(|| {
+            panic!(
+                "No embedded content for script fixture '{filename}'. \
+                 Add it to script_fixture_content() in tests/bdd.rs."
+            )
+        });
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                panic!("Failed to create fixture dir {}: {e}", parent.display())
+            });
+        }
+        std::fs::write(&full_path, content)
+            .unwrap_or_else(|e| panic!("Failed to write fixture {}: {e}", full_path.display()));
+    }
+
+    // Ensure binary is available (may already be set by "agentchrome is built").
+    if world.binary_path.is_none() {
+        let bin = binary_path();
+        if bin.exists() {
+            world.binary_path = Some(bin);
+        }
+    }
+}
+
 // =============================================================================
 // CdpWorld — CDP WebSocket client BDD tests
 // =============================================================================
@@ -3724,6 +3812,20 @@ fn diagnose_stdout_contains(world: &mut DiagnoseWorld, expected: String) {
 /// Coordinate space helpers BDD scenarios testable without a running Chrome instance.
 /// Chrome-dependent scenarios (AC1-AC9, AC11, regression Chrome scenarios) are commented out in
 /// the feature file and verified via manual smoke test.
+/// Batch script execution (issue #199) BDD scenarios testable without Chrome.
+/// Schema validation, dry-run, help text, and capabilities/examples integration
+/// do not require a live Chrome session.
+const BATCH_SCRIPT_TESTABLE_SCENARIOS: &[&str] = &[
+    "AC9 happy — Dry-run validates a correct script",
+    "AC9 alt — Dry-run reports schema errors for unknown subcommands",
+    "Empty commands array is rejected at parse time",
+    "AC10 — script --help mentions key concepts",
+    "AC10 — script run --help lists flags",
+    "AC11 — script run --help long form includes EXAMPLES",
+    "AC12 — Capabilities manifest includes the script surface",
+    "AC13 — examples script prints worked examples",
+];
+
 const COORD_SPACE_TESTABLE_SCENARIOS: &[&str] = &[
     "AC10 — Invalid percentage value rejected by clap before dispatch",
     "Percentage coordinates without --relative-to are rejected",
@@ -5421,6 +5523,18 @@ async fn main() {
             "tests/features/coordinate-space-helpers.feature",
             |_feature, _rule, scenario| {
                 COORD_SPACE_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
+
+    // Batch script execution (issue #199) — schema validation, help surface, dry-run, and
+    // capabilities/examples integration can be tested without Chrome. Live execution scenarios
+    // (AC1-AC8, AC14, AC16) require a running Chrome instance and are verified via smoke test.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/batch-script-execution.feature",
+            |_feature, _rule, scenario| {
+                BATCH_SCRIPT_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
             },
         )
         .await;

@@ -1,0 +1,159 @@
+# File: tests/features/batch-script-execution.feature
+#
+# Generated from: specs/feature-add-batch-script-execution-for-command-chaining/requirements.md
+# Issue: #199
+
+Feature: Batch Script Execution
+  As a browser automation engineer running repetitive multi-step workflows
+  I want to define agentchrome commands in a JSON script and run them as one operation
+  So that I can cut round-trips and context-window usage for long automations
+
+  Background:
+    Given agentchrome is built in debug mode
+    And a headless Chrome session is active
+
+  # --- Happy Path ---
+
+  Scenario: AC1 — Execute a script file
+    Given a script file "slides.json" containing three commands navigate, page snapshot, and js exec "document.title"
+    When I run "agentchrome script run slides.json"
+    Then the exit code is 0
+    And stdout is a single JSON object with fields "results", "executed", "skipped", "failed"
+    And "executed" equals 3
+    And every entry in "results" has "index", "command", "status", and "duration_ms"
+    And results[2].output.result equals "Example Domain"
+
+  # --- Alternative Input ---
+
+  Scenario: AC2 — Script execution from stdin
+    Given the same three-command script piped on stdin
+    When I run "agentchrome script run -"
+    Then the exit code is 0
+    And stdout JSON matches the file-based run's shape
+
+  # --- Control Flow: Conditional ---
+
+  Scenario: AC3 happy — if-branch selected when condition is truthy
+    Given a script with a preceding step that binds "title" to "Example Domain"
+    And a conditional step "if: $vars.title.includes('Example')" with then=[screenshot ok.png] else=[screenshot fail.png]
+    When I run the script
+    Then "screenshot ok.png" executes
+    And the else-branch entry appears in results with status "skipped"
+
+  Scenario: AC3 alt — else-branch selected when condition is falsy
+    Given the same script but "title" binds to "Other Site"
+    When I run the script
+    Then "screenshot fail.png" executes
+    And the then-branch entry appears in results with status "skipped"
+
+  # --- Error Handling ---
+
+  Scenario: AC4 — Fail-fast halts at the failing step
+    Given a 5-step script where step 2 fails (js exec raises)
+    When I run "agentchrome script run --fail-fast broken.json"
+    Then the exit code is 1
+    And stderr contains exactly one JSON error with fields "error", "code", "failing_index", "failing_command"
+    And failing_index equals 2
+    And stdout's results array contains only steps 1 and 2
+    And results[1].status equals "error"
+
+  Scenario: AC5 — Continue-on-error runs all steps
+    Given the same 5-step script but no --fail-fast
+    When I run "agentchrome script run broken.json"
+    Then the exit code is 0
+    And stdout's results array contains all 5 entries
+    And exactly one entry has status "error"
+    And "failed" equals 1
+
+  # --- Control Flow: Loops ---
+
+  Scenario: AC6 — Count-based loop runs body N times
+    Given a script with loop.count=3 over a body that clicks at (100,200)
+    When I run the script
+    Then the underlying click executes exactly 3 times
+    And results contains 3 entries with loop_index 0, 1, 2
+
+  Scenario: AC7 — While loop honours the max guard
+    Given a script with loop.while="true" and loop.max=5
+    When I run the script
+    Then the body executes exactly 5 times
+    And stderr contains one JSON warning "loop max iterations reached" with max=5
+
+  # --- Variable Binding ---
+
+  Scenario: AC8 — Bound variable is substituted in later arguments
+    Given a script that binds js exec "document.title" to "title"
+    And a subsequent step referencing "$vars.title" in its argv
+    When I run the script
+    Then the subsequent step receives "Example Domain" as its argument
+    And results for the subsequent step has status "ok"
+
+  Scenario: AC8 alt — Unknown variable reference produces a step error
+    Given a script that references "$vars.does_not_exist"
+    When I run the script without --fail-fast
+    Then the referencing step has status "error" in results
+    And the error message names the undefined variable
+
+  # --- Validation ---
+
+  Scenario: AC9 happy — Dry-run validates a correct script
+    Given a valid script "plan.json"
+    When I run "agentchrome script run --dry-run plan.json"
+    Then no CDP calls are made
+    And the exit code is 0
+    And stdout is {"dispatched": false, "ok": true, "steps": N}
+
+  Scenario: AC9 alt — Dry-run reports schema or reference errors
+    Given a script with an unknown subcommand name
+    When I run "agentchrome script run --dry-run bad.json"
+    Then the exit code is 1
+    And stderr contains one structured JSON error naming the invalid step
+
+  # --- Help Surface ---
+
+  Scenario: AC10 — script --help / script run --help metadata
+    When I run "agentchrome script --help"
+    Then stdout mentions "script execution" or "command chaining"
+    And "agentchrome script run --help" lists --fail-fast, --dry-run, and the <file> positional (with `-` for stdin)
+
+  Scenario: AC11 — script run --help long form includes worked examples
+    When I run "agentchrome script run --help"
+    Then the output contains a heading "EXAMPLES"
+    And at least one example reads a script from stdin
+    And at least one example uses --fail-fast
+
+  # --- Integration with capabilities and examples ---
+
+  Scenario: AC12 — Capabilities manifest includes the script surface
+    When I run "agentchrome capabilities --json"
+    Then the output includes a "script" entry
+    And the entry lists "run" as a subcommand with --fail-fast and --dry-run flags
+
+  Scenario: AC13 — examples script prints worked scripts
+    When I run "agentchrome examples script"
+    Then at least 3 example scripts are printed
+    And at least one covers conditional branching
+    And at least one covers loops
+
+  # --- Session Precondition ---
+
+  Scenario: AC14 — No active session produces a connection error
+    Given no active CDP session
+    When I run "agentchrome script run good.json"
+    Then the exit code is 2
+    And stderr contains exactly one JSON error matching the global shape
+    And stdout is empty
+
+  # --- Name Collision Guard ---
+
+  Scenario: AC15 — No collision with global flags
+    When I inspect "agentchrome script run --help"
+    Then none of the documented flags collide with --json, --pretty, --port, --host, --timeout, or --config
+
+  # --- Cross-Step State Propagation ---
+
+  Scenario: AC16 — State created by one step is visible to the next
+    Given a script whose step 1 creates a new tab and step 2 issues "page snapshot"
+    When I run the script
+    Then step 2 observes the tab created by step 1
+    And the behaviour holds in both headed and headless runtimes

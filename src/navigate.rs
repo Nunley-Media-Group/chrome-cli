@@ -634,6 +634,7 @@ fn extract_http_status(
 /// # Errors
 ///
 /// Propagates `AppError` from the underlying navigate logic.
+#[allow(clippy::too_many_lines)]
 pub async fn run_from_session(
     managed: &mut ManagedSession,
     global: &GlobalOpts,

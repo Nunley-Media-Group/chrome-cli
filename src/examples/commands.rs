@@ -697,6 +697,32 @@ pub fn all_examples() -> Vec<CommandGroupSummary> {
                 },
             ],
         },
+        CommandGroupSummary {
+            command: "script".into(),
+            description: "Execute a batch script of agentchrome commands from a JSON file".into(),
+            examples: vec![
+                ExampleEntry {
+                    cmd: "agentchrome script run script.json".into(),
+                    description: "Execute all commands in script.json sequentially".into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome script run script.json --fail-fast".into(),
+                    description: "Stop on the first failing step and exit non-zero".into(),
+                    flags: Some(vec!["--fail-fast".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome script run script.json --dry-run".into(),
+                    description: "Validate the script schema without dispatching to Chrome".into(),
+                    flags: Some(vec!["--dry-run".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome script run -".into(),
+                    description: "Read the script from stdin instead of a file".into(),
+                    flags: None,
+                },
+            ],
+        },
     ]
 }
 
