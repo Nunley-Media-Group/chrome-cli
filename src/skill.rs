@@ -23,8 +23,8 @@ enum InstallMode {
 }
 
 /// Metadata for a supported agentic tool.
-struct ToolInfo {
-    name: &'static str,
+pub(crate) struct ToolInfo {
+    pub(crate) name: &'static str,
     detection: &'static str,
     install_mode: InstallMode,
 }
@@ -59,7 +59,7 @@ struct ToolListEntry {
 // Tool registry
 // =============================================================================
 
-static TOOLS: &[ToolInfo] = &[
+pub(crate) static TOOLS: &[ToolInfo] = &[
     ToolInfo {
         name: "claude-code",
         detection: "CLAUDE_CODE env var or 'claude' in parent process",
@@ -262,7 +262,7 @@ fn home_dir() -> Option<std::path::PathBuf> {
     dirs::home_dir()
 }
 
-fn resolve_path(template: &str) -> Result<std::path::PathBuf, AppError> {
+pub(crate) fn resolve_path(template: &str) -> Result<std::path::PathBuf, AppError> {
     if let Some(rest) = template.strip_prefix("~/") {
         let home = home_dir().ok_or_else(|| AppError {
             message: "could not determine home directory".into(),
@@ -275,7 +275,7 @@ fn resolve_path(template: &str) -> Result<std::path::PathBuf, AppError> {
     }
 }
 
-fn path_template(tool: &ToolInfo) -> &'static str {
+pub(crate) fn path_template(tool: &ToolInfo) -> &'static str {
     match &tool.install_mode {
         InstallMode::Standalone { path_template }
         | InstallMode::AppendSection { path_template } => path_template,

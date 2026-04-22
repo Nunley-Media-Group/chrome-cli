@@ -24,6 +24,7 @@ mod output;
 mod page;
 mod perf;
 mod skill;
+mod skill_check;
 mod snapshot;
 mod tabs;
 
@@ -163,6 +164,7 @@ fn resolve_subcommand_path(argv: &[String]) -> Option<String> {
 async fn run(cli: &Cli) -> Result<(), AppError> {
     // Load config file (if any) and apply defaults to global opts
     let (config_path, config_file) = config::load_config(cli.global.config.as_deref());
+    skill_check::emit_stale_notice_if_any(&config_file);
     let global = apply_config_defaults(&cli.global, &config_file);
 
     match &cli.command {
