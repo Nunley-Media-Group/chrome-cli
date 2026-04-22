@@ -760,7 +760,6 @@ async fn execute_script(global: &GlobalOpts, args: &cli::ScriptArgs) -> Result<(
 
     let ScriptSubcommand::Run(run_args) = &args.sub;
 
-    // Read script bytes (file or stdin)
     let bytes: Vec<u8> = if run_args.file == "-" {
         let mut buf = Vec::new();
         std::io::stdin()
@@ -789,10 +788,8 @@ async fn execute_script(global: &GlobalOpts, args: &cli::ScriptArgs) -> Result<(
         })?
     };
 
-    // Parse and validate schema
     let script_doc = parse_script(&bytes)?;
 
-    // Dry-run path (no Chrome required)
     if run_args.dry_run {
         let steps = validate_dry_run(&script_doc)?;
         let report = DryRunReport {
@@ -804,7 +801,6 @@ async fn execute_script(global: &GlobalOpts, args: &cli::ScriptArgs) -> Result<(
         return Ok(());
     }
 
-    // Establish a CDP session
     let opts_connection = output::connect_from_global(global).await?;
     let target = agentchrome::connection::resolve_target(
         &opts_connection.resolved.host,
@@ -828,29 +824,19 @@ async fn execute_script(global: &GlobalOpts, args: &cli::ScriptArgs) -> Result<(
         global,
         &run_opts,
     )
-    .await;
+    .await?;
 
-    match report {
-        Ok(report) => {
-            // Emit the run report on stdout
-            if global.output.pretty {
-                let json = serde_json::to_string_pretty(&report).map_err(|e| AppError {
-                    message: format!("serialization error: {e}"),
-                    code: ExitCode::GeneralError,
-                    custom_json: None,
-                })?;
-                println!("{json}");
-            } else {
-                print_json(&report)?;
-            }
-            Ok(())
-        }
-        Err(e) => {
-            // fail_fast abort: emit structured error on stderr with partial results
-            // (the run_script function returns early, so there's no partial report)
-            Err(e)
-        }
+    if global.output.pretty {
+        let json = serde_json::to_string_pretty(&report).map_err(|e| AppError {
+            message: format!("serialization error: {e}"),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })?;
+        println!("{json}");
+    } else {
+        print_json(&report)?;
     }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -154,13 +154,20 @@ fn execute_step<'a>(
                 });
 
                 if is_error && opts.fail_fast {
+                    let message = format!(
+                        "script step {current_index} failed: {}",
+                        err_clone.unwrap_or_default()
+                    );
+                    let custom = serde_json::json!({
+                        "error": message,
+                        "code": ExitCode::GeneralError as u8,
+                        "failing_index": current_index,
+                        "failing_command": cmd_step.cmd,
+                    });
                     return Err(AppError {
-                        message: format!(
-                            "script step {current_index} failed: {}",
-                            err_clone.unwrap_or_default()
-                        ),
+                        message,
                         code: ExitCode::GeneralError,
-                        custom_json: None,
+                        custom_json: Some(custom.to_string()),
                     });
                 }
             }
@@ -270,7 +277,6 @@ fn emit_skipped_step(
             *index += 1;
         }
         Step::If(if_step) => {
-            // Recursively skip all nested steps
             for sub in &if_step.then {
                 emit_skipped_step(sub, results, index, loop_index);
             }

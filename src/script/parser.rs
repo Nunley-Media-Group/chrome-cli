@@ -309,9 +309,6 @@ mod tests {
 
     #[test]
     fn reject_while_without_max() {
-        // When max is missing, WhileLoop fails to deserialize (no max field),
-        // so it falls through to CountLoop which also fails (no count field),
-        // ultimately hitting a parse error.
         let bytes =
             json(r#"{"commands":[{"loop":{"while":"true"},"body":[{"cmd":["navigate","x"]}]}]}"#);
         let err = parse_script(&bytes).expect_err("should fail");

@@ -598,7 +598,7 @@ async fn execute_in_worker(
 /// Propagates `AppError` from the underlying js logic.
 pub async fn run_from_session(
     managed: &mut agentchrome::connection::ManagedSession,
-    global: &GlobalOpts,
+    _global: &GlobalOpts,
     args: &JsArgs,
 ) -> Result<serde_json::Value, AppError> {
     let JsCommand::Exec(exec_args) = &args.command;
@@ -629,7 +629,6 @@ pub async fn run_from_session(
     let value = extract_result_value(cdp_result);
     let (value, was_truncated) = apply_truncation(value, exec_args.max_size);
 
-    let _ = global; // output format is handled by script runner
     Ok(serde_json::json!({
         "result": value,
         "type": js_type,
