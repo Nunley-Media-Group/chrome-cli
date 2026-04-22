@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.39.2] - 2026-04-22
+
+### Fixed
+
+- Fix `agentchrome console follow --timeout <ms>` default exit code so it returns 0 when the timeout elapses even if `console.error` messages were observed, restoring tail-style monitoring semantics. The previous error-coupled exit-1 behavior is now opt-in via a new `--fail-on-error` flag, preserving the CI assertion use case. `console follow --help`, the `examples` listing, and the capabilities manifest document both modes with worked examples. (#228)
+
 ## [1.39.1] - 2026-04-22
 
 ### Fixed
