@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.39.1] - 2026-04-22
+
+### Fixed
+
+- Fix `agentchrome interact key <KEY>` so `keyup` listeners on the target page observe the dispatched key: `Input.dispatchKeyEvent` payloads now include `windowsVirtualKeyCode` on both `keyDown` and `keyUp`, include `text` on `keyDown` for printable keys, and `cdp_key_value` returns the proper `"Enter"`/`"Tab"` strings (previously `"\r"` / `"\t"`) so page listeners reading `event.key` observe the expected value. Modifier combinations and `interact type` char-synthesis are unchanged. (#227)
+
 ## [1.39.0] - 2026-04-21
 
 ### Added
