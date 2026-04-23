@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.46.0] - 2026-04-23
+
+### Fixed
+
+- `script run` now auto-unwraps the `js exec` output envelope at the bind site so `$vars.<name>` holds the scalar (or object/array) `result` directly instead of `{result, truncated, type}`. Expressions like `$vars.t.includes('Internet')` evaluate without `TypeError`, and `$vars.obj.<field>` resolves on returned objects. Bind shape for other commands (`page find`, `page text`, `page screenshot`, `navigate`, …) is unchanged, and `agentchrome js exec` stdout outside scripts still emits the full envelope. (#248)
+
 ## [1.45.0] - 2026-04-23
 
 ### Added
