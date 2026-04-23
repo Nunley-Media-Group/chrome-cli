@@ -1,0 +1,46 @@
+# File: tests/features/batch-script-execution.feature (additions)
+#
+# Generated from: specs/bug-fix-script-bind-auto-unwrap-scalar-results/requirements.md
+# Issue: #248
+# Type: Defect regression
+
+@regression
+Feature: Script bind auto-unwraps scalar `js exec` results
+  Previously, a script step `{ "cmd": ["js", "exec", ...], "bind": "k" }` stored
+  the full `{result, truncated, type}` envelope into `$vars.k`, causing
+  `$vars.k.includes(...)` and similar scalar access to throw `TypeError`.
+  This was fixed by unwrapping the `result` field at the bind site inside the
+  script runner, while leaving `agentchrome js exec`'s stdout envelope unchanged.
+
+  # --- Bug Is Fixed ---
+
+  @regression
+  Scenario: js exec scalar result is auto-unwrapped for downstream expression use
+    Given a page whose document title is "The Internet"
+    And a script with a step `{ "cmd": ["js", "exec", "document.title"], "bind": "t" }`
+    And a following step `{ "if": "$vars.t.includes('Internet')", "then": [{ "cmd": ["page", "snapshot"] }] }`
+    When I run the script with `agentchrome script run`
+    Then the `if` expression evaluates without a TypeError
+    And the `then` branch is taken
+    And the overall script run succeeds
+
+  # --- Non-scalar js exec results remain accessible directly ---
+
+  @regression
+  Scenario: js exec object result is bound without the envelope wrapper
+    Given a script with a step `{ "cmd": ["js", "exec", "({a: 1, b: 2})"], "bind": "obj" }`
+    And a following step that references `$vars.obj.a`
+    When I run the script with `agentchrome script run`
+    Then `$vars.obj.a` resolves to `1`
+    And `$vars.obj` does not have a `truncated` field
+
+  # --- Related Behavior Still Works ---
+
+  @regression
+  Scenario: page find bind shape is unchanged
+    Given a page containing a single clickable element with accessible name "Submit"
+    And a script with a step `{ "cmd": ["page", "find", "--name", "Submit"], "bind": "match" }`
+    And a following step that references `$vars.match[0].uid`
+    When I run the script with `agentchrome script run`
+    Then `$vars.match[0].uid` resolves to the uid of the "Submit" element
+    And the script run succeeds

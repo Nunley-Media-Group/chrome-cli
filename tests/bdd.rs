@@ -561,6 +561,27 @@ fn script_fixture_content(filename: &str) -> Option<&'static str> {
 }
 "#,
         ),
+        "js-exec-bind-scalar.json" => Some(
+            r#"{
+  "commands": [
+    { "cmd": ["js", "exec", "document.title"], "bind": "t" },
+    {
+      "if": "$vars.t.includes('Internet')",
+      "then": [{ "cmd": ["page", "snapshot"] }]
+    }
+  ]
+}
+"#,
+        ),
+        "js-exec-bind-object.json" => Some(
+            r#"{
+  "commands": [
+    { "cmd": ["js", "exec", "({a: 1, b: 2})"], "bind": "obj" },
+    { "cmd": ["js", "exec", "$vars.obj.a"] }
+  ]
+}
+"#,
+        ),
         _ => None,
     }
 }
@@ -4057,6 +4078,8 @@ const BATCH_SCRIPT_TESTABLE_SCENARIOS: &[&str] = &[
     "AC17 dry-run — page find passes script schema validation",
     "AC18 dry-run — page screenshot passes script schema validation",
     "AC19 dry-run — page find then interact click passes validation",
+    "AC21 dry-run — js-exec-bind-scalar script passes schema validation",
+    "AC22 dry-run — js-exec-bind-object script passes schema validation",
 ];
 
 const COORD_SPACE_TESTABLE_SCENARIOS: &[&str] = &[

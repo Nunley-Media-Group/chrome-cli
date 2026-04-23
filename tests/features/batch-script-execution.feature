@@ -128,3 +128,37 @@ Feature: Batch Script Execution
     When I run "agentchrome script run tests/fixtures/scripts/simple.json"
     Then the exit code should be 0
     And no warnings appear on stderr
+
+  # --- Issue #248: js exec bind auto-unwraps scalar result ---
+
+  @regression
+  Scenario: AC21 dry-run — js-exec-bind-scalar script passes schema validation
+    Given a script file at "tests/fixtures/scripts/js-exec-bind-scalar.json"
+    When I run "agentchrome script run --dry-run tests/fixtures/scripts/js-exec-bind-scalar.json"
+    Then the exit code should be 0
+    And stdout should be valid JSON
+    And stdout JSON should have key "ok"
+
+  @regression
+  Scenario: AC22 dry-run — js-exec-bind-object script passes schema validation
+    Given a script file at "tests/fixtures/scripts/js-exec-bind-object.json"
+    When I run "agentchrome script run --dry-run tests/fixtures/scripts/js-exec-bind-object.json"
+    Then the exit code should be 0
+    And stdout should be valid JSON
+    And stdout JSON should have key "ok"
+
+  @smoke @regression
+  Scenario: AC21 live — js exec scalar bind is auto-unwrapped for downstream use
+    Given an active CDP session on a page whose document title is "The Internet"
+    When I run "agentchrome script run tests/fixtures/scripts/js-exec-bind-scalar.json"
+    Then the exit code should be 0
+    And the script result for step 0 has status "ok"
+    And the script result for step 1 has status "ok"
+
+  @smoke @regression
+  Scenario: AC22 live — js exec object bind exposes fields directly
+    Given an active CDP session
+    When I run "agentchrome script run tests/fixtures/scripts/js-exec-bind-object.json"
+    Then the exit code should be 0
+    And $vars.obj.a resolves to 1
+    And $vars.obj has no "truncated" field

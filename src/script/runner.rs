@@ -128,7 +128,7 @@ fn execute_step<'a>(
                     Ok(argv) => match invoke(&argv, ctx, client, managed, global).await {
                         Ok(value) => {
                             if let Some(bind_name) = &cmd_step.bind {
-                                ctx.bind(bind_name, value.clone());
+                                ctx.bind(bind_name, bind_value_for(&argv, &value));
                             }
                             ctx.set_prev(value.clone());
                             (StepStatus::Ok, Some(value), None)
@@ -253,6 +253,21 @@ fn execute_step<'a>(
     })
 }
 
+/// Compute the value stored in `$vars` when a step has a `bind`.
+///
+/// `js exec` wraps its result in a `{result, type, truncated}` envelope on the
+/// wire, but script authors naturally expect `$vars.<bind>` to hold the
+/// underlying JS value. Unwrap the envelope at the bind site for `js exec` only
+/// — other commands keep their returned shape intact.
+fn bind_value_for(cmd: &[String], value: &serde_json::Value) -> serde_json::Value {
+    if cmd.len() >= 2 && cmd[0] == "js" && cmd[1] == "exec" {
+        if let Some(inner) = value.get("result") {
+            return inner.clone();
+        }
+    }
+    value.clone()
+}
+
 /// Emit a `skipped` result entry for a step that was not selected by an `if` branch.
 fn emit_skipped_step(
     step: &Step,
@@ -355,6 +370,63 @@ mod tests {
         let err = validate_dry_run(&script).expect_err("should fail");
         assert!(err.message.contains("unknown subcommand"));
         assert!(err.message.contains("unknown_cmd"));
+    }
+
+    #[test]
+    fn bind_value_for_js_exec_scalar_unwraps_result() {
+        let cmd = vec![
+            "js".to_string(),
+            "exec".to_string(),
+            "document.title".to_string(),
+        ];
+        let envelope = serde_json::json!({
+            "result": "The Internet",
+            "type": "string",
+            "truncated": false
+        });
+        let bound = bind_value_for(&cmd, &envelope);
+        assert_eq!(bound, serde_json::Value::String("The Internet".to_string()));
+    }
+
+    #[test]
+    fn bind_value_for_js_exec_object_unwraps_result() {
+        let cmd = vec![
+            "js".to_string(),
+            "exec".to_string(),
+            "({a:1,b:2})".to_string(),
+        ];
+        let envelope = serde_json::json!({
+            "result": {"a": 1, "b": 2},
+            "type": "object",
+            "truncated": false
+        });
+        let bound = bind_value_for(&cmd, &envelope);
+        assert_eq!(bound, serde_json::json!({"a": 1, "b": 2}));
+        assert!(bound.get("truncated").is_none());
+    }
+
+    #[test]
+    fn bind_value_for_page_find_passes_through_array() {
+        let cmd = vec!["page".to_string(), "find".to_string(), "Submit".to_string()];
+        let value = serde_json::json!([{"uid": "u-1", "role": "button", "name": "Submit"}]);
+        let bound = bind_value_for(&cmd, &value);
+        assert_eq!(bound, value);
+    }
+
+    #[test]
+    fn bind_value_for_navigate_passes_through_object() {
+        let cmd = vec!["navigate".to_string(), "https://example.com".to_string()];
+        let value = serde_json::json!({"url": "https://example.com", "title": "Example"});
+        let bound = bind_value_for(&cmd, &value);
+        assert_eq!(bound, value);
+    }
+
+    #[test]
+    fn bind_value_for_js_without_exec_passes_through() {
+        let cmd = vec!["js".to_string(), "help".to_string()];
+        let value = serde_json::json!({"result": "something"});
+        let bound = bind_value_for(&cmd, &value);
+        assert_eq!(bound, value);
     }
 
     #[test]
