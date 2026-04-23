@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.44.0] - 2026-04-23
+
+### Fixed
+
+- `form fill-many` now accepts `target` as the primary JSON key for each entry, matching the field name used throughout the rest of the `form` subcommand family (`form fill <target>`). The legacy `uid` key remains accepted as a silent alias for backward compatibility. The deserialization error message, `--help` `long_about`, inline examples, and `examples_data.rs` strategies now reference `target` consistently. (#246)
+
 ## [1.43.0] - 2026-04-22
 
 ### Added

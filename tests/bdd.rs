@@ -5822,6 +5822,10 @@ async fn main() {
     FormFillReactWorld::run("tests/features/161-fix-form-fill-react-controlled-inputs.feature")
         .await;
 
+    // Form fill-many `target` field name (issue #246) — all scenarios are CLI-only
+    // (help text and error output for malformed payloads); no Chrome is required.
+    CliWorld::run("tests/features/246-fix-fill-many-target-field-name.feature").await;
+
     // Form submit (issue #147) — CLI-testable scenarios only (help text, missing args).
     // Chrome-dependent scenarios are commented out in the feature file.
     CliWorld::cucumber()

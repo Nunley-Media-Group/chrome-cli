@@ -60,10 +60,12 @@ struct SubmitResult {
     snapshot: Option<serde_json::Value>,
 }
 
-/// JSON input for fill-many: each entry has a uid and value.
+/// JSON input for fill-many: each entry has a target (UID or CSS selector) and value.
+/// Accepts `uid` as a silent alias for backward compatibility.
 #[derive(Deserialize)]
 struct FillEntry {
-    uid: String,
+    #[serde(alias = "uid")]
+    target: String,
     value: String,
 }
 
@@ -780,7 +782,7 @@ async fn execute_fill_many(
     };
 
     let entries: Vec<FillEntry> = serde_json::from_str(&json_str).map_err(|e| AppError {
-        message: format!("Invalid JSON: expected array of {{uid, value}} objects: {e}"),
+        message: format!("Invalid JSON: expected array of {{target, value}} objects: {e}"),
         code: ExitCode::GeneralError,
         custom_json: None,
     })?;
@@ -812,9 +814,9 @@ async fn execute_fill_many(
     // Fill each element via the effective session
     let mut results = Vec::with_capacity(entries.len());
     for entry in &entries {
-        fill_element(effective, &entry.uid, &entry.value, None).await?;
+        fill_element(effective, &entry.target, &entry.value, None).await?;
         results.push(FillResult {
-            filled: entry.uid.clone(),
+            filled: entry.target.clone(),
             value: entry.value.clone(),
             snapshot: None,
         });
@@ -1424,26 +1426,37 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn fill_entry_deserialization() {
+    fn fill_entry_deserialization_with_target() {
+        let json = r#"[{"target":"s1","value":"John"},{"target":"s2","value":"Doe"}]"#;
+        let entries: Vec<FillEntry> = serde_json::from_str(json).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].target, "s1");
+        assert_eq!(entries[0].value, "John");
+        assert_eq!(entries[1].target, "s2");
+        assert_eq!(entries[1].value, "Doe");
+    }
+
+    #[test]
+    fn fill_entry_deserialization_with_uid_alias() {
         let json = r#"[{"uid":"s1","value":"John"},{"uid":"s2","value":"Doe"}]"#;
         let entries: Vec<FillEntry> = serde_json::from_str(json).unwrap();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].uid, "s1");
+        assert_eq!(entries[0].target, "s1");
         assert_eq!(entries[0].value, "John");
-        assert_eq!(entries[1].uid, "s2");
+        assert_eq!(entries[1].target, "s2");
         assert_eq!(entries[1].value, "Doe");
     }
 
     #[test]
     fn fill_entry_invalid_json() {
-        let json = r#"[{"uid":"s1"}]"#; // missing "value"
+        let json = r#"[{"target":"s1"}]"#; // missing "value"
         let result: Result<Vec<FillEntry>, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
 
     #[test]
     fn fill_entry_not_array() {
-        let json = r#"{"uid":"s1","value":"John"}"#;
+        let json = r#"{"target":"s1","value":"John"}"#;
         let result: Result<Vec<FillEntry>, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
