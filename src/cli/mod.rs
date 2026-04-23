@@ -445,7 +445,7 @@ EXAMPLES:
   agentchrome form fill css:#email \"user@example.com\"
 
   # Fill multiple fields at once
-  agentchrome form fill-many '[{\"uid\":\"s5\",\"value\":\"Alice\"},{\"uid\":\"s7\",\"value\":\"alice@example.com\"}]'
+  agentchrome form fill-many '[{\"target\":\"s5\",\"value\":\"Alice\"},{\"target\":\"s7\",\"value\":\"alice@example.com\"}]'
 
   # Clear a field
   agentchrome form clear s5
@@ -2760,12 +2760,15 @@ EXAMPLES:
     /// Fill multiple form fields at once from JSON
     #[command(
         long_about = "Fill multiple form fields in a single command. Accepts a JSON array of \
-            {uid, value} objects either as an inline argument or from a file with --file. Each \
-            field is filled in order. Useful for completing entire forms in one step.",
+            {target, value} objects either as an inline argument or from a file with --file. Each \
+            target is a UID (like 's5') or a CSS selector (prefixed with 'css:'), matching the \
+            vocabulary of `form fill`. Each field is filled in order. Useful for completing \
+            entire forms in one step. The legacy `uid` key is still accepted as an alias for \
+            `target` so existing scripts keep working.",
         after_long_help = "\
 EXAMPLES:
   # Fill multiple fields inline
-  agentchrome form fill-many '[{\"uid\":\"s5\",\"value\":\"Alice\"},{\"uid\":\"s7\",\"value\":\"alice@example.com\"}]'
+  agentchrome form fill-many '[{\"target\":\"s5\",\"value\":\"Alice\"},{\"target\":\"s7\",\"value\":\"alice@example.com\"}]'
 
   # Fill from a JSON file
   agentchrome form fill-many --file form-data.json"
@@ -2849,7 +2852,7 @@ pub struct FormFillArgs {
 /// Arguments for `form fill-many`.
 #[derive(Args)]
 pub struct FormFillManyArgs {
-    /// Inline JSON array of {uid, value} objects
+    /// Inline JSON array of {target, value} objects
     #[arg(value_name = "JSON")]
     pub input: Option<String>,
 
