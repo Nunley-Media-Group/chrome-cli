@@ -20,15 +20,15 @@ const VALID_CATEGORIES: &[&str] = &[
 ];
 
 // =============================================================================
-// Summary builder (T006)
+// Summary builder
 // =============================================================================
 
-/// Build a domain-appropriate `summary` for `audit lighthouse` large-response objects.
+/// Build the `{categories, total_issues, failing_audit_ids}` summary for
+/// `audit lighthouse` large-response objects.
 ///
-/// Shape: `{categories: [{id, score}], total_issues, failing_audit_ids}`
-///
-/// `value` is the serialized scores object from `extract_scores`.
-/// Unmeasurable fields serialize as `null` per retrospective.md:58.
+/// `total_issues` and `failing_audit_ids` are serialized as `null` because the
+/// scores-only object carries only per-category scores — the failing-audit list
+/// lives in the full Lighthouse report, not in the summary input.
 fn summary_of_audit(value: &Value) -> Value {
     let Some(obj) = value.as_object() else {
         return serde_json::json!({
@@ -38,7 +38,6 @@ fn summary_of_audit(value: &Value) -> Value {
         });
     };
 
-    // Build categories array from all keys that are not "url" and are numeric/null.
     let mut categories = Vec::new();
     for (key, score) in obj {
         if key == "url" {
@@ -50,8 +49,6 @@ fn summary_of_audit(value: &Value) -> Value {
         }));
     }
 
-    // total_issues and failing_audit_ids are not available in the scores-only object;
-    // set to null per retrospective.md:58 (unmeasurable = null, not omitted).
     serde_json::json!({
         "categories": categories,
         "total_issues": Value::Null,
@@ -497,7 +494,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // summary_of_audit tests (T006)
+    // summary_of_audit tests
     // -------------------------------------------------------------------------
 
     #[test]

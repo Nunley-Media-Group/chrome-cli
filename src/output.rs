@@ -622,7 +622,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // emit_with_snapshot tests (T003)
+    // emit_with_snapshot tests
     // -------------------------------------------------------------------------
 
     /// Helper: `OutputFormat` with a very large threshold so nothing is offloaded.

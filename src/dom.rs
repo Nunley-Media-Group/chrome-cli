@@ -642,7 +642,7 @@ async fn find_in_shadow_dom(
 }
 
 // =============================================================================
-// Summary builders (T006)
+// Summary builders
 // =============================================================================
 
 /// Build a domain-appropriate `summary` for `dom select` large-response objects.
@@ -2538,7 +2538,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // Summary builder tests (T006)
+    // Summary builder tests
     // -------------------------------------------------------------------------
 
     #[test]

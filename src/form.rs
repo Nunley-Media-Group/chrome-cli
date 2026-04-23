@@ -68,20 +68,6 @@ struct FillEntry {
 }
 
 // =============================================================================
-// Summary builder
-// =============================================================================
-
-/// Build a summary of a snapshot value for the `emit_with_snapshot` large-response gate.
-fn summary_of_snapshot(value: &serde_json::Value) -> serde_json::Value {
-    let total_nodes = crate::snapshot::count_nodes(value);
-    let top_roles = crate::snapshot::top_roles(value, 5);
-    serde_json::json!({
-        "total_nodes": total_nodes,
-        "top_roles": top_roles,
-    })
-}
-
-// =============================================================================
 // Output formatting
 // =============================================================================
 
@@ -769,7 +755,7 @@ async fn execute_fill(
             &global.output,
             "form fill",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -850,7 +836,7 @@ async fn execute_fill_many(
                 &global.output,
                 "form fill-many",
                 "snapshot",
-                summary_of_snapshot,
+                crate::snapshot::summary_of_snapshot,
             )
         }
     } else {
@@ -922,7 +908,7 @@ async fn execute_clear(
             &global.output,
             "form clear",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -1078,7 +1064,7 @@ async fn execute_upload(
             &global.output,
             "form upload",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -1229,7 +1215,7 @@ async fn execute_submit(
             &global.output,
             "form submit",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }

@@ -4892,8 +4892,6 @@ fn skill_file_has_version(world: &mut SkillWorld) {
     let temp_home = world.temp_home.as_ref().expect("No temp home");
     let path = temp_home.path().join(".claude/skills/agentchrome/SKILL.md");
     let content = std::fs::read_to_string(&path).expect("Failed to read skill file");
-    // The SKILL_TEMPLATE (T004) uses YAML frontmatter: `version: "X.Y.Z"`.
-    // The legacy `Version:` heading is no longer written by install/update.
     assert!(
         content.contains("version:"),
         "Skill file does not contain YAML version key\ncontent: {content}"
@@ -4957,7 +4955,6 @@ fn skill_file_overwritten(world: &mut SkillWorld) {
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
     let path = json["path"].as_str().expect("missing 'path' field");
     let content = std::fs::read_to_string(path).expect("Failed to read skill file");
-    // The SKILL_TEMPLATE (T004) uses YAML frontmatter: `version: "X.Y.Z"`.
     assert!(
         content.contains("version:"),
         "Skill file should contain YAML version key\ncontent: {content}"
@@ -5090,7 +5087,6 @@ fn skill_gemini_file_has_version(world: &mut SkillWorld) {
     let temp_home = world.temp_home.as_ref().expect("No temp home");
     let path = temp_home.path().join(".gemini/instructions/agentchrome.md");
     let content = std::fs::read_to_string(&path).expect("Failed to read Gemini skill file");
-    // The SKILL_TEMPLATE (T004) uses YAML frontmatter: `version: "X.Y.Z"`.
     assert!(
         content.contains("version:"),
         "Gemini skill file does not contain YAML version key\ncontent: {content}"
@@ -5107,7 +5103,7 @@ fn skill_readme_lists_gemini(world: &mut SkillWorld) {
     );
 }
 
-// --- SKILL.md enrichment Then steps (issue #220 / T021) ---
+// --- SKILL.md enrichment Then steps ---
 
 /// Read the installed SKILL.md from the path reported in stdout JSON.
 fn read_installed_skill_md(world: &SkillWorld) -> String {
@@ -5198,7 +5194,7 @@ fn skill_windsurf_version_marker(world: &mut SkillWorld) {
 }
 
 // =============================================================================
-// StaleSkillWorld — skill staleness check BDD tests (issue #220)
+// StaleSkillWorld — skill staleness check BDD tests
 // =============================================================================
 //
 // Scenarios in skill-staleness.feature are logic-only (no Chrome required).
@@ -5907,8 +5903,8 @@ async fn main() {
     // Skill command group — uses temp dirs, no Chrome needed.
     SkillWorld::run("tests/features/skill-command-group.feature").await;
 
-    // Skill staleness check (issue #220) — all scenarios are logic-only, no Chrome needed.
-    // Scenarios plant versioned skill files in a temp home and verify the stderr notice.
+    // Skill staleness check — all scenarios plant versioned skill files in a temp
+    // home and verify the stderr notice (no Chrome needed).
     StaleSkillWorld::run("tests/features/skill-staleness.feature").await;
 
     // README documentation — all scenarios are file-parsing tests (no Chrome needed).

@@ -133,20 +133,6 @@ struct ScrollResult {
 }
 
 // =============================================================================
-// Summary builder
-// =============================================================================
-
-/// Build a summary of a snapshot value for the `emit_with_snapshot` large-response gate.
-fn summary_of_snapshot(value: &serde_json::Value) -> serde_json::Value {
-    let total_nodes = crate::snapshot::count_nodes(value);
-    let top_roles = crate::snapshot::top_roles(value, 5);
-    serde_json::json!({
-        "total_nodes": total_nodes,
-        "top_roles": top_roles,
-    })
-}
-
-// =============================================================================
 // Output formatting
 // =============================================================================
 
@@ -1668,7 +1654,7 @@ async fn execute_scroll(
             &global.output,
             "interact scroll",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -1808,7 +1794,7 @@ async fn execute_click(
             &global.output,
             "interact click",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -1973,7 +1959,7 @@ async fn execute_click_at(
             &global.output,
             "interact click-at",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -2038,7 +2024,7 @@ async fn execute_hover(
             &global.output,
             "interact hover",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -2111,7 +2097,7 @@ async fn execute_drag(
             &global.output,
             "interact drag",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -2238,7 +2224,7 @@ async fn execute_drag_at(
             &global.output,
             "interact drag-at",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -2319,7 +2305,7 @@ async fn execute_mousedown_at(
             &global.output,
             "interact mousedown-at",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -2400,7 +2386,7 @@ async fn execute_mouseup_at(
             &global.output,
             "interact mouseup-at",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -2453,7 +2439,7 @@ async fn execute_type(
             &global.output,
             "interact type",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }
@@ -2509,7 +2495,7 @@ async fn execute_key(
             &global.output,
             "interact key",
             "snapshot",
-            summary_of_snapshot,
+            crate::snapshot::summary_of_snapshot,
         )
     }
 }

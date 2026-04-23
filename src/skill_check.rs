@@ -26,7 +26,13 @@ struct StaleTool {
 // Version marker parsing
 // =============================================================================
 
-/// Try to parse a version triple out of the first ~20 lines of a skill file.
+/// Line budget for scanning the version marker out of a skill file.
+///
+/// Version markers live in the YAML frontmatter or the first few lines of
+/// the skill body; reading past this bounds the hot-path work.
+const VERSION_SCAN_LINES: usize = 20;
+
+/// Try to parse a version triple out of the first few lines of a skill file.
 ///
 /// Accepts three formats (in priority order):
 /// 1. YAML frontmatter: `version: "X.Y.Z"` or `version: X.Y.Z`
@@ -39,9 +45,8 @@ pub(crate) fn read_version_marker(path: &Path) -> Option<Version> {
     parse_version_from_content(&content)
 }
 
-/// Parse a version from in-memory content (separated for unit-testability).
 fn parse_version_from_content(content: &str) -> Option<Version> {
-    for line in content.lines().take(20) {
+    for line in content.lines().take(VERSION_SCAN_LINES) {
         let trimmed = line.trim();
 
         // YAML frontmatter: version: "X.Y.Z"  or  version: X.Y.Z
@@ -108,7 +113,7 @@ fn binary_version() -> Version {
 /// a missing install is not a stale install.
 fn stale_tools() -> Vec<StaleTool> {
     let bin_ver = binary_version();
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(crate::skill::TOOLS.len());
 
     for tool in crate::skill::TOOLS {
         let template = crate::skill::path_template(tool);
@@ -181,12 +186,10 @@ fn format_notice(stale: &[StaleTool]) -> Option<String> {
 /// Never returns an error — any internal failure is silently swallowed so that
 /// skill-check issues never break the main command path.
 pub fn emit_stale_notice_if_any(config: &ConfigFile) {
-    // Env-var suppression gate
     if std::env::var("AGENTCHROME_NO_SKILL_CHECK").as_deref() == Ok("1") {
         return;
     }
 
-    // Config-key suppression gate
     if config.skill.check_enabled == Some(false) {
         return;
     }
@@ -360,20 +363,18 @@ mod tests {
     #[test]
     fn not_stale_when_installed_equals_binary() {
         let bin_ver = binary_version();
-        // An installed version equal to the binary is NOT stale — stale_tools uses `<`.
-        // Verify the comparison gate: equal is not less-than.
-        assert!(bin_ver >= bin_ver, "equal version must not be stale");
-        // format_notice on empty returns None:
-        assert!(format_notice(&[]).is_none());
+        let content = format!(
+            "---\nversion: \"{}.{}.{}\"\n---\n",
+            bin_ver.0, bin_ver.1, bin_ver.2
+        );
+        let parsed = parse_version_from_content(&content).expect("binary version parses");
+        assert!(parsed >= bin_ver, "equal version must not be stale");
     }
 
     #[test]
     fn newer_installed_version_not_stale() {
-        // If installed > binary, it's not stale either — stale_tools uses `<`
         let bin_ver = binary_version();
-        let fake_newer = (bin_ver.0 + 1, 0, 0);
-        assert!(fake_newer > bin_ver, "newer version is greater");
-        // Only installed_version < binary_version counts as stale
-        assert!(fake_newer >= bin_ver);
+        let newer = (bin_ver.0 + 1, 0, 0);
+        assert!(newer >= bin_ver, "newer version must not be stale");
     }
 }

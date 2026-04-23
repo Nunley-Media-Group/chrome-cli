@@ -523,6 +523,15 @@ fn collect_roles(value: &serde_json::Value, counts: &mut HashMap<String, usize>)
     }
 }
 
+/// Build the `{total_nodes, top_roles}` summary shape for snapshot payloads
+/// offloaded by `emit_with_snapshot`.
+pub fn summary_of_snapshot(value: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "total_nodes": count_nodes(value),
+        "top_roles": top_roles(value, 5),
+    })
+}
+
 // =============================================================================
 // Compact tree (token-efficient mode)
 // =============================================================================
