@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.45.0] - 2026-04-23
+
+### Added
+
+- Enable `page find` and `page screenshot` inside `script run` batch scripts. The script runner now dispatches both subcommands via `page::run_from_session`, allowing bind-then-use flows (e.g. `page find` → `$vars.match[0].uid` → `interact click`) and inline screenshot capture. The "not yet supported" guard message was updated to reflect the expanded whitelist (`snapshot`, `text`, `find`, `screenshot`). `examples script` samples extended to demonstrate the new patterns. (#247)
+
 ## [1.44.0] - 2026-04-23
 
 ### Fixed
