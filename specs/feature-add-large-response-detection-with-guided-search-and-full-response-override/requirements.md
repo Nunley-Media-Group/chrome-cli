@@ -1,6 +1,6 @@
 # Requirements: Large Response Detection with Guided Search and Full-Response Override
 
-**Issues**: #168, #177
+**Issues**: #168, #177, #220
 **Date**: 2026-03-13
 **Status**: Draft
 **Author**: AI (nmg-sdlc)
@@ -225,6 +225,8 @@ Issue #177 simplifies this: when output exceeds the threshold, automatically wri
 **Then** it always has exactly these top-level fields: `output_file` (string — absolute file path), `size_bytes` (integer — byte count of the written file), `command` (string — full subcommand path, e.g., `"page snapshot"`), `summary` (object — command-specific metadata)
 **And** no other top-level fields are present
 
+> **Note (#220)**: Compound interaction+snapshot results use an extension of this shape — see the harden-progressive-disclosure spec. When an `--include-snapshot` result exceeds the threshold, only the `snapshot` field is offloaded to a temp file and replaced with a `TempFileOutput` object inline; the interaction confirmation fields remain at the top level.
+
 ### AC22: Plain Mode Also Writes to Temp File
 
 **Given** a command run with `--plain` producing output exceeding the threshold
@@ -380,6 +382,7 @@ Issue #177 simplifies this: when output exceeds the threshold, automatically wri
 |-------|------|---------|
 | #168 | 2026-03-12 | Initial feature spec |
 | #177 | 2026-03-13 | Replace guidance object with temp file output; remove `--search` and `--full-response` flags; plain mode now writes to temp file; ACs 1–4, 8–14, 16–17 superseded; FRs 1, 4–13, 15–16 superseded; new ACs 18–24 and FRs 17–24 added |
+| #220 | 2026-04-22 | Extended temp-file gating + compound schema (see feature-harden-progressive-disclosure-enrich-skill-md-extend-temp-file-gating-notify-on-stale-skill/) |
 
 ---
 
