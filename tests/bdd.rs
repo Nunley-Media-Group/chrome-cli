@@ -2296,6 +2296,8 @@ struct ConfigWorld {
     stdout: String,
     stderr: String,
     exit_code: Option<i32>,
+    targets: std::collections::HashMap<String, PathBuf>,
+    blocked_target: Option<PathBuf>,
 }
 
 impl Default for ConfigWorld {
@@ -2316,6 +2318,8 @@ impl Default for ConfigWorld {
             stdout: String::new(),
             stderr: String::new(),
             exit_code: None,
+            targets: std::collections::HashMap::new(),
+            blocked_target: None,
         }
     }
 }
@@ -2579,6 +2583,184 @@ fn config_init_target_exists(world: &mut ConfigWorld) {
         path.exists(),
         "Expected init target file to exist at {}",
         path.display()
+    );
+}
+
+// --- ConfigWorld steps for issue #249 (config init custom path) ---
+
+fn config_xdg_default_path(world: &ConfigWorld) -> PathBuf {
+    let fake_home = world.temp_dir.join("fake-home");
+    #[cfg(target_os = "macos")]
+    let config_dir = fake_home.join("Library").join("Application Support");
+    #[cfg(not(target_os = "macos"))]
+    let config_dir = fake_home.join(".config");
+    config_dir.join("agentchrome").join("config.toml")
+}
+
+#[given(regex = r#"^a writable target path "([^"]+)" that does not exist$"#)]
+fn config_writable_target(world: &mut ConfigWorld, name: String) {
+    let path = world.temp_dir.join(&name);
+    let _ = std::fs::remove_file(&path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    world.targets.insert(name, path);
+}
+
+#[given("no config file exists at the XDG default path")]
+fn config_no_xdg_default(world: &mut ConfigWorld) {
+    let path = config_xdg_default_path(world);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[given("a regular file blocks the parent directory of the target path")]
+fn config_blocked_parent(world: &mut ConfigWorld) {
+    let blocker = world.temp_dir.join("blocker-file");
+    if blocker.is_dir() {
+        std::fs::remove_dir_all(&blocker).unwrap();
+    }
+    std::fs::write(&blocker, b"not a directory").unwrap();
+    world.blocked_target = Some(blocker.join("sub").join("file.toml"));
+}
+
+#[when(regex = r#"^I run agentchrome config init with --config pointing at "([^"]+)"$"#)]
+fn config_run_init_with_config(world: &mut ConfigWorld, name: String) {
+    let target = world.targets.get(&name).expect("target not set");
+    let target_str = target.display().to_string();
+    world.run_agentchrome(&["config", "init", "--config", &target_str]);
+}
+
+#[when("I run agentchrome config init with no path flags")]
+fn config_run_init_no_flags(world: &mut ConfigWorld) {
+    world.run_agentchrome(&["config", "init"]);
+}
+
+#[when("I run agentchrome config init with --config pointing at the blocked target path")]
+fn config_run_init_blocked(world: &mut ConfigWorld) {
+    let blocked = world.blocked_target.clone().expect("no blocked target set");
+    let blocked_str = blocked.display().to_string();
+    world.run_agentchrome(&["config", "init", "--config", &blocked_str]);
+}
+
+#[when(
+    regex = r#"^I run agentchrome config init with --path on "([^"]+)" and --config on "([^"]+)"$"#
+)]
+fn config_run_init_both(world: &mut ConfigWorld, path_name: String, config_name: String) {
+    let path_target = world
+        .targets
+        .get(&path_name)
+        .cloned()
+        .expect("--path target not set");
+    let config_target = world
+        .targets
+        .get(&config_name)
+        .cloned()
+        .expect("--config target not set");
+    let path_str = path_target.display().to_string();
+    let config_str = config_target.display().to_string();
+    world.run_agentchrome(&[
+        "config",
+        "init",
+        "--path",
+        &path_str,
+        "--config",
+        &config_str,
+    ]);
+}
+
+#[then(regex = r#"^the "([^"]+)" target file exists$"#)]
+fn config_named_target_exists(world: &mut ConfigWorld, name: String) {
+    let target = world.targets.get(&name).expect("target not set");
+    assert!(target.exists(), "expected {} to exist", target.display());
+}
+
+#[then(regex = r#"^the "([^"]+)" target file does not exist$"#)]
+fn config_named_target_absent(world: &mut ConfigWorld, name: String) {
+    let target = world.targets.get(&name).expect("target not set");
+    assert!(
+        !target.exists(),
+        "expected {} to NOT exist",
+        target.display()
+    );
+}
+
+#[then(regex = r#"^the JSON output's "created" field equals the "([^"]+)" target path$"#)]
+fn config_created_field_equals_named(world: &mut ConfigWorld, name: String) {
+    let target = world.targets.get(&name).expect("target not set");
+    let json = parse_stdout_json(world);
+    let created = json
+        .get("created")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("missing created field\nstdout: {}", world.stdout));
+    assert_eq!(
+        created,
+        target.display().to_string(),
+        "created field mismatch"
+    );
+}
+
+#[then("the file at the XDG default path exists")]
+fn config_xdg_default_exists(world: &mut ConfigWorld) {
+    let path = config_xdg_default_path(world);
+    assert!(
+        path.exists(),
+        "expected XDG default file at {}",
+        path.display()
+    );
+}
+
+#[then("the JSON output's \"created\" field equals the XDG default path")]
+fn config_created_field_equals_xdg(world: &mut ConfigWorld) {
+    let xdg = config_xdg_default_path(world);
+    let json = parse_stdout_json(world);
+    let created = json
+        .get("created")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("missing created field\nstdout: {}", world.stdout));
+    assert_eq!(created, xdg.display().to_string(), "created field mismatch");
+}
+
+#[then(regex = r"^the process exits with code (\d+)$")]
+fn config_process_exit_code(world: &mut ConfigWorld, expected: i32) {
+    let actual = world.exit_code.expect("no exit code captured");
+    assert_eq!(
+        actual, expected,
+        "expected exit {expected}, got {actual}\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then("no file is created at the XDG default path")]
+fn config_no_xdg_default_after(world: &mut ConfigWorld) {
+    let path = config_xdg_default_path(world);
+    assert!(
+        !path.exists(),
+        "expected XDG default file to NOT exist at {}",
+        path.display()
+    );
+}
+
+#[then("stderr contains the blocked target path")]
+fn config_stderr_has_blocked(world: &mut ConfigWorld) {
+    let blocked = world
+        .blocked_target
+        .as_ref()
+        .expect("no blocked target set");
+    let blocked_str = blocked.display().to_string();
+    assert!(
+        world.stderr.contains(&blocked_str),
+        "stderr does not contain blocked path '{blocked_str}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then("stderr notes that --path overrode --config")]
+fn config_stderr_notes_override(world: &mut ConfigWorld) {
+    let lower = world.stderr.to_lowercase();
+    assert!(
+        lower.contains("--path") && lower.contains("--config"),
+        "stderr does not note --path/--config override\nstderr: {}",
+        world.stderr
     );
 }
 
@@ -5942,6 +6124,9 @@ async fn main() {
 
     // Configuration file support — all scenarios are CLI-testable (no Chrome needed).
     ConfigWorld::run("tests/features/config.feature").await;
+
+    // Issue #249 — `config init --config <path>` regression coverage.
+    ConfigWorld::run("tests/features/249-fix-config-init-custom-path.feature").await;
 
     // Help text — all scenarios are CLI-testable (no Chrome needed, just --help output).
     CliWorld::run("tests/features/help-text.feature").await;

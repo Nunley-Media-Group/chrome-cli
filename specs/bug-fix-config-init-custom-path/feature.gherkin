@@ -1,0 +1,38 @@
+Feature: config init honors custom destination path
+  As a developer provisioning agentchrome for a CI environment
+  I want `config init --config /path/to/file.toml` to write the template to the specified path
+  So that I can initialize config files in custom locations without editing them manually
+
+  @regression
+  Scenario: --config is honored as the init destination
+    Given a writable target path "<TMP>/custom.toml" that does not exist
+    When I run "agentchrome config init --config <TMP>/custom.toml"
+    Then the file "<TMP>/custom.toml" exists
+    And the JSON output's "created" field equals "<TMP>/custom.toml"
+    And the process exits with code 0
+
+  @regression
+  Scenario: default path is preserved when no path flag is supplied
+    Given no config file exists at the XDG default path
+    When I run "agentchrome config init"
+    Then the file at the XDG default path exists
+    And the JSON output's "created" field equals the XDG default path
+    And the process exits with code 0
+
+  @regression
+  Scenario: unwritable path errors clearly without falling back to the default
+    Given the directory "<TMP>/nonexistent-parent" does not exist and cannot be created
+    When I run "agentchrome config init --config <TMP>/nonexistent-parent/file.toml"
+    Then no file is created at the XDG default path
+    And the process exits with code 1
+    And stderr contains "<TMP>/nonexistent-parent/file.toml"
+
+  @regression
+  Scenario: --path wins when both flags are supplied with different values
+    Given a writable target path "<TMP>/from-path.toml" that does not exist
+    And a writable target path "<TMP>/from-config.toml" that does not exist
+    When I run "agentchrome config init --path <TMP>/from-path.toml --config <TMP>/from-config.toml"
+    Then the file "<TMP>/from-path.toml" exists
+    And the file "<TMP>/from-config.toml" does not exist
+    And stderr notes that --path overrode --config
+    And the process exits with code 0

@@ -178,7 +178,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
     match &cli.command {
         Command::Config(args) => {
             let resolved = build_resolved_config(&global, &config_file, config_path);
-            execute_config(&args.command, &resolved)
+            execute_config(&args.command, &resolved, cli.global.config.as_deref())
         }
         Command::Connect(args) => execute_connect(&global, args).await,
         Command::Tabs(args) => tabs::execute_tabs(&global, args).await,
@@ -306,15 +306,38 @@ struct ConfigPathOutput {
     config_path: Option<String>,
 }
 
-/// Execute config subcommands.
-fn execute_config(cmd: &ConfigCommand, resolved: &config::ResolvedConfig) -> Result<(), AppError> {
+/// Execute config subcommands. `global_config_raw` is the pre-resolution
+/// `--config` value; only the `Init` arm consumes it (as a destination fallback).
+fn execute_config(
+    cmd: &ConfigCommand,
+    resolved: &config::ResolvedConfig,
+    global_config_raw: Option<&std::path::Path>,
+) -> Result<(), AppError> {
     match cmd {
         ConfigCommand::Show => {
             print_json(resolved)?;
             Ok(())
         }
         ConfigCommand::Init(args) => {
-            let path = config::init_config(args.path.as_deref())?;
+            if let (Some(p), Some(g)) = (args.path.as_deref(), global_config_raw) {
+                if p != g {
+                    eprintln!(
+                        "note: --path overrode --config (--path={}, --config={})",
+                        p.display(),
+                        g.display()
+                    );
+                }
+            }
+            let destination = args.path.as_deref().or(global_config_raw);
+            let path = config::init_config(destination).map_err(|e| {
+                let dest = destination
+                    .map_or_else(|| "<default>".to_string(), |p| p.display().to_string());
+                AppError {
+                    message: format!("config init failed for {dest}: {e}"),
+                    code: ExitCode::GeneralError,
+                    custom_json: None,
+                }
+            })?;
             print_json(&ConfigInitOutput {
                 created: path.display().to_string(),
             })?;
