@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.48.0] - 2026-04-23
+
+### Fixed
+
+- `dom tree` now accepts an optional positional `ROOT` argument (e.g., `agentchrome dom tree css:table`), consistent with all other `dom` subcommands. The `--root` flag is retained for backward compatibility; supplying both simultaneously produces a clap conflict error. (#251)
+
 ## [1.47.0] - 2026-04-23
 
 ### Fixed
