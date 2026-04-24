@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.49.0] - 2026-04-23
+
+### Fixed
+
+- `config init --config <path>` now honours the supplied path: the template is written to the specified location, the JSON `created` field reflects that path, and the process exits 0. Previously the global `--config` resolution treated the supplied path as a missing config file to read, causing the command to ignore the flag, write to the default XDG path, and exit 1 despite reporting success on stdout. When `--config` is absent the default XDG behaviour is preserved; when the parent directory does not exist the command exits 1 with a clear stderr error. (#249)
+
 ## [1.48.0] - 2026-04-23
 
 ### Fixed
