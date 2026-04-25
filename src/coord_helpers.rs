@@ -90,25 +90,23 @@ pub(crate) async fn resolve_element_box(
     // objectId so the query runs in the iframe's document, not the main document.
     // The page session's `DOM.getBoxModel` returns coordinates in page-global space, so we
     // subtract the frame offset to convert to the frame-local space this function promises.
-    if let Some(ctx) = frame_ctx {
-        if is_element_css_selector(selector) {
-            if let Some(exec_ctx_id) = agentchrome::frame::execution_context_id(ctx) {
-                let css = &selector[4..];
-                let object_id = query_selector_in_execution_context(managed, exec_ctx_id, css)
-                    .await?
-                    .ok_or_else(|| AppError::css_selector_not_found(css))?;
-                let page_global =
-                    fetch_bounding_box_inner(managed, serde_json::json!({ "objectId": object_id }))
-                        .await?;
-                let (off_x, off_y) = frame_viewport_offset(managed, ctx).await?;
-                return Ok(BoundingBox {
-                    x: page_global.x - off_x,
-                    y: page_global.y - off_y,
-                    width: page_global.width,
-                    height: page_global.height,
-                });
-            }
-        }
+    if let Some(ctx) = frame_ctx
+        && is_element_css_selector(selector)
+        && let Some(exec_ctx_id) = agentchrome::frame::execution_context_id(ctx)
+    {
+        let css = &selector[4..];
+        let object_id = query_selector_in_execution_context(managed, exec_ctx_id, css)
+            .await?
+            .ok_or_else(|| AppError::css_selector_not_found(css))?;
+        let page_global =
+            fetch_bounding_box_inner(managed, serde_json::json!({ "objectId": object_id })).await?;
+        let (off_x, off_y) = frame_viewport_offset(managed, ctx).await?;
+        return Ok(BoundingBox {
+            x: page_global.x - off_x,
+            y: page_global.y - off_y,
+            width: page_global.width,
+            height: page_global.height,
+        });
     }
 
     let backend_node_id = resolve_backend_node_id(managed, frame_ctx, selector).await?;

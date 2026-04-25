@@ -260,10 +260,12 @@ fn execute_step<'a>(
 /// underlying JS value. Unwrap the envelope at the bind site for `js exec` only
 /// — other commands keep their returned shape intact.
 fn bind_value_for(cmd: &[String], value: &serde_json::Value) -> serde_json::Value {
-    if cmd.len() >= 2 && cmd[0] == "js" && cmd[1] == "exec" {
-        if let Some(inner) = value.get("result") {
-            return inner.clone();
-        }
+    if cmd.len() >= 2
+        && cmd[0] == "js"
+        && cmd[1] == "exec"
+        && let Some(inner) = value.get("result")
+    {
+        return inner.clone();
     }
     value.clone()
 }

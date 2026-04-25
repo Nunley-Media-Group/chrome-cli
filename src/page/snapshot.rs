@@ -326,13 +326,16 @@ pub async fn execute_snapshot(
 
     // Plain/text output path
     if !global.output.json && !global.output.pretty {
+        use std::fmt::Write as _;
+
         let mut text = crate::snapshot::format_text(&root, args.verbose);
         if build.truncated {
-            text.push_str(&format!(
-                "[... truncated: {} nodes, showing first {}]\n",
+            let _ = writeln!(
+                text,
+                "[... truncated: {} nodes, showing first {}]",
                 build.total_nodes,
                 crate::snapshot::MAX_NODES
-            ));
+            );
         }
 
         if let Some(ref file_path) = args.file {
@@ -351,14 +354,14 @@ pub async fn execute_snapshot(
         code: ExitCode::GeneralError,
         custom_json: None,
     })?;
-    if build.truncated {
-        if let Some(obj) = json_value.as_object_mut() {
-            obj.insert("truncated".to_string(), serde_json::Value::Bool(true));
-            obj.insert(
-                "total_nodes".to_string(),
-                serde_json::Value::Number(build.total_nodes.into()),
-            );
-        }
+    if build.truncated
+        && let Some(obj) = json_value.as_object_mut()
+    {
+        obj.insert("truncated".to_string(), serde_json::Value::Bool(true));
+        obj.insert(
+            "total_nodes".to_string(),
+            serde_json::Value::Number(build.total_nodes.into()),
+        );
     }
 
     // Write to file if --file is given (bypass the gate)

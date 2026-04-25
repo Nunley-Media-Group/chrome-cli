@@ -76,11 +76,11 @@ fn print_output(
     output: &crate::cli::OutputFormat,
     plain_text: Option<&str>,
 ) -> Result<(), AppError> {
-    if output.plain {
-        if let Some(text) = plain_text {
-            print!("{text}");
-            return Ok(());
-        }
+    if output.plain
+        && let Some(text) = plain_text
+    {
+        print!("{text}");
+        return Ok(());
     }
     output::print_output(value, output)
 }
@@ -419,14 +419,12 @@ fn extract_cls(events: &[TraceEvent]) -> Option<f64> {
     let mut total_cls: f64 = 0.0;
 
     for event in events {
-        if event.name == "LayoutShift" {
-            if let Some(data) = event.args.get("data") {
-                let had_recent_input = data["had_recent_input"].as_bool().unwrap_or(false);
-                if !had_recent_input {
-                    if let Some(score) = data["score"].as_f64() {
-                        total_cls += score;
-                    }
-                }
+        if event.name == "LayoutShift"
+            && let Some(data) = event.args.get("data")
+        {
+            let had_recent_input = data["had_recent_input"].as_bool().unwrap_or(false);
+            if !had_recent_input && let Some(score) = data["score"].as_f64() {
+                total_cls += score;
             }
         }
     }
@@ -454,28 +452,26 @@ fn extract_ttfb(events: &[TraceEvent]) -> Option<f64> {
     let mut response_ts: Option<f64> = None;
 
     for event in events {
-        if event.name == "ResourceSendRequest" {
-            if let Some(data) = event.args.get("data") {
-                let url = data["url"].as_str().unwrap_or("");
-                let is_doc = data["requestId"].as_str().is_some()
-                    && doc_request_id.is_none()
-                    && !url.is_empty()
-                    && !is_subresource_url(url);
-                if is_doc {
-                    doc_request_id = data["requestId"].as_str().map(String::from);
-                    request_ts = Some(event.ts);
-                }
+        if event.name == "ResourceSendRequest"
+            && let Some(data) = event.args.get("data")
+        {
+            let url = data["url"].as_str().unwrap_or("");
+            let is_doc = data["requestId"].as_str().is_some()
+                && doc_request_id.is_none()
+                && !url.is_empty()
+                && !is_subresource_url(url);
+            if is_doc {
+                doc_request_id = data["requestId"].as_str().map(String::from);
+                request_ts = Some(event.ts);
             }
         }
-        if event.name == "ResourceReceiveResponse" {
-            if let Some(ref req_id) = doc_request_id {
-                if let Some(data) = event.args.get("data") {
-                    if data["requestId"].as_str() == Some(req_id) {
-                        response_ts = Some(event.ts);
-                        break;
-                    }
-                }
-            }
+        if event.name == "ResourceReceiveResponse"
+            && let Some(ref req_id) = doc_request_id
+            && let Some(data) = event.args.get("data")
+            && data["requestId"].as_str() == Some(req_id)
+        {
+            response_ts = Some(event.ts);
+            break;
         }
     }
 
@@ -585,29 +581,28 @@ fn analyze_document_latency(events: &[TraceEvent]) -> serde_json::Value {
     let mut doc_request_id: Option<String> = None;
 
     for event in events {
-        if event.name == "ResourceSendRequest" && doc_request_id.is_none() {
-            if let Some(data) = event.args.get("data") {
-                let url = data["url"].as_str().unwrap_or("");
-                if !url.is_empty() && !is_subresource_url(url) {
-                    doc_request_id = data["requestId"].as_str().map(String::from);
-                    request_ts = Some(event.ts);
-                }
+        if event.name == "ResourceSendRequest"
+            && doc_request_id.is_none()
+            && let Some(data) = event.args.get("data")
+        {
+            let url = data["url"].as_str().unwrap_or("");
+            if !url.is_empty() && !is_subresource_url(url) {
+                doc_request_id = data["requestId"].as_str().map(String::from);
+                request_ts = Some(event.ts);
             }
         }
         if let Some(ref req_id) = doc_request_id {
-            if event.name == "ResourceReceiveResponse" {
-                if let Some(data) = event.args.get("data") {
-                    if data["requestId"].as_str() == Some(req_id) {
-                        response_ts = Some(event.ts);
-                    }
-                }
+            if event.name == "ResourceReceiveResponse"
+                && let Some(data) = event.args.get("data")
+                && data["requestId"].as_str() == Some(req_id)
+            {
+                response_ts = Some(event.ts);
             }
-            if event.name == "ResourceFinish" {
-                if let Some(data) = event.args.get("data") {
-                    if data["requestId"].as_str() == Some(req_id) {
-                        finish_ts = Some(event.ts);
-                    }
-                }
+            if event.name == "ResourceFinish"
+                && let Some(data) = event.args.get("data")
+                && data["requestId"].as_str() == Some(req_id)
+            {
+                finish_ts = Some(event.ts);
             }
         }
     }
@@ -660,16 +655,16 @@ fn analyze_render_blocking(events: &[TraceEvent]) -> serde_json::Value {
     let mut blocking_resources: Vec<serde_json::Value> = Vec::new();
 
     for event in events {
-        if event.name == "ResourceSendRequest" {
-            if let Some(data) = event.args.get("data") {
-                let render_blocking = data["renderBlocking"].as_str().unwrap_or("non_blocking");
-                if render_blocking == "blocking" || render_blocking == "in_body_parser_blocking" {
-                    let url = data["url"].as_str().unwrap_or("unknown");
-                    blocking_resources.push(serde_json::json!({
-                        "url": url,
-                        "blocking_type": render_blocking,
-                    }));
-                }
+        if event.name == "ResourceSendRequest"
+            && let Some(data) = event.args.get("data")
+        {
+            let render_blocking = data["renderBlocking"].as_str().unwrap_or("non_blocking");
+            if render_blocking == "blocking" || render_blocking == "in_body_parser_blocking" {
+                let url = data["url"].as_str().unwrap_or("unknown");
+                blocking_resources.push(serde_json::json!({
+                    "url": url,
+                    "blocking_type": render_blocking,
+                }));
             }
         }
     }
@@ -843,10 +838,12 @@ async fn wait_for_event(
 // =============================================================================
 
 fn format_record_plain(result: &PerfRecordResult) -> String {
+    use std::fmt::Write as _;
+
     let mut out = String::new();
-    out.push_str(&format!("Trace saved: {}\n", result.file));
-    out.push_str(&format!("Duration: {}ms\n", result.duration_ms));
-    out.push_str(&format!("Size: {} bytes\n", result.size_bytes));
+    let _ = writeln!(out, "Trace saved: {}", result.file);
+    let _ = writeln!(out, "Duration: {}ms", result.duration_ms);
+    let _ = writeln!(out, "Size: {} bytes", result.size_bytes);
     let lcp = result
         .vitals
         .lcp_ms
@@ -859,9 +856,9 @@ fn format_record_plain(result: &PerfRecordResult) -> String {
         .vitals
         .ttfb_ms
         .map_or("N/A".to_string(), |v| format!("{v:.1}ms"));
-    out.push_str(&format!("LCP: {lcp}\n"));
-    out.push_str(&format!("CLS: {cls}\n"));
-    out.push_str(&format!("TTFB: {ttfb}\n"));
+    let _ = writeln!(out, "LCP: {lcp}");
+    let _ = writeln!(out, "CLS: {cls}");
+    let _ = writeln!(out, "TTFB: {ttfb}");
     out
 }
 
@@ -877,18 +874,20 @@ fn format_vitals_plain(result: &PerfVitalsResult) -> String {
 }
 
 fn format_analyze_plain(result: &PerfAnalyzeResult) -> String {
+    use std::fmt::Write as _;
+
     let mut out = format!("Insight: {}\n", result.insight);
     if let Some(obj) = result.details.as_object() {
         for (key, value) in obj {
             if key == "resources" || key == "tasks" {
                 if let Some(arr) = value.as_array() {
-                    out.push_str(&format!("  {key}: ({} items)\n", arr.len()));
+                    let _ = writeln!(out, "  {key}: ({} items)", arr.len());
                     for item in arr.iter().take(10) {
-                        out.push_str(&format!("    {item}\n"));
+                        let _ = writeln!(out, "    {item}");
                     }
                 }
             } else {
-                out.push_str(&format!("  {key}: {value}\n"));
+                let _ = writeln!(out, "  {key}: {value}");
             }
         }
     }

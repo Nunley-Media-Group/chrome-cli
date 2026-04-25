@@ -319,14 +319,14 @@ fn execute_config(
             Ok(())
         }
         ConfigCommand::Init(args) => {
-            if let (Some(p), Some(g)) = (args.path.as_deref(), global_config_raw) {
-                if p != g {
-                    eprintln!(
-                        "note: --path overrode --config (--path={}, --config={})",
-                        p.display(),
-                        g.display()
-                    );
-                }
+            if let (Some(p), Some(g)) = (args.path.as_deref(), global_config_raw)
+                && p != g
+            {
+                eprintln!(
+                    "note: --path overrode --config (--path={}, --config={})",
+                    p.display(),
+                    g.display()
+                );
             }
             let destination = args.path.as_deref().or(global_config_raw);
             let path = config::init_config(destination).map_err(|e| {
@@ -554,22 +554,20 @@ async fn execute_connect(global: &GlobalOpts, args: &ConnectArgs) -> Result<(), 
 
     // Strategy 3: Check existing session first, then auto-discover, then auto-launch.
     // When --port is explicit, skip the session file and only try that port directly.
-    if global.port.is_none() {
-        if let Some(session_data) = session::read_session()? {
-            if connection::health_check(&global.host, session_data.port)
-                .await
-                .is_ok()
-            {
-                let info = ConnectionInfo {
-                    ws_url: session_data.ws_url,
-                    port: session_data.port,
-                    pid: session_data.pid,
-                };
-                save_session(&info);
-                print_json(&info)?;
-                return Ok(());
-            }
-        }
+    if global.port.is_none()
+        && let Some(session_data) = session::read_session()?
+        && connection::health_check(&global.host, session_data.port)
+            .await
+            .is_ok()
+    {
+        let info = ConnectionInfo {
+            ws_url: session_data.ws_url,
+            port: session_data.port,
+            pid: session_data.pid,
+        };
+        save_session(&info);
+        print_json(&info)?;
+        return Ok(());
     }
 
     let discover_result = if global.port.is_some() {
@@ -647,7 +645,6 @@ async fn execute_launch(args: &ConnectArgs, timeout: Duration) -> Result<(), App
             }
             Err(e @ chrome::ChromeError::LaunchFailed(_)) => {
                 last_err = Some(e);
-                continue;
             }
             Err(e) => return Err(e.into()),
         }
@@ -747,11 +744,11 @@ fn execute_disconnect() -> Result<(), AppError> {
     let session_data = session::read_session()?;
     let mut killed_pid = None;
 
-    if let Some(data) = &session_data {
-        if let Some(pid) = data.pid {
-            kill_process(pid);
-            killed_pid = Some(pid);
-        }
+    if let Some(data) = &session_data
+        && let Some(pid) = data.pid
+    {
+        kill_process(pid);
+        killed_pid = Some(pid);
     }
 
     session::delete_session()?;

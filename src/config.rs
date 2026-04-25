@@ -218,10 +218,10 @@ pub fn find_config_file_with(
     env_config: Option<String>,
 ) -> Option<PathBuf> {
     // 1. Explicit --config path
-    if let Some(p) = explicit_path {
-        if p.exists() {
-            return Some(p.to_path_buf());
-        }
+    if let Some(p) = explicit_path
+        && p.exists()
+    {
+        return Some(p.to_path_buf());
     }
 
     // 2. $AGENTCHROME_CONFIG

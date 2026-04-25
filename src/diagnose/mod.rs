@@ -208,10 +208,10 @@ fn assemble_challenges(
     }
 
     // Canvas
-    if let Some(cv) = bundle.canvas {
-        if cv.canvas_count > 0 {
-            out.push(build_canvas_challenge(cv));
-        }
+    if let Some(cv) = bundle.canvas
+        && cv.canvas_count > 0
+    {
+        out.push(build_canvas_challenge(cv));
     }
 
     // Media

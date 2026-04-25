@@ -144,10 +144,10 @@ fn parse_devtools_active_port(contents: &str) -> Result<(u16, String), ChromeErr
 /// Returns `ChromeError::NotRunning` if no Chrome instance can be discovered.
 pub async fn discover_chrome(host: &str, port: u16) -> Result<(String, u16), ChromeError> {
     // Try DevToolsActivePort file first
-    if let Ok((file_port, _ws_path)) = read_devtools_active_port() {
-        if let Ok(version) = query_version("127.0.0.1", file_port).await {
-            return Ok((version.ws_debugger_url, file_port));
-        }
+    if let Ok((file_port, _ws_path)) = read_devtools_active_port()
+        && let Ok(version) = query_version("127.0.0.1", file_port).await
+    {
+        return Ok((version.ws_debugger_url, file_port));
     }
 
     // Fall back to the explicitly given host/port
@@ -179,10 +179,10 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 fn parse_content_length(headers: &[u8]) -> Option<usize> {
     let header_str = std::str::from_utf8(headers).ok()?;
     for line in header_str.lines() {
-        if let Some((key, value)) = line.split_once(':') {
-            if key.trim().eq_ignore_ascii_case("content-length") {
-                return value.trim().parse().ok();
-            }
+        if let Some((key, value)) = line.split_once(':')
+            && key.trim().eq_ignore_ascii_case("content-length")
+        {
+            return value.trim().parse().ok();
         }
     }
     None

@@ -100,10 +100,10 @@ fn find_chrome_from(
     channel: Channel,
     env_override: Option<&std::path::Path>,
 ) -> Result<PathBuf, ChromeError> {
-    if let Some(p) = env_override {
-        if p.exists() {
-            return Ok(p.to_path_buf());
-        }
+    if let Some(p) = env_override
+        && p.exists()
+    {
+        return Ok(p.to_path_buf());
     }
 
     for candidate in chrome_candidates(channel) {

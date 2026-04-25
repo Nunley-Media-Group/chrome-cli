@@ -149,11 +149,11 @@ pub async fn list_frames(session: &mut ManagedSession) -> Result<Vec<FrameInfo>,
     }
 
     // Main frame dimensions from viewport.
-    if !frames.is_empty() {
-        if let Ok(dims) = get_viewport_dimensions(session).await {
-            frames[0].width = dims.0;
-            frames[0].height = dims.1;
-        }
+    if !frames.is_empty()
+        && let Ok(dims) = get_viewport_dimensions(session).await
+    {
+        frames[0].width = dims.0;
+        frames[0].height = dims.1;
     }
 
     Ok(frames)
@@ -336,32 +336,31 @@ async fn resolve_frame_by_info(
     // Check if the frame has a separate target (OOPIF).
     let targets_result = client.send_command("Target.getTargets", None).await;
 
-    if let Ok(targets_result) = targets_result {
-        if let Some(targets) = targets_result["targetInfos"].as_array() {
-            for target in targets {
-                let target_type = target["type"].as_str().unwrap_or_default();
-                let target_id = target["targetId"].as_str().unwrap_or_default();
+    if let Ok(targets_result) = targets_result
+        && let Some(targets) = targets_result["targetInfos"].as_array()
+    {
+        for target in targets {
+            let target_type = target["type"].as_str().unwrap_or_default();
+            let target_id = target["targetId"].as_str().unwrap_or_default();
 
-                // Match OOPIF by target ID == frame ID, or by iframe type + URL match.
-                let is_match = target_id == frame.id
-                    || (target_type == "iframe"
-                        && target["url"].as_str() == Some(frame.url.as_str()));
+            // Match OOPIF by target ID == frame ID, or by iframe type + URL match.
+            let is_match = target_id == frame.id
+                || (target_type == "iframe" && target["url"].as_str() == Some(frame.url.as_str()));
 
-                if is_match {
-                    let oopif_session =
-                        client
-                            .create_session(target_id)
-                            .await
-                            .map_err(|e| AppError {
-                                message: format!("Failed to attach to frame target: {e}"),
-                                code: ExitCode::ProtocolError,
-                                custom_json: None,
-                            })?;
-                    return Ok(FrameContext::OutOfProcess {
-                        session: ManagedSession::new(oopif_session),
-                        frame_id: frame.id.clone(),
-                    });
-                }
+            if is_match {
+                let oopif_session =
+                    client
+                        .create_session(target_id)
+                        .await
+                        .map_err(|e| AppError {
+                            message: format!("Failed to attach to frame target: {e}"),
+                            code: ExitCode::ProtocolError,
+                            custom_json: None,
+                        })?;
+                return Ok(FrameContext::OutOfProcess {
+                    session: ManagedSession::new(oopif_session),
+                    frame_id: frame.id.clone(),
+                });
             }
         }
     }
@@ -413,11 +412,11 @@ async fn find_execution_context(
         if let Some(event) = result {
             let ctx = &event.params["context"];
             let aux = &ctx["auxData"];
-            if aux["frameId"].as_str() == Some(frame_id) && aux["isDefault"].as_bool() == Some(true)
+            if aux["frameId"].as_str() == Some(frame_id)
+                && aux["isDefault"].as_bool() == Some(true)
+                && let Some(id) = ctx["id"].as_i64()
             {
-                if let Some(id) = ctx["id"].as_i64() {
-                    return Ok(id);
-                }
+                return Ok(id);
             }
         }
     }
@@ -532,20 +531,20 @@ pub async fn resolve_frame_auto<S: ::std::hash::BuildHasher>(
     snapshot_hint: Option<(u32, &std::collections::HashMap<String, i64, S>)>,
 ) -> Result<(FrameContext, u32), AppError> {
     // Fast path: use the persisted snapshot state hint if the UID is in it.
-    if let Some((frame_index, uid_map)) = snapshot_hint {
-        if uid_map.contains_key(uid) {
-            let ctx = if frame_index == 0 {
-                FrameContext::MainFrame
-            } else {
-                let frames = list_frames(session).await?;
-                let frame = frames
-                    .iter()
-                    .find(|f| f.index == frame_index)
-                    .ok_or_else(|| AppError::frame_not_found(frame_index))?;
-                resolve_frame_by_info(client, session, frame).await?
-            };
-            return Ok((ctx, frame_index));
-        }
+    if let Some((frame_index, uid_map)) = snapshot_hint
+        && uid_map.contains_key(uid)
+    {
+        let ctx = if frame_index == 0 {
+            FrameContext::MainFrame
+        } else {
+            let frames = list_frames(session).await?;
+            let frame = frames
+                .iter()
+                .find(|f| f.index == frame_index)
+                .ok_or_else(|| AppError::frame_not_found(frame_index))?;
+            resolve_frame_by_info(client, session, frame).await?
+        };
+        return Ok((ctx, frame_index));
     }
 
     // Slow path: iterate frames in document order, taking a quick AX snapshot of each.
@@ -575,7 +574,7 @@ pub async fn resolve_frame_auto<S: ::std::hash::BuildHasher>(
                 let ctx = resolve_frame_by_info(client, session, frame).await?;
                 return Ok((ctx, frame.index));
             }
-            _ => continue,
+            _ => {}
         }
     }
 
@@ -633,12 +632,12 @@ async fn uid_in_frame_snapshot(
             continue;
         }
         let role = node["role"]["value"].as_str().unwrap_or_default();
-        if INTERACTIVE_ROLES.contains(&role) {
-            if let Some(backend_id) = node["backendDOMNodeId"].as_i64() {
-                uid_counter += 1;
-                let uid = format!("s{uid_counter}");
-                uid_map.insert(uid, backend_id);
-            }
+        if INTERACTIVE_ROLES.contains(&role)
+            && let Some(backend_id) = node["backendDOMNodeId"].as_i64()
+        {
+            uid_counter += 1;
+            let uid = format!("s{uid_counter}");
+            uid_map.insert(uid, backend_id);
         }
     }
 

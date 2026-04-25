@@ -655,12 +655,12 @@ async fn execute_set(global: &GlobalOpts, args: &EmulateSetArgs) -> Result<(), A
     }
 
     // --- Viewport / Device Metrics ---
-    if let Some(scale) = args.device_scale {
-        if scale <= 0.0 {
-            return Err(AppError::emulation_failed(
-                "device scale factor must be a positive number",
-            ));
-        }
+    if let Some(scale) = args.device_scale
+        && scale <= 0.0
+    {
+        return Err(AppError::emulation_failed(
+            "device scale factor must be a positive number",
+        ));
     }
 
     // Read persisted state early so we can check baseline_viewport before overriding

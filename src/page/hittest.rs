@@ -70,11 +70,11 @@ fn element_selector(info: &ElementInfo) -> String {
     if let Some(ref id) = info.id {
         sel.push('#');
         sel.push_str(id);
-    } else if let Some(ref class) = info.class {
-        if let Some(first) = class.split_whitespace().next() {
-            sel.push('.');
-            sel.push_str(first);
-        }
+    } else if let Some(ref class) = info.class
+        && let Some(first) = class.split_whitespace().next()
+    {
+        sel.push('.');
+        sel.push_str(first);
     }
     sel
 }

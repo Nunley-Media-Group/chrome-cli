@@ -258,11 +258,12 @@ async fn capture_snapshot(
 
 /// Try to assign a UID from the snapshot tree to a CSS-matched element.
 fn assign_uid_from_snapshot(node: &crate::snapshot::SnapshotNode, m: &mut FindMatch) {
-    if node.role == m.role && node.name == m.name {
-        if let Some(ref uid) = node.uid {
-            m.uid = Some(uid.clone());
-            return;
-        }
+    if node.role == m.role
+        && node.name == m.name
+        && let Some(ref uid) = node.uid
+    {
+        m.uid = Some(uid.clone());
+        return;
     }
     for child in &node.children {
         if m.uid.is_some() {

@@ -123,10 +123,10 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
     let result = managed.send_command("Page.navigate", Some(params)).await?;
 
     // Check for navigation errors (e.g., DNS failure)
-    if let Some(error_text) = result["errorText"].as_str() {
-        if !error_text.is_empty() {
-            return Err(AppError::navigation_failed(error_text));
-        }
+    if let Some(error_text) = result["errorText"].as_str()
+        && !error_text.is_empty()
+    {
+        return Err(AppError::navigation_failed(error_text));
     }
 
     let frame_id = result["frameId"].as_str().unwrap_or_default().to_string();
@@ -244,10 +244,10 @@ pub(crate) async fn navigate_and_wait(
     let result = managed.send_command("Page.navigate", Some(params)).await?;
 
     // Check for navigation errors (e.g., DNS failure)
-    if let Some(error_text) = result["errorText"].as_str() {
-        if !error_text.is_empty() {
-            return Err(AppError::navigation_failed(error_text));
-        }
+    if let Some(error_text) = result["errorText"].as_str()
+        && !error_text.is_empty()
+    {
+        return Err(AppError::navigation_failed(error_text));
     }
 
     let frame_id = result["frameId"].as_str().unwrap_or_default().to_string();
@@ -610,12 +610,13 @@ fn extract_http_status(
         // Match the response for the main frame document
         let event_frame = event.params["frameId"].as_str().unwrap_or_default();
         let resource_type = event.params["type"].as_str().unwrap_or_default();
-        if event_frame == frame_id && resource_type == "Document" {
-            if let Some(s) = event.params["response"]["status"].as_u64() {
-                #[allow(clippy::cast_possible_truncation)]
-                {
-                    status = Some(s as u16);
-                }
+        if event_frame == frame_id
+            && resource_type == "Document"
+            && let Some(s) = event.params["response"]["status"].as_u64()
+        {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                status = Some(s as u16);
             }
         }
     }

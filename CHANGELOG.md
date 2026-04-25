@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.51.2] - 2026-04-24
+
+### Fixed
+
+- Fix `connect --launch` sessions dying immediately after the connect command exits. Launched Chrome now starts in an independent process session / process group and `ChromeProcess::detach()` preserves the child handle and temporary profile ownership needed by the detached browser, so subsequent AgentChrome invocations can reuse the saved session. (#265)
+
+### Changed
+
+- Apply Rust 1.93 clippy cleanup required by CI after the toolchain/dependency refresh.
+
 ## [1.51.1] - 2026-04-24
 
 ### Changed

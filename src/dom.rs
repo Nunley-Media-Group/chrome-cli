@@ -316,10 +316,10 @@ async fn query_selector_all_in_context(
                     Some(serde_json::json!({ "objectId": obj_id })),
                 )
                 .await;
-            if let Ok(nr) = node_result {
-                if let Some(nid) = nr["nodeId"].as_i64().filter(|&id| id > 0) {
-                    node_ids.push(nid);
-                }
+            if let Ok(nr) = node_result
+                && let Some(nid) = nr["nodeId"].as_i64().filter(|&id| id > 0)
+            {
+                node_ids.push(nid);
             }
         }
     }
@@ -628,12 +628,10 @@ async fn find_in_shadow_dom(
                     Some(serde_json::json!({ "objectId": elem_obj_id })),
                 )
                 .await
+                && let Some(nid) = req["nodeId"].as_i64()
+                && nid > 0
             {
-                if let Some(nid) = req["nodeId"].as_i64() {
-                    if nid > 0 {
-                        node_ids.push(nid);
-                    }
-                }
+                node_ids.push(nid);
             }
         }
     }
@@ -882,10 +880,12 @@ async fn execute_select(
     };
 
     // If pierce_shadow is set and no CSS results found, try shadow DOM JS traversal
-    if pierce_shadow && node_ids.is_empty() && !args.xpath {
-        if let Ok(shadow_ids) = find_in_shadow_dom(effective, &args.selector).await {
-            node_ids = shadow_ids;
-        }
+    if pierce_shadow
+        && node_ids.is_empty()
+        && !args.xpath
+        && let Ok(shadow_ids) = find_in_shadow_dom(effective, &args.selector).await
+    {
+        node_ids = shadow_ids;
     }
 
     // Describe each node
@@ -1653,10 +1653,10 @@ async fn execute_children(
         let node_type = child["nodeType"].as_i64().unwrap_or(0);
         if node_type == 1 {
             let child_id = child["nodeId"].as_i64().unwrap_or(0);
-            if child_id > 0 {
-                if let Ok(el) = describe_element(effective, child_id).await {
-                    elements.push(el);
-                }
+            if child_id > 0
+                && let Ok(el) = describe_element(effective, child_id).await
+            {
+                elements.push(el);
             }
         }
     }
@@ -1777,10 +1777,12 @@ async fn execute_siblings(
     for child in &children {
         let node_type = child["nodeType"].as_i64().unwrap_or(0);
         let child_id = child["nodeId"].as_i64().unwrap_or(0);
-        if node_type == 1 && child_id > 0 && child_id != node_id {
-            if let Ok(el) = describe_element(effective, child_id).await {
-                elements.push(el);
-            }
+        if node_type == 1
+            && child_id > 0
+            && child_id != node_id
+            && let Ok(el) = describe_element(effective, child_id).await
+        {
+            elements.push(el);
         }
     }
 
@@ -1929,12 +1931,10 @@ async fn execute_events(
         if let Ok(eval) = effective
             .send_command("Runtime.evaluate", Some(eval_params))
             .await
+            && let Some(json_str) = eval["result"]["value"].as_str()
+            && let Ok(map) = serde_json::from_str::<HashMap<String, String>>(json_str)
         {
-            if let Some(json_str) = eval["result"]["value"].as_str() {
-                if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(json_str) {
-                    handler_descriptions = map;
-                }
-            }
+            handler_descriptions = map;
         }
     }
 
@@ -2136,15 +2136,15 @@ fn extract_direct_text(node: &serde_json::Value) -> String {
     let mut text = String::new();
     if let Some(children) = node["children"].as_array() {
         for child in children {
-            if child["nodeType"].as_i64() == Some(3) {
-                if let Some(value) = child["nodeValue"].as_str() {
-                    let trimmed = value.trim();
-                    if !trimmed.is_empty() {
-                        if !text.is_empty() {
-                            text.push(' ');
-                        }
-                        text.push_str(trimmed);
+            if child["nodeType"].as_i64() == Some(3)
+                && let Some(value) = child["nodeValue"].as_str()
+            {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    if !text.is_empty() {
+                        text.push(' ');
                     }
+                    text.push_str(trimmed);
                 }
             }
         }

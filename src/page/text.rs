@@ -117,11 +117,11 @@ pub async fn execute_text(
     let value = &result["result"]["value"];
 
     // Check for sentinel error object
-    if let Some(error) = value.get("__error") {
-        if error.as_str() == Some("not_found") {
-            let selector = args.selector.as_deref().unwrap_or("unknown");
-            return Err(AppError::element_not_found(selector));
-        }
+    if let Some(error) = value.get("__error")
+        && error.as_str() == Some("not_found")
+    {
+        let selector = args.selector.as_deref().unwrap_or("unknown");
+        return Err(AppError::element_not_found(selector));
     }
 
     let text = value.as_str().unwrap_or_default().to_string();
@@ -262,10 +262,10 @@ async fn collect_frame_execution_contexts(
     while let Ok(Some(event)) = tokio::time::timeout_at(deadline, rx.recv()).await {
         let ctx = &event.params["context"];
         let aux = &ctx["auxData"];
-        if aux["isDefault"].as_bool() == Some(true) {
-            if let (Some(fid), Some(cid)) = (aux["frameId"].as_str(), ctx["id"].as_i64()) {
-                frame_ctx_map.insert(fid.to_string(), cid);
-            }
+        if aux["isDefault"].as_bool() == Some(true)
+            && let (Some(fid), Some(cid)) = (aux["frameId"].as_str(), ctx["id"].as_i64())
+        {
+            frame_ctx_map.insert(fid.to_string(), cid);
         }
     }
 
@@ -322,11 +322,11 @@ pub async fn compute_text(
     }
 
     let value = &result["result"]["value"];
-    if let Some(error) = value.get("__error") {
-        if error.as_str() == Some("not_found") {
-            let selector = args.selector.as_deref().unwrap_or("unknown");
-            return Err(agentchrome::error::AppError::element_not_found(selector));
-        }
+    if let Some(error) = value.get("__error")
+        && error.as_str() == Some("not_found")
+    {
+        let selector = args.selector.as_deref().unwrap_or("unknown");
+        return Err(agentchrome::error::AppError::element_not_found(selector));
     }
 
     let text = value.as_str().unwrap_or_default().to_string();

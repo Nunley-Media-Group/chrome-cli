@@ -647,11 +647,13 @@ fn patch_aider_config(config_path: &std::path::Path, skill_path: &str) -> Result
 
         // Check if `read:` section exists
         if let Some(read_pos) = content.find("\nread:") {
+            use std::fmt::Write as _;
+
             // Find the end of the read section's entries and append
             let after_read = read_pos + "\nread:".len();
             let mut new_content = String::with_capacity(content.len() + skill_path.len() + 10);
             new_content.push_str(&content[..after_read]);
-            new_content.push_str(&format!("\n  - {skill_path}"));
+            let _ = write!(new_content, "\n  - {skill_path}");
             new_content.push_str(&content[after_read..]);
             std::fs::write(config_path, new_content).map_err(|e| AppError {
                 message: format!("failed to write {}: {e}", config_path.display()),
@@ -659,11 +661,13 @@ fn patch_aider_config(config_path: &std::path::Path, skill_path: &str) -> Result
                 custom_json: None,
             })?;
         } else if content.starts_with("read:") {
+            use std::fmt::Write as _;
+
             // read: is the first line
             let after_read = "read:".len();
             let mut new_content = String::with_capacity(content.len() + skill_path.len() + 10);
             new_content.push_str(&content[..after_read]);
-            new_content.push_str(&format!("\n  - {skill_path}"));
+            let _ = write!(new_content, "\n  - {skill_path}");
             new_content.push_str(&content[after_read..]);
             std::fs::write(config_path, new_content).map_err(|e| AppError {
                 message: format!("failed to write {}: {e}", config_path.display()),
@@ -671,12 +675,14 @@ fn patch_aider_config(config_path: &std::path::Path, skill_path: &str) -> Result
                 custom_json: None,
             })?;
         } else {
+            use std::fmt::Write as _;
+
             // No read section — append one
             let mut new_content = content;
             if !new_content.ends_with('\n') && !new_content.is_empty() {
                 new_content.push('\n');
             }
-            new_content.push_str(&format!("read:\n  - {skill_path}\n"));
+            let _ = writeln!(new_content, "read:\n  - {skill_path}");
             std::fs::write(config_path, new_content).map_err(|e| AppError {
                 message: format!("failed to write {}: {e}", config_path.display()),
                 code: ExitCode::GeneralError,

@@ -331,10 +331,10 @@ fn infer_type(arg: &clap::Arg) -> String {
     }
 
     // Check for multiple values
-    if let Some(num_args) = arg.get_num_args() {
-        if num_args.max_values() > 1 {
-            return "array".to_string();
-        }
+    if let Some(num_args) = arg.get_num_args()
+        && num_args.max_values() > 1
+    {
+        return "array".to_string();
     }
 
     // Infer from value name
@@ -395,10 +395,10 @@ fn extract_default(arg: &clap::Arg) -> Option<serde_json::Value> {
     }
 
     // Try float
-    if let Ok(n) = val.parse::<f64>() {
-        if let Some(num) = serde_json::Number::from_f64(n) {
-            return Some(serde_json::Value::Number(num));
-        }
+    if let Ok(n) = val.parse::<f64>()
+        && let Some(num) = serde_json::Number::from_f64(n)
+    {
+        return Some(serde_json::Value::Number(num));
     }
 
     // Try bool

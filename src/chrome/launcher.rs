@@ -2,6 +2,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use super::ChromeError;
 use super::discovery::query_version;
 
@@ -66,10 +71,16 @@ impl ChromeProcess {
     pub fn detach(mut self) -> (u32, u16) {
         let pid = self.pid();
         let port = self.port;
-        // Take ownership to prevent Drop from killing the process
-        self.child = None;
-        // Prevent temp dir cleanup — Chrome still needs it
-        self.temp_dir = None;
+        // Prevent process cleanup: the launched browser must outlive this
+        // ChromeProcess handle after a successful connect --launch.
+        if let Some(child) = self.child.take() {
+            std::mem::forget(child);
+        }
+        // Prevent temp dir cleanup: Chrome still needs the profile directory
+        // after the launching process exits.
+        if let Some(temp_dir) = self.temp_dir.take() {
+            std::mem::forget(temp_dir);
+        }
         (pid, port)
     }
 }
@@ -87,10 +98,10 @@ impl Drop for ChromeProcess {
 fn random_suffix() -> String {
     use std::io::Read;
     let mut buf = [0u8; 8];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        if f.read_exact(&mut buf).is_ok() {
-            return hex_encode(&buf);
-        }
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom")
+        && f.read_exact(&mut buf).is_ok()
+    {
+        return hex_encode(&buf);
     }
     // Fallback: combine PID and a stack address for uniqueness
     let pid = std::process::id();
@@ -145,6 +156,40 @@ fn build_chrome_args(config: &LaunchConfig, data_dir: &Path) -> Vec<String> {
     args
 }
 
+/// Configure Chrome so it is not tied to the launcher process group.
+///
+/// `connect --launch` is a cross-invocation command: Chrome must survive after
+/// the short-lived `AgentChrome` process exits, including under harnesses that
+/// clean up the launcher's process group.
+fn configure_detached_process(cmd: &mut Command) {
+    #[cfg(unix)]
+    {
+        // SAFETY: `pre_exec` runs in the child after fork and before exec.
+        // The closure only calls `setsid`, an async-signal-safe libc function,
+        // and returns an OS error if it fails.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = cmd;
+    }
+}
+
 /// Launch a Chrome process with the given configuration.
 ///
 /// Polls the Chrome debug endpoint until it responds or the timeout expires.
@@ -173,6 +218,7 @@ pub async fn launch_chrome(
         cmd.arg(arg);
     }
 
+    configure_detached_process(&mut cmd);
     cmd.stdout(Stdio::null()).stderr(Stdio::null());
 
     let child = cmd.spawn().map_err(|e| {
@@ -200,12 +246,12 @@ pub async fn launch_chrome(
         }
 
         // Check if the child has exited unexpectedly
-        if let Some(child) = process.child.as_mut() {
-            if let Ok(Some(status)) = child.try_wait() {
-                return Err(ChromeError::LaunchFailed(format!(
-                    "Chrome exited with status {status} before becoming ready"
-                )));
-            }
+        if let Some(child) = process.child.as_mut()
+            && let Ok(Some(status)) = child.try_wait()
+        {
+            return Err(ChromeError::LaunchFailed(format!(
+                "Chrome exited with status {status} before becoming ready"
+            )));
         }
 
         if query_version("127.0.0.1", config.port).await.is_ok() {
@@ -274,6 +320,29 @@ mod tests {
             args.iter().any(|a| a == "--enable-automation"),
             "Expected --enable-automation in args: {args:?}"
         );
+    }
+
+    #[test]
+    fn detach_preserves_temp_user_data_dir() {
+        let path =
+            std::env::temp_dir().join(format!("agentchrome-detach-test-{}", random_suffix()));
+        std::fs::create_dir_all(&path).unwrap();
+
+        let process = ChromeProcess {
+            child: None,
+            port: 9222,
+            temp_dir: Some(TempDir { path: path.clone() }),
+        };
+
+        let (_pid, port) = process.detach();
+
+        assert_eq!(port, 9222);
+        assert!(
+            path.exists(),
+            "detach must not delete Chrome's temporary user data directory"
+        );
+
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

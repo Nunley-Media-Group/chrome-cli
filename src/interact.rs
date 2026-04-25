@@ -345,8 +345,8 @@ async fn get_element_center(
     let x3 = content[4].as_f64().unwrap_or(0.0);
     let y3 = content[5].as_f64().unwrap_or(0.0);
 
-    let center_x = (x1 + x3) / 2.0;
-    let center_y = (y1 + y3) / 2.0;
+    let center_x = f64::midpoint(x1, x3);
+    let center_y = f64::midpoint(y1, y3);
 
     // Check for zero-size
     if (x3 - x1).abs() < 1.0 || (y3 - y1).abs() < 1.0 {

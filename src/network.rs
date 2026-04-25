@@ -260,14 +260,14 @@ fn timestamp_to_iso(ts: f64) -> String {
 /// Parse a status filter string. Supports exact ("404") or wildcard ("4xx").
 fn parse_status_filter(status_str: &str) -> StatusFilter {
     let lower = status_str.to_lowercase();
-    if lower.len() == 3 && lower.ends_with("xx") {
-        if let Some(prefix_char) = lower.chars().next() {
-            if let Some(digit) = prefix_char.to_digit(10) {
-                #[allow(clippy::cast_possible_truncation)]
-                let base = (digit as u16) * 100;
-                return StatusFilter::Range(base, base + 99);
-            }
-        }
+    if lower.len() == 3
+        && lower.ends_with("xx")
+        && let Some(prefix_char) = lower.chars().next()
+        && let Some(digit) = prefix_char.to_digit(10)
+    {
+        #[allow(clippy::cast_possible_truncation)]
+        let base = (digit as u16) * 100;
+        return StatusFilter::Range(base, base + 99);
     }
     if let Ok(code) = status_str.parse::<u16>() {
         StatusFilter::Exact(code)
@@ -755,10 +755,10 @@ fn resolve_size(
     encoded_data_length: Option<u64>,
     response_headers: &serde_json::Value,
 ) -> Option<u64> {
-    if let Some(len) = encoded_data_length {
-        if len > 0 {
-            return Some(len);
-        }
+    if let Some(len) = encoded_data_length
+        && len > 0
+    {
+        return Some(len);
     }
     // Fall back to content-length header (case-insensitive lookup)
     if let Some(headers) = response_headers.as_object() {
@@ -921,6 +921,8 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
 
     // Output
     if global.output.plain {
+        use std::fmt::Write as _;
+
         let mut text = String::new();
         for req in &requests {
             let status_str = req
@@ -932,10 +934,11 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
             let dur_str = req
                 .duration_ms
                 .map_or_else(|| "-".to_string(), |d| format!("{d:.1}ms"));
-            text.push_str(&format!(
-                "{} {} {} {} {}\n",
+            let _ = writeln!(
+                text,
+                "{} {} {} {} {}",
                 req.method, req.url, status_str, size_str, dur_str
-            ));
+            );
         }
         crate::output::emit_plain(&text, &global.output)?;
         return Ok(());
@@ -1032,10 +1035,10 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
     };
 
     // Save request body if requested
-    if let Some(ref save_path) = args.save_request {
-        if let Some(ref body) = request_body {
-            save_body_to_file(save_path, body)?;
-        }
+    if let Some(ref save_path) = args.save_request
+        && let Some(ref body) = request_body
+    {
+        save_body_to_file(save_path, body)?;
     }
 
     // Build timing info
@@ -1333,20 +1336,20 @@ fn emit_stream_event(
     verbose: bool,
 ) {
     // Apply filters
-    if let Some(types) = type_filter {
-        if !types.iter().any(|t| t == &req.resource_type.to_lowercase()) {
-            return;
-        }
+    if let Some(types) = type_filter
+        && !types.iter().any(|t| t == &req.resource_type.to_lowercase())
+    {
+        return;
     }
-    if let Some(pattern) = url_filter {
-        if !req.url.contains(pattern) {
-            return;
-        }
+    if let Some(pattern) = url_filter
+        && !req.url.contains(pattern)
+    {
+        return;
     }
-    if let Some(method) = method_filter {
-        if req.method.to_uppercase() != method {
-            return;
-        }
+    if let Some(method) = method_filter
+        && req.method.to_uppercase() != method
+    {
+        return;
     }
 
     let duration_ms = end_timestamp.map(|end| (end - req.timestamp) * 1000.0);

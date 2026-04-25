@@ -368,13 +368,13 @@ async fn read_dialog_cookie(managed: &ManagedSession) -> (String, String, String
     for cookie in cookie_array {
         if cookie["name"].as_str() == Some(DIALOG_COOKIE_NAME) {
             let encoded = cookie["value"].as_str().unwrap_or("");
-            if let Ok(decoded) = urlencoding::decode(encoded) {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&decoded) {
-                    let dialog_type = parsed["type"].as_str().unwrap_or("unknown").to_string();
-                    let message = parsed["message"].as_str().unwrap_or("").to_string();
-                    let default_value = parsed["defaultValue"].as_str().unwrap_or("").to_string();
-                    return (dialog_type, message, default_value);
-                }
+            if let Ok(decoded) = urlencoding::decode(encoded)
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&decoded)
+            {
+                let dialog_type = parsed["type"].as_str().unwrap_or("unknown").to_string();
+                let message = parsed["message"].as_str().unwrap_or("").to_string();
+                let default_value = parsed["defaultValue"].as_str().unwrap_or("").to_string();
+                return (dialog_type, message, default_value);
             }
         }
     }

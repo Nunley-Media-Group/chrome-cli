@@ -206,10 +206,10 @@ pub fn build_tree_with_uid_offset(
         }
         // Inject computed child_ids into nodes that have none
         for node in &mut ax_nodes {
-            if node.child_ids.is_empty() {
-                if let Some(children) = parent_to_children.remove(&node.node_id) {
-                    node.child_ids = children;
-                }
+            if node.child_ids.is_empty()
+                && let Some(children) = parent_to_children.remove(&node.node_id)
+            {
+                node.child_ids = children;
             }
         }
     }
@@ -511,10 +511,10 @@ pub fn top_roles(value: &serde_json::Value, limit: usize) -> Vec<String> {
 }
 
 fn collect_roles(value: &serde_json::Value, counts: &mut HashMap<String, usize>) {
-    if let Some(role) = value["role"].as_str() {
-        if !role.is_empty() {
-            *counts.entry(role.to_string()).or_insert(0) += 1;
-        }
+    if let Some(role) = value["role"].as_str()
+        && !role.is_empty()
+    {
+        *counts.entry(role.to_string()).or_insert(0) += 1;
     }
     if let Some(children) = value["children"].as_array() {
         for child in children {

@@ -1,0 +1,24 @@
+@regression
+Feature: Fix connect --launch deleting temporary Chrome profile on detach
+  As an AgentChrome user
+  I want launched Chrome sessions to survive the connect command that created them
+  So that follow-up AgentChrome commands can reuse the persisted session
+
+  @regression
+  Scenario: Detached launch preserves temporary profile
+    Given Chrome was launched with an internally managed temporary user data directory
+    When AgentChrome detaches the launch handle after Chrome becomes ready
+    Then the temporary user data directory is not deleted by the launcher process
+
+  @regression
+  Scenario: Follow-up commands can reuse launched session
+    Given "agentchrome connect --launch --headless" succeeds
+    When the user runs a follow-up command in a new AgentChrome invocation
+    Then the persisted session remains reachable
+    And the follow-up command exits successfully
+
+  @regression
+  Scenario: Error cleanup still removes temporary profile
+    Given AgentChrome creates a temporary user data directory while launching Chrome
+    When the launch process is not detached
+    Then dropping the temporary directory owner still removes the directory

@@ -514,11 +514,10 @@ async fn execute_follow(global: &GlobalOpts, args: &ConsoleFollowArgs) -> Result
                         }
 
                         // Apply type filter
-                        if let Some(ref types) = type_filter {
-                            if !types.iter().any(|t| t == &msg_type) {
+                        if let Some(ref types) = type_filter
+                            && !types.iter().any(|t| t == &msg_type) {
                                 continue;
                             }
-                        }
 
                         let args_arr = ev.params["args"].as_array();
                         let text = args_arr

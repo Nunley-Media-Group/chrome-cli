@@ -135,17 +135,17 @@ fn validate_step(step: &Step, index: usize) -> Result<(), AppError> {
                     custom_json: None,
                 });
             }
-            if let Some(name) = &cmd_step.bind {
-                if !is_valid_identifier(name) {
-                    return Err(AppError {
-                        message: format!(
-                            "script step {index}: 'bind' name '{name}' is not a valid identifier \
+            if let Some(name) = &cmd_step.bind
+                && !is_valid_identifier(name)
+            {
+                return Err(AppError {
+                    message: format!(
+                        "script step {index}: 'bind' name '{name}' is not a valid identifier \
                              (must match [a-zA-Z_][a-zA-Z0-9_]*)"
-                        ),
-                        code: ExitCode::GeneralError,
-                        custom_json: None,
-                    });
-                }
+                    ),
+                    code: ExitCode::GeneralError,
+                    custom_json: None,
+                });
             }
         }
         Step::If(if_step) => {
