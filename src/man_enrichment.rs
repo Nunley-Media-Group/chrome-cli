@@ -20,11 +20,38 @@ pub fn render_enriched(
 ) -> std::io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     clap_mangen::Man::new(cmd).date("").render(&mut buf)?;
+    if short_name == "agentchrome" {
+        strip_line_trailing_ascii_whitespace(&mut buf);
+    }
     let enrichment = enrich_for(short_name, manifest, examples);
     if !enrichment.is_empty() {
         buf.extend_from_slice(enrichment.as_bytes());
     }
     Ok(buf)
+}
+
+fn strip_line_trailing_ascii_whitespace(buf: &mut Vec<u8>) {
+    let mut cleaned = Vec::with_capacity(buf.len());
+    let mut line = Vec::new();
+
+    for &byte in buf.iter() {
+        if byte == b'\n' {
+            while matches!(line.last(), Some(b' ' | b'\t')) {
+                line.pop();
+            }
+            cleaned.extend_from_slice(&line);
+            cleaned.push(byte);
+            line.clear();
+        } else {
+            line.push(byte);
+        }
+    }
+
+    while matches!(line.last(), Some(b' ' | b'\t')) {
+        line.pop();
+    }
+    cleaned.extend_from_slice(&line);
+    *buf = cleaned;
 }
 
 /// Emit roff-formatted CAPABILITIES and EXAMPLES sections for the named command.
@@ -196,5 +223,15 @@ mod tests {
         let examples = make_examples_with("navigate");
         let output = enrich_for("tabs", &manifest, &examples);
         assert!(output.is_empty(), "expected empty string, got: {output}");
+    }
+
+    #[test]
+    fn strips_trailing_spaces_from_rendered_lines() {
+        let mut buf = b".TH agentchrome 1  \"agentchrome 1.51.0\" \n.SH NAME\t\nok\n".to_vec();
+        strip_line_trailing_ascii_whitespace(&mut buf);
+        assert_eq!(
+            String::from_utf8(buf).expect("valid utf8"),
+            ".TH agentchrome 1  \"agentchrome 1.51.0\"\n.SH NAME\nok\n"
+        );
     }
 }
