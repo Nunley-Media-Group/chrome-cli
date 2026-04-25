@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.51.5] - 2026-04-25
+
+### Changed
+
+- Regenerate packaged man pages after the 1.51.x patch releases so the committed manual pages and binary version remain deterministic in CI.
+
 ## [1.51.4] - 2026-04-25
 
 ### Changed
