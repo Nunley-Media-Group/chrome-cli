@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.51.1] - 2026-04-24
+
+### Changed
+
+- Raise the pinned Rust toolchain and published MSRV to 1.93.0, refresh dependency resolution, and keep normal `cargo install agentchrome --force` installs working without requiring `--locked` after newer transitive ICU crates raised their Rust requirement.
+
 ## [1.51.0] - 2026-04-24
 
 ### Added

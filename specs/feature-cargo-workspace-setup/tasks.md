@@ -57,7 +57,7 @@ Map `{layer}/` placeholders to actual project paths using `structure.md`.
 **Type**: Create
 **Depends**: None
 **Acceptance**:
-- [ ] Pins `channel = "1.85.0"` (first stable supporting edition 2024)
+- [ ] Pins `channel = "1.93.0"` (current pinned stable toolchain)
 
 ### T003: Create rustfmt.toml
 

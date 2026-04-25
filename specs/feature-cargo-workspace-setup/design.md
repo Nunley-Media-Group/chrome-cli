@@ -85,10 +85,10 @@ fn main() {
 
 ```toml
 [toolchain]
-channel = "1.85.0"
+channel = "1.93.0"
 ```
 
-**Rationale**: Rust 1.85.0 is the first stable release supporting edition 2024. Pin to this as the minimum required version.
+**Rationale**: Rust 1.93.0 is the current pinned stable toolchain for builds and dependency resolution.
 
 ### rustfmt.toml
 

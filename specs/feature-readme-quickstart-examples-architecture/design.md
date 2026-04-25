@@ -143,7 +143,7 @@ Brief descriptions of:
 
 ### Contributing Section
 
-- Prerequisites: Rust 1.85.0+, Chrome/Chromium
+- Prerequisites: Rust 1.93.0+, Chrome/Chromium
 - Build: `cargo build`
 - Test: `cargo test`
 - Lint: `cargo clippy` and `cargo fmt --check`

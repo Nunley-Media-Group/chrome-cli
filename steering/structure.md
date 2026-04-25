@@ -72,7 +72,7 @@ agentchrome/
 ├── Cargo.toml                 # Workspace + package manifest
 ├── Cargo.lock                 # Dependency lock file
 ├── VERSION                    # Single source of truth for version (0.1.0)
-├── rust-toolchain.toml        # Pinned Rust toolchain (1.85.0)
+├── rust-toolchain.toml        # Pinned Rust toolchain (1.93.0)
 ├── rustfmt.toml               # Formatter config (edition 2024)
 ├── LICENSE-APACHE             # Apache 2.0 license
 ├── LICENSE-MIT                # MIT license

@@ -386,7 +386,7 @@ All contributions must follow the [NMG-SDLC](https://github.com/Nunley-Media-Gro
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) 1.85.0 or later (pinned via `rust-toolchain.toml`)
+- [Rust](https://rustup.rs/) 1.93.0 or later (pinned via `rust-toolchain.toml`)
 - Chrome or Chromium (for integration testing)
 - Codex with the [NMG-SDLC plugin](https://github.com/Nunley-Media-Group/nmg-plugins) installed
 

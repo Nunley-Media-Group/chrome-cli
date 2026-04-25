@@ -26,7 +26,7 @@ Chrome Browser (DevTools Protocol)
 | Layer | Technology | Version |
 |-------|------------|---------|
 | Language | Rust | Edition 2024 |
-| Toolchain | rustc | 1.85.0 |
+| Toolchain | rustc | 1.93.0 |
 | Build system | Cargo | workspace, resolver v3 |
 | CLI framework | clap | 4 (derive mode) |
 | Async runtime | tokio | 1 (multi-thread) |
@@ -54,6 +54,7 @@ The `VERSION` file (plain text semver at project root) is the **single source of
 |------|------|-------|
 | VERSION | (entire file) | Plain text semver string |
 | Cargo.toml | `package.version` | Root workspace package version |
+| Cargo.toml | `package.rust-version` | Minimum supported Rust version |
 
 ---
 
