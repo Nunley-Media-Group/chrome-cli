@@ -488,13 +488,8 @@ async fn dispatch_click(
             "button": button,
             "clickCount": click_count,
         });
-        opened_dialog |= dispatch_mouse_event(
-            session,
-            release_params,
-            "mouse_release",
-            dialog_open_rx.as_deref_mut(),
-        )
-        .await?;
+        opened_dialog |=
+            dispatch_mouse_event(session, release_params, "mouse_release", dialog_open_rx).await?;
     }
 
     Ok(opened_dialog)
@@ -1773,6 +1768,7 @@ fn compute_scroll_delta(
 }
 
 /// Execute the `interact click` command.
+#[allow(clippy::too_many_lines)]
 async fn execute_click(
     global: &GlobalOpts,
     args: &ClickArgs,

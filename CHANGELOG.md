@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.51.4] - 2026-04-25
+
+### Changed
+
+- Apply the Rust 1.93 clippy cleanup for the dialog-aware click fix released in 1.51.3 so the main CI check remains green.
+
 ## [1.51.3] - 2026-04-25
 
 ### Fixed
