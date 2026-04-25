@@ -1,7 +1,7 @@
 # Requirements: Add agentchrome skill Command Group
 
-**Issues**: #172, #214
-**Date**: 2026-04-16
+**Issues**: #172, #214, #263
+**Date**: 2026-04-24
 **Status**: Draft
 **Author**: Claude (AI-assisted)
 
@@ -166,6 +166,61 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 **When** the command completes (success or error)
 **Then** success output is JSON on stdout and error output is JSON on stderr, consistent with the global output contract
 
+### AC19: Codex skill installs explicitly
+
+**Given** no particular agentic environment is active
+**When** the user runs `agentchrome skill install --tool codex`
+**Then** the command exits 0
+**And** stdout contains JSON with `"tool": "codex"` and `"action": "installed"`
+**And** AgentChrome writes `SKILL.md` to `$CODEX_HOME/skills/agentchrome/SKILL.md` when `CODEX_HOME` is set
+**And** AgentChrome writes `SKILL.md` to `~/.codex/skills/agentchrome/SKILL.md` when `CODEX_HOME` is not set
+
+### AC20: Codex appears in skill list
+
+**Given** the skill command is available
+**When** the user runs `agentchrome skill list`
+**Then** stdout contains JSON with a `tools` array
+**And** the array includes an entry with `"name": "codex"`
+**And** the Codex entry includes `detection`, `path`, and `installed` fields
+**And** `installed` reflects whether the Codex skill file exists at the resolved install path
+
+### AC21: Codex auto-detection works
+
+**Given** Codex-specific signals are present, such as `CODEX_HOME` or an existing `~/.codex/` directory
+**When** the user runs `agentchrome skill install` without `--tool`
+**Then** Codex is selected when no higher-priority explicit tool signal applies
+**And** the skill is installed to the resolved Codex skill path
+**And** stdout reports `"tool": "codex"`
+
+### AC22: Codex lifecycle commands work
+
+**Given** a Codex skill was previously installed
+**When** the user runs `agentchrome skill update --tool codex`
+**Then** the skill file is rewritten with the current AgentChrome skill template
+**And** stdout reports `"action": "updated"`
+
+**Given** a Codex skill was previously installed
+**When** the user runs `agentchrome skill uninstall --tool codex`
+**Then** the Codex skill file is removed
+**And** stdout reports `"action": "uninstalled"`
+
+### AC23: Staleness check includes Codex
+
+**Given** an installed Codex skill has an older embedded version than the AgentChrome binary
+**When** any `agentchrome` command is invoked
+**Then** stderr contains exactly one staleness notice line using the existing format
+**And** the notice names `codex` when only the Codex skill is stale
+**And** the notice includes `codex` in the aggregated stale-tool list when multiple skills are stale
+**And** existing suppression via `AGENTCHROME_NO_SKILL_CHECK=1` and config still applies
+
+### AC24: Documentation and tests cover Codex
+
+**Given** Codex support is implemented
+**When** the README, Codex guide, examples, and BDD tests are reviewed
+**Then** Codex is documented as a supported skill installer target
+**And** the docs show `agentchrome skill install --tool codex`
+**And** focused BDD or unit tests cover install, list, detection, update, uninstall, and staleness behavior for Codex
+
 ---
 
 ## Functional Requirements
@@ -194,6 +249,14 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | FR20 | Add Tier 3 detection for `~/.gemini/` directory existence in `detect_tool()` | Must | Issue #214 |
 | FR21 | Update unit tests: registry count (6→7), `tool_for_name` mapping, list output count, and add Gemini-specific assertions | Must | Issue #214 |
 | FR22 | Update README.md to list Gemini CLI as a supported tool in the skill installer section, including the `--tool gemini` example and `~/.gemini/instructions/agentchrome.md` install path | Must | Issue #214 |
+| FR23 | Add `Codex` to the `ToolName` enum and map it to the CLI value `codex`. | Must | Issue #263 |
+| FR24 | Add a Codex `ToolInfo` entry to the `TOOLS` registry. | Must | Issue #263 |
+| FR25 | Resolve the Codex install path as `$CODEX_HOME/skills/agentchrome/SKILL.md` when `CODEX_HOME` is set, otherwise `~/.codex/skills/agentchrome/SKILL.md`. | Must | Issue #263 |
+| FR26 | Support Codex in `install`, `update`, `uninstall`, and `list` with the existing JSON stdout/error contract. | Must | Issue #263 |
+| FR27 | Add Codex detection using Codex-specific environment or config-directory signals without breaking existing detection priority. | Should | Issue #263 |
+| FR28 | Include Codex in the staleness-check registry behavior. | Must | Issue #263 |
+| FR29 | Update README, Codex guide, and examples to list Codex as a supported tool and show the install/update workflow. | Must | Issue #263 |
+| FR30 | Add focused BDD and/or unit coverage for Codex install, listing, auto-detection, lifecycle commands, and stale-skill notice behavior. | Must | Issue #263 |
 
 ---
 
@@ -216,6 +279,13 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 |-------|------|------------|----------|
 | `--tool` | String (enum) | Must be one of: `claude-code`, `windsurf`, `aider`, `continue`, `copilot-jb`, `cursor`, `gemini` | No (auto-detect if omitted) |
 | Subcommand | Enum | Must be one of: `install`, `uninstall`, `update`, `list` | Yes |
+
+### Input Data Amendment (#263)
+
+| Field | Type | Validation | Required |
+|-------|------|------------|----------|
+| `--tool` | String (enum) | Also accepts `codex` as a supported explicit target | No (auto-detect if omitted) |
+| `CODEX_HOME` | Path-like environment variable | When set, used as Codex's home directory for skill installation | No |
 
 ### Output Data (install/uninstall/update)
 
@@ -249,6 +319,7 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | GitHub Copilot (JB) | `~/.config/github-copilot/` exists | `~/.config/github-copilot/intellij/global-copilot-instructions.md` (append section) |
 | Cursor | `CURSOR_*` env or `~/.cursor/` exists | `.cursor/rules/agentchrome.mdc` (project-level only) |
 | Gemini CLI | `GEMINI_*` env var or `~/.gemini/` directory exists | `~/.gemini/instructions/agentchrome.md` |
+| Codex | `CODEX_HOME` env var or `~/.codex/` directory exists | `$CODEX_HOME/skills/agentchrome/SKILL.md`, or `~/.codex/skills/agentchrome/SKILL.md` when `CODEX_HOME` is unset |
 
 ---
 
@@ -275,6 +346,10 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 - MCP server registration in Gemini's `~/.gemini/settings.json` (separate feature)
 - Gemini-specific skill template content (uses the shared template; customization is a follow-up)
 - GEMINI.md project-level file generation
+- Publishing AgentChrome to OpenAI's external skills repository
+- Changing Codex itself or its skill loader behavior
+- Rewriting the existing AgentChrome skill template beyond what Codex support requires
+- Changing the JSON output contract for existing `agentchrome skill` commands
 
 ---
 
@@ -285,6 +360,14 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | Supported tools | 7 (Claude Code, Windsurf, Aider, Continue.dev, Copilot JB, Cursor, Gemini CLI) | Count of working tool integrations |
 | Install round-trip | install → list shows installed → uninstall → list shows not installed | End-to-end verification |
 | Startup overhead | < 50ms for all skill subcommands | Benchmark timing |
+
+### Success Metrics Amendment (#263)
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Supported tools | 8 (existing seven tools plus Codex) | Count of working tool integrations |
+| Codex lifecycle round-trip | install → list shows installed → update rewrites → uninstall removes → list shows not installed | Focused Codex BDD or unit coverage |
+| Staleness coverage | Codex stale installs are included in single-tool and aggregated stale-tool notices | Staleness tests with Codex-only and multi-tool stale fixtures |
 
 ---
 
@@ -300,6 +383,7 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 |-------|------|---------|
 | #172 | 2026-03-12 | Initial feature spec |
 | #214 | 2026-04-16 | Add Gemini CLI as 7th supported tool (AC13–AC18, FR16–FR22) |
+| #263 | 2026-04-24 | Add Codex as a supported skill installer target |
 
 ---
 

@@ -1,7 +1,7 @@
 # Design: Add agentchrome skill Command Group
 
-**Issues**: #172, #214
-**Date**: 2026-04-16
+**Issues**: #172, #214, #263
+**Date**: 2026-04-24
 **Status**: Draft
 **Author**: Claude (AI-assisted)
 
@@ -284,6 +284,125 @@ The `{version}` placeholder is replaced at runtime with the binary's version fro
 
 ---
 
+## Design Amendment: Codex Skill Target (#263)
+
+Issue #263 extends the existing registry-driven skill installer with Codex as the eighth supported tool. Codex fits the existing `Standalone` install model, but its install root is dynamic: `$CODEX_HOME` when set, otherwise `~/.codex`. The implementation should keep Codex in the same `TOOLS` registry used by install/list/update/uninstall and by `src/skill_check.rs`, while adding one narrow path-resolution branch for Codex's environment-sensitive root.
+
+### CLI Surface Amendment
+
+Add `Codex` to `src/cli/mod.rs`'s `ToolName` enum so `clap` accepts `--tool codex` across `skill install`, `skill update`, and `skill uninstall`.
+
+```rust
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ToolName {
+    ClaudeCode,
+    Windsurf,
+    Aider,
+    Continue,
+    CopilotJb,
+    Cursor,
+    Gemini,
+    Codex,
+}
+```
+
+The command schemas stay unchanged. `codex` is an additional enum value, not a new command or output shape. Existing JSON stdout and stderr contracts remain unchanged.
+
+### Registry Amendment
+
+Add a Codex entry to `src/skill.rs::TOOLS`:
+
+```rust
+ToolInfo {
+    name: "codex",
+    detection: "CODEX_HOME env var or ~/.codex/ directory exists",
+    install_mode: InstallMode::Standalone {
+        path_template: "$CODEX_HOME/skills/agentchrome/SKILL.md",
+    },
+}
+```
+
+Because `$CODEX_HOME` has a fallback, the path resolver must not treat the literal `$CODEX_HOME` string as a filesystem segment. Two implementation options are acceptable:
+
+1. Add a Codex-specific `InstallMode` variant such as `CodexStandalone { env_var, fallback_home_relative }`.
+2. Keep `Standalone` and teach `resolve_path()` to recognize the exact `$CODEX_HOME/` prefix and fall back to `~/.codex/` when unset.
+
+Option 2 is the smaller change and preserves the current registry shape. It is selected as long as the prefix handling is exact and covered by tests. Do not add general shell-style environment interpolation; the project only needs this one Codex root rule.
+
+### Detection Amendment
+
+Extend `detect_tool()` in `src/skill.rs` without changing the tier order:
+
+1. Tier 1 environment variables:
+   - `CODEX_HOME` -> Codex
+2. Tier 2 parent process:
+   - No Codex parent-process detection in this issue. Codex invocations may run through different host process names, and `CODEX_HOME` / config-dir signals are more reliable.
+3. Tier 3 config directories:
+   - `~/.codex/` exists -> Codex
+
+Codex should be checked after the existing explicit env-var signals unless a code review finds a stronger project-local convention for inserting new tools. AC21 only requires Codex selection when no higher-priority explicit tool signal applies, so this preserves existing detection behavior.
+
+### Path Resolution Amendment
+
+`src/skill.rs::resolve_path()` currently expands `~/` against `dirs::home_dir()`. Add exact support for the Codex template:
+
+```text
+$CODEX_HOME/skills/agentchrome/SKILL.md
+```
+
+Resolution rules:
+
+| Condition | Resolved path |
+|-----------|---------------|
+| `CODEX_HOME=/custom/codex` | `/custom/codex/skills/agentchrome/SKILL.md` |
+| `CODEX_HOME` unset | `~/.codex/skills/agentchrome/SKILL.md` |
+| `CODEX_HOME` set to empty string | Treat as unset and use `~/.codex/skills/agentchrome/SKILL.md` |
+
+This resolver is shared by `install`, `update`, `uninstall`, `list`, and `skill_check`, so one implementation point keeps lifecycle behavior and staleness checks aligned.
+
+### Skill Check Amendment
+
+`src/skill_check.rs::stale_tools()` already iterates `crate::skill::TOOLS` and calls `path_template()` plus `resolve_path()`. After Codex is in `TOOLS` and `resolve_path()` handles `$CODEX_HOME`, Codex becomes part of the stale-skill scan automatically. Tests must cover:
+
+- Codex-only stale notice names `codex`.
+- Multi-tool stale notice includes `codex` in the aggregated list.
+- Suppression via `AGENTCHROME_NO_SKILL_CHECK=1` and `skill.check_enabled = false` still applies.
+
+### Documentation Amendment
+
+Update the existing documentation locations that describe skill installer targets:
+
+| File | Change |
+|------|--------|
+| `README.md` | Add Codex to supported tools and show `agentchrome skill install --tool codex`. |
+| `docs/codex.md` | Prefer `agentchrome skill install --tool codex` as the native Codex setup path and document `$CODEX_HOME` fallback behavior. |
+| `examples/AGENTS.md.example` | Mention that Codex users can install the AgentChrome skill with `agentchrome skill install --tool codex`. |
+
+The shared `SKILL_TEMPLATE` remains compact and reusable. Codex does not receive a custom template in this issue.
+
+### Test Amendment
+
+Extend existing tests instead of creating a parallel test harness:
+
+| File | Coverage |
+|------|----------|
+| `tests/features/skill-command-group.feature` | Add Codex scenarios matching AC19-AC22 and AC24. |
+| `tests/features/skill-staleness.feature` | Add Codex-only and multi-tool aggregation scenarios for AC23. |
+| `tests/bdd.rs` | Add Codex path helpers and step bindings analogous to the existing Gemini helpers. |
+| `src/skill.rs` unit tests | Update registry count, `tool_for_name()` mapping, path resolution, list output, and Codex detection. |
+| `src/skill_check.rs` unit tests or BDD | Verify stale notice formatting and registry iteration include Codex. |
+
+### Risk Amendment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| `$CODEX_HOME` fallback diverges between install/list and staleness check | Medium | Medium | Route every caller through `resolve_path()` and add tests for both set and unset `CODEX_HOME`. |
+| Codex detection could preempt an existing tool signal in mixed-agent environments | Low | Medium | Preserve the existing detection tier order and place Codex after existing Tier 1 signals. |
+| Empty `CODEX_HOME` creates a relative or invalid path | Low | Medium | Treat empty values as unset and fall back to `~/.codex`. |
+| Registry-count tests become brittle when adding the eighth tool | Medium | Low | Update expected count from 7 to 8 and add a per-tool assertion for Codex. |
+
+---
+
 ## Alternatives Considered
 
 | Option | Description | Pros | Cons | Decision |
@@ -345,6 +464,7 @@ The `{version}` placeholder is replaced at runtime with the binary's version fro
 |-------|------|---------|
 | #172 | 2026-03-12 | Initial feature spec |
 | #214 | 2026-04-16 | Add Gemini CLI: `Gemini` variant in `ToolName`, `ToolInfo` entry with `Standalone` mode, Tier 1 + Tier 3 detection, README update |
+| #263 | 2026-04-24 | Add Codex target with CODEX_HOME-aware path resolution, registry support, staleness coverage, docs, and tests |
 
 ---
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.51.0] - 2026-04-24
+
+### Added
+
+- Add Codex as a first-class `agentchrome skill` target, including `$CODEX_HOME` and `~/.codex` install path resolution, auto-detection, lifecycle support, stale-skill checks, documentation, and BDD coverage. (#263)
+
 ## [1.50.0] - 2026-04-23
 
 ### Fixed

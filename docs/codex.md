@@ -26,17 +26,19 @@ agentchrome examples navigate
 Codex discovers AgentChrome through four mechanisms:
 
 1. **PATH lookup** — Codex runs shell commands, so `agentchrome` must be on `PATH`.
-2. **`--help` text** — Every command and subcommand supports `--help` for usage details.
-3. **`capabilities` command** — `agentchrome capabilities` outputs a complete JSON manifest of all commands, flags, arguments, and exit codes. This is the fastest way for an AI agent to learn the full CLI surface.
-4. **`examples` command** — `agentchrome examples <command>` shows practical usage examples for each command group.
+2. **Codex skill install** — `agentchrome skill install --tool codex` writes the AgentChrome skill to `$CODEX_HOME/skills/agentchrome/SKILL.md`, or to `~/.codex/skills/agentchrome/SKILL.md` when `CODEX_HOME` is not set.
+3. **`--help` text** — Every command and subcommand supports `--help` for usage details.
+4. **`capabilities` command** — `agentchrome capabilities` outputs a complete JSON manifest of all commands, flags, arguments, and exit codes. This is the fastest way for an AI agent to learn the full CLI surface.
+5. **`examples` command** — `agentchrome examples <command>` shows practical usage examples for each command group.
 
 ### Setup checklist
 
 1. Install AgentChrome (`cargo install agentchrome` or download a release binary)
 2. Verify: `agentchrome --help`
-3. Launch Chrome: `agentchrome connect --launch --headless`
-4. Test the connection: `agentchrome page text`
-5. Add AgentChrome to your project's `AGENTS.md` (see [AGENTS.md Template](#agentsmd-template) below)
+3. Install the Codex skill: `agentchrome skill install --tool codex`
+4. Launch Chrome: `agentchrome connect --launch --headless`
+5. Test the connection: `agentchrome page text`
+6. Optionally add AgentChrome to your project's `AGENTS.md` (see [AGENTS.md Template](#agentsmd-template) below)
 
 ## AGENTS.md Template
 

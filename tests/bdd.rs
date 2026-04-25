@@ -4924,6 +4924,32 @@ fn skill_gemini_dir_exists(world: &mut SkillWorld) {
     std::fs::create_dir_all(temp_home.join(".gemini")).unwrap();
 }
 
+#[given("CODEX_HOME points to a temp Codex home")]
+fn skill_codex_home_set(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    let temp_home = world.ensure_temp_home();
+    let codex_home = temp_home.join("codex-home");
+    world
+        .extra_env
+        .push(("CODEX_HOME".into(), codex_home.display().to_string()));
+}
+
+#[given("CODEX_HOME is not set")]
+fn skill_codex_home_unset(world: &mut SkillWorld) {
+    world.extra_env.retain(|(key, _)| key != "CODEX_HOME");
+}
+
+#[given("the \"~/.codex/\" directory exists")]
+fn skill_codex_dir_exists(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    let temp_home = world.ensure_temp_home();
+    std::fs::create_dir_all(temp_home.join(".codex")).unwrap();
+}
+
 #[given("no GEMINI_* environment variables are set")]
 fn skill_no_gemini_env(_world: &mut SkillWorld) {
     // env_clear() in run_skill_command_with_env ensures no GEMINI_* vars are set
@@ -5061,7 +5087,7 @@ fn skill_stdout_has_tools_array(world: &mut SkillWorld) {
 }
 
 #[then(
-    "the \"tools\" array contains entries for \"claude-code\", \"windsurf\", \"aider\", \"continue\", \"copilot-jb\", \"cursor\", and \"gemini\""
+    "the \"tools\" array contains entries for \"claude-code\", \"windsurf\", \"aider\", \"continue\", \"copilot-jb\", \"cursor\", \"gemini\", and \"codex\""
 )]
 fn skill_tools_contains_all(world: &mut SkillWorld) {
     let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
@@ -5076,6 +5102,7 @@ fn skill_tools_contains_all(world: &mut SkillWorld) {
         "copilot-jb",
         "cursor",
         "gemini",
+        "codex",
     ] {
         assert!(
             names.contains(expected),
@@ -5148,9 +5175,13 @@ fn skill_stderr_has_supported_tools(world: &mut SkillWorld) {
         .as_array()
         .expect("Missing 'supported_tools' array in error output");
     assert!(
-        tools.len() >= 6,
-        "Expected at least 6 tools, got {}",
+        tools.len() >= 8,
+        "Expected at least 8 tools, got {}",
         tools.len()
+    );
+    assert!(
+        tools.iter().any(|tool| tool.as_str() == Some("codex")),
+        "supported_tools does not include codex: {tools:?}"
     );
 }
 
@@ -5335,6 +5366,227 @@ fn skill_readme_lists_gemini(world: &mut SkillWorld) {
     );
 }
 
+// --- Codex-specific Then steps ---
+
+fn codex_home_from_env(world: &SkillWorld) -> PathBuf {
+    world
+        .extra_env
+        .iter()
+        .find(|(key, _)| key == "CODEX_HOME")
+        .map(|(_, value)| PathBuf::from(value))
+        .expect("CODEX_HOME was not set for this scenario")
+}
+
+fn default_codex_skill_path(world: &SkillWorld) -> PathBuf {
+    world
+        .temp_home
+        .as_ref()
+        .expect("No temp home")
+        .path()
+        .join(".codex/skills/agentchrome/SKILL.md")
+}
+
+fn codex_entry(world: &SkillWorld) -> serde_json::Value {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    json["tools"]
+        .as_array()
+        .expect("tools is not an array")
+        .iter()
+        .find(|t| t["name"].as_str() == Some("codex"))
+        .cloned()
+        .expect("codex not found in tools list")
+}
+
+#[then("the skill file exists at \"$CODEX_HOME/skills/agentchrome/SKILL.md\"")]
+fn skill_file_exists_codex_home(world: &mut SkillWorld) {
+    let path = codex_home_from_env(world).join("skills/agentchrome/SKILL.md");
+    assert!(
+        path.exists(),
+        "Codex skill file does not exist at {}",
+        path.display()
+    );
+}
+
+#[then("the skill file exists at \"~/.codex/skills/agentchrome/SKILL.md\"")]
+fn skill_file_exists_codex_default(world: &mut SkillWorld) {
+    let path = default_codex_skill_path(world);
+    assert!(
+        path.exists(),
+        "Codex skill file does not exist at {}",
+        path.display()
+    );
+}
+
+#[then("the \"tools\" array contains an entry with \"name\" equal to \"codex\"")]
+fn skill_tools_contains_codex(world: &mut SkillWorld) {
+    let _ = codex_entry(world);
+}
+
+#[then(
+    "the codex entry has \"path\" equal to \"$CODEX_HOME/skills/agentchrome/SKILL.md\" or \"~/.codex/skills/agentchrome/SKILL.md\""
+)]
+fn skill_codex_path(world: &mut SkillWorld) {
+    let codex = codex_entry(world);
+    let path = codex["path"].as_str().expect("codex path is not a string");
+    assert!(
+        path == "$CODEX_HOME/skills/agentchrome/SKILL.md"
+            || path == "~/.codex/skills/agentchrome/SKILL.md",
+        "Codex path mismatch: {path}"
+    );
+}
+
+#[then("the codex entry has \"detection\" and \"installed\" fields")]
+fn skill_codex_fields(world: &mut SkillWorld) {
+    let codex = codex_entry(world);
+    assert!(
+        codex["detection"].is_string(),
+        "missing 'detection' field for codex"
+    );
+    assert!(
+        codex["installed"].is_boolean(),
+        "missing 'installed' field for codex"
+    );
+}
+
+#[then("the Codex skill file contains the updated version")]
+fn skill_codex_file_has_version(world: &mut SkillWorld) {
+    let path = if world.extra_env.iter().any(|(key, _)| key == "CODEX_HOME") {
+        codex_home_from_env(world).join("skills/agentchrome/SKILL.md")
+    } else {
+        default_codex_skill_path(world)
+    };
+    let content = std::fs::read_to_string(&path).expect("Failed to read Codex skill file");
+    assert!(
+        content.contains("version:"),
+        "Codex skill file does not contain YAML version key\ncontent: {content}"
+    );
+}
+
+#[then("the Codex skill file no longer exists")]
+fn skill_codex_file_removed(world: &mut SkillWorld) {
+    let path = if world.extra_env.iter().any(|(key, _)| key == "CODEX_HOME") {
+        codex_home_from_env(world).join("skills/agentchrome/SKILL.md")
+    } else {
+        default_codex_skill_path(world)
+    };
+    assert!(
+        !path.exists(),
+        "Codex skill file should have been removed at {}",
+        path.display()
+    );
+}
+
+#[given(expr = "an installed skill for codex with version {string} planted in a temp Codex home")]
+fn skill_codex_stale_planted(world: &mut SkillWorld, version: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    let temp_home = world.ensure_temp_home();
+    let codex_home = temp_home.join("codex-stale-home");
+    let skill_path = codex_home.join("skills/agentchrome/SKILL.md");
+    std::fs::create_dir_all(skill_path.parent().unwrap()).unwrap();
+    let content =
+        format!("---\nname: agentchrome\nversion: \"{version}\"\n---\n\n# agentchrome skill\n");
+    std::fs::write(&skill_path, content).unwrap();
+    world
+        .extra_env
+        .push(("CODEX_HOME".into(), codex_home.display().to_string()));
+}
+
+#[when("I invoke agentchrome with the planted Codex home")]
+fn skill_invoke_with_codex_home(world: &mut SkillWorld) {
+    let env_vars: Vec<(String, String)> = world.extra_env.clone();
+    let refs: Vec<(&str, &str)> = env_vars
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    world.run_skill_command_with_env("agentchrome skill list", refs);
+}
+
+#[then("stderr contains exactly one staleness notice line")]
+fn skill_stderr_one_staleness_notice(world: &mut SkillWorld) {
+    let count = world
+        .stderr
+        .lines()
+        .filter(|line| line.starts_with("note: installed agentchrome skill"))
+        .count();
+    assert_eq!(
+        count, 1,
+        "Expected exactly one staleness notice line, found {count}\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "stderr contains a line starting with {string}")]
+fn skill_stderr_line_starts_with(world: &mut SkillWorld, prefix: String) {
+    let found = world
+        .stderr
+        .lines()
+        .any(|line| line.starts_with(prefix.as_str()));
+    assert!(
+        found,
+        "No stderr line starts with '{prefix}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[given("Codex support is implemented")]
+fn skill_codex_support_implemented(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+#[when("I review the skill installer documentation and BDD tests")]
+fn skill_review_codex_docs_and_tests(world: &mut SkillWorld) {
+    let root = project_root();
+    world.readme_content = std::fs::read_to_string(root.join("README.md")).unwrap();
+    let docs = std::fs::read_to_string(root.join("docs/codex.md")).unwrap();
+    let feature =
+        std::fs::read_to_string(root.join("tests/features/skill-command-group.feature")).unwrap();
+    world.stdout = format!("{docs}\n{feature}");
+}
+
+#[then("README.md documents Codex as a supported skill installer target")]
+fn skill_readme_documents_codex(world: &mut SkillWorld) {
+    assert!(
+        world.readme_content.contains("codex")
+            && world
+                .readme_content
+                .contains("agentchrome skill install --tool codex"),
+        "README does not document Codex skill installer support"
+    );
+}
+
+#[then("docs/codex.md shows \"agentchrome skill install --tool codex\"")]
+fn skill_codex_docs_show_install(world: &mut SkillWorld) {
+    assert!(
+        world
+            .stdout
+            .contains("agentchrome skill install --tool codex"),
+        "docs/codex.md or feature context does not show Codex install command"
+    );
+}
+
+#[then(
+    "BDD or unit tests cover Codex install, list, detection, update, uninstall, and staleness behavior"
+)]
+fn skill_codex_tests_cover_lifecycle(world: &mut SkillWorld) {
+    for expected in [
+        "Codex skill installs explicitly",
+        "Codex appears in skill list",
+        "Codex auto-detection",
+        "Codex skill lifecycle commands work",
+        "Codex stale skill",
+    ] {
+        assert!(
+            world.stdout.contains(expected),
+            "Missing Codex test coverage marker: {expected}"
+        );
+    }
+}
+
 // --- SKILL.md enrichment Then steps ---
 
 /// Read the installed SKILL.md from the path reported in stdout JSON.
@@ -5467,6 +5719,7 @@ impl StaleSkillWorld {
             "windsurf" => temp_home.join(".codeium/windsurf/memories/global_rules.md"),
             "cursor" => temp_home.join(".cursor/rules/agentchrome.mdc"),
             "gemini" => temp_home.join(".gemini/instructions/agentchrome.md"),
+            "codex" => temp_home.join(".codex/skills/agentchrome/SKILL.md"),
             "aider" => temp_home.join(".aider/agentchrome.md"),
             "continue" => temp_home.join(".continue/rules/agentchrome.md"),
             "copilot-jb" => {

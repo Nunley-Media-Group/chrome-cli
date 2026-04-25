@@ -19,10 +19,16 @@ cargo install agentchrome
 **2. Add AgentChrome guidance to Codex**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Nunley-Media-Group/AgentChrome/main/examples/AGENTS.md.example > AGENTS.md
+agentchrome skill install --tool codex
 ```
 
-This adds a project-local `AGENTS.md` with the browser automation workflow Codex should follow. AgentChrome is self-documenting through `agentchrome --help`, `agentchrome capabilities`, and `agentchrome examples`, so Codex can discover the current CLI surface directly from the installed binary.
+This writes the AgentChrome Codex skill to `$CODEX_HOME/skills/agentchrome/SKILL.md`, or to `~/.codex/skills/agentchrome/SKILL.md` when `CODEX_HOME` is not set. AgentChrome is self-documenting through `agentchrome --help`, `agentchrome capabilities`, and `agentchrome examples`, so Codex can discover the current CLI surface directly from the installed binary.
+
+For project-local guidance, you can also add the AGENTS template:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Nunley-Media-Group/AgentChrome/main/examples/AGENTS.md.example > AGENTS.md
+```
 
 **3. Ask Codex to use the browser**
 
@@ -41,7 +47,7 @@ agentchrome console read --errors-only
 
 See the full [Codex Integration Guide](docs/codex.md) for workflows, efficiency tips, and error handling patterns.
 
-For agentic tools supported by AgentChrome's built-in skill installer, use `agentchrome skill install` to write the tool-specific guidance file and `agentchrome skill update` after upgrading AgentChrome.
+For agentic tools supported by AgentChrome's built-in skill installer, use `agentchrome skill install` to write the tool-specific guidance file and `agentchrome skill update` after upgrading AgentChrome. Supported targets include Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor, Gemini CLI, and Codex; Codex users can target it explicitly with `agentchrome skill install --tool codex`.
 
 ## Features
 

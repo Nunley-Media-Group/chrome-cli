@@ -30,6 +30,8 @@ copilot\-jb
 cursor
 .IP \(bu 2
 gemini
+.IP \(bu 2
+codex
 .RE
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -41,6 +43,9 @@ EXAMPLES:
 
   # Install for a specific tool
   agentchrome skill install \-\-tool claude\-code
+
+  # Install for Codex
+  agentchrome skill install \-\-tool codex
 .SH CAPABILITIES
 .PP
 Agentic tool skill installation and management
@@ -74,6 +79,9 @@ Auto-detect agentic tool and install skill
 .TP
 .B \`agentchrome skill install --tool cursor\`
 Install skill for a specific tool
+.TP
+.B \`agentchrome skill install --tool codex\`
+Install the AgentChrome skill for Codex
 .TP
 .B \`agentchrome skill list\`
 List supported tools and installation status

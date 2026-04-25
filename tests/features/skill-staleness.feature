@@ -38,11 +38,20 @@ Feature: Skill staleness check notifies when installed skill is behind binary
   Scenario: Stale multi-tool notice aggregates all stale tools into one line (AC7)
     Given an installed skill for claude-code with version "0.1.0" planted in a temp home
     And an installed skill for gemini with version "0.1.0" planted in the same temp home
+    And an installed skill for codex with version "0.1.0" planted in the same temp home
     When I invoke agentchrome with the planted home
     Then stderr contains a line starting with "note: installed agentchrome skills for"
     And that line contains "claude-code"
     And that line contains "gemini"
+    And that line contains "codex"
     And that line contains "stale"
+    And that line contains "run 'agentchrome skill update' to refresh"
+    And stderr contains exactly one staleness notice line
+
+  Scenario: Stale Codex skill emits a Codex note line on stderr (AC7, AC23)
+    Given an installed skill for codex with version "0.1.0" planted in a temp home
+    When I invoke agentchrome with the planted home
+    Then stderr contains a line starting with "note: installed agentchrome skill for codex"
     And that line contains "run 'agentchrome skill update' to refresh"
     And stderr contains exactly one staleness notice line
 

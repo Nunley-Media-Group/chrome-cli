@@ -1,7 +1,7 @@
 # Tasks: Add agentchrome skill Command Group
 
-**Issues**: #172, #214
-**Date**: 2026-04-16
+**Issues**: #172, #214, #263
+**Date**: 2026-04-24
 **Status**: Planning
 **Author**: Claude (AI-assisted)
 
@@ -17,7 +17,8 @@
 | Testing | 3 | [ ] |
 | Documentation | 1 | [ ] |
 | Gemini CLI (#214) | 5 | [ ] |
-| **Total** | **18** | |
+| Codex Support (#263) | 8 | [ ] |
+| **Total** | **26** | |
 
 ---
 
@@ -279,6 +280,115 @@
 
 ---
 
+## Phase 7: Codex Support (Issue #263)
+
+### T019: Add Codex CLI enum and registry mapping
+
+**File(s)**: `src/cli/mod.rs`, `src/skill.rs`
+**Type**: Modify
+**Depends**: None (existing skill infrastructure from T001-T008 is already implemented)
+**Acceptance**:
+- [ ] `Codex` variant added to `ToolName` enum in `src/cli/mod.rs`
+- [ ] `tool_for_name` maps `ToolName::Codex` to `"codex"`
+- [ ] `TOOLS` includes a Codex `ToolInfo` entry with detection text `CODEX_HOME env var or ~/.codex/ directory exists`
+- [ ] Codex uses standalone skill installation at `$CODEX_HOME/skills/agentchrome/SKILL.md` with fallback behavior defined in T020
+- [ ] `cargo check` passes
+
+**Notes**: Keep this as an enum/registry extension. Do not add new command variants or Codex-specific JSON output.
+
+### T020: Implement CODEX_HOME-aware path resolution
+
+**File(s)**: `src/skill.rs`
+**Type**: Modify
+**Depends**: T019
+**Acceptance**:
+- [ ] `resolve_path()` recognizes the exact `$CODEX_HOME/` prefix used by the Codex path template
+- [ ] When `CODEX_HOME` is set to a non-empty value, paths resolve under that directory
+- [ ] When `CODEX_HOME` is unset or empty, paths resolve under `~/.codex/`
+- [ ] Existing `~/` path resolution remains unchanged for all other tools
+- [ ] Unit tests cover set, unset, and empty `CODEX_HOME`
+
+**Notes**: Do not implement general environment-variable expansion. This issue only needs the Codex home-root rule.
+
+### T021: Add Codex detection without changing priority semantics
+
+**File(s)**: `src/skill.rs`
+**Type**: Modify
+**Depends**: T019, T020
+**Acceptance**:
+- [ ] Tier 1 detection selects Codex when `CODEX_HOME` is set and no higher-priority explicit tool env signal applies
+- [ ] Tier 3 detection selects Codex when `~/.codex/` exists and no higher-priority config directory applies
+- [ ] Existing detection behavior for Claude Code, Windsurf, Aider, Cursor, Gemini, Continue, and Copilot JB remains unchanged
+- [ ] Unit tests cover `CODEX_HOME`, `~/.codex/`, and mixed-signal priority behavior
+
+**Notes**: No parent-process detection is required for Codex in this issue.
+
+### T022: Extend Codex lifecycle BDD coverage
+
+**File(s)**: `tests/features/skill-command-group.feature`, `tests/bdd.rs`
+**Type**: Modify
+**Depends**: T019, T020, T021
+**Acceptance**:
+- [ ] BDD scenarios cover `agentchrome skill install --tool codex` with `CODEX_HOME` set
+- [ ] BDD scenarios cover explicit Codex install fallback to `~/.codex` when `CODEX_HOME` is unset
+- [ ] BDD scenarios cover Codex entry in `skill list`
+- [ ] BDD scenarios cover Codex auto-detection via `CODEX_HOME` and `~/.codex/`
+- [ ] BDD scenarios cover Codex update and uninstall
+- [ ] BDD helpers use temp homes and temp `CODEX_HOME` directories, never the real user Codex directory
+
+### T023: Extend staleness coverage for Codex
+
+**File(s)**: `tests/features/skill-staleness.feature`, `tests/bdd.rs`
+**Type**: Modify
+**Depends**: T019, T020
+**Acceptance**:
+- [ ] Codex-only stale skill scenario asserts the single-tool notice names `codex`
+- [ ] Multi-tool stale scenario includes Codex in the aggregated stale-tool list
+- [ ] Suppression scenarios continue to pass for Codex via `AGENTCHROME_NO_SKILL_CHECK=1` and config
+- [ ] Tests plant stale Codex skill files under temp `CODEX_HOME` or temp `~/.codex`
+
+**Notes**: `src/skill_check.rs` should not need special-case logic if Codex is correctly added to `TOOLS` and `resolve_path()`.
+
+### T024: Update unit tests for Codex registry and paths
+
+**File(s)**: `src/skill.rs`, `src/skill_check.rs`
+**Type**: Modify
+**Depends**: T019, T020, T021
+**Acceptance**:
+- [ ] Registry count assertion updated from 7 to 8
+- [ ] `tool_for_name_maps_all_variants` includes Codex
+- [ ] List output assertions include Codex
+- [ ] Path resolution tests cover `$CODEX_HOME` set/unset/empty behavior
+- [ ] Detection tests cover Codex env and config-dir signals
+- [ ] Relevant staleness formatting or integration tests include Codex
+- [ ] `cargo test --lib skill` or equivalent focused unit tests pass
+
+### T025: Update Codex documentation
+
+**File(s)**: `README.md`, `docs/codex.md`, `examples/AGENTS.md.example`
+**Type**: Modify
+**Depends**: T019
+**Acceptance**:
+- [ ] README lists Codex as a supported skill installer target
+- [ ] README shows `agentchrome skill install --tool codex`
+- [ ] `docs/codex.md` recommends the native Codex skill install path and documents `$CODEX_HOME` fallback behavior
+- [ ] `examples/AGENTS.md.example` mentions the Codex skill install command where setup guidance is presented
+
+### T026: Verify Codex skill workflow
+
+**File(s)**: (focused verification)
+**Type**: Verify
+**Depends**: T019, T020, T021, T022, T023, T024, T025
+**Acceptance**:
+- [ ] `cargo fmt --check` passes
+- [ ] `cargo check` passes
+- [ ] Focused unit tests for skill registry/path/detection pass
+- [ ] Focused BDD scenarios for `tests/features/skill-command-group.feature` pass or are run as part of `cargo test --test bdd`
+- [ ] Focused BDD scenarios for `tests/features/skill-staleness.feature` pass or are run as part of `cargo test --test bdd`
+- [ ] Manual smoke with temp `CODEX_HOME`: install → list shows installed → update → uninstall → list shows not installed
+
+---
+
 ## Dependency Graph
 
 ```
@@ -299,6 +409,15 @@ Phase 6 (Issue #214 — independent of Phases 1-5, runs on existing infrastructu
 T014 ──▶ T015 ──┬──▶ T016 ──▶ T018
                 │
                 └──▶ T017
+
+Phase 7 (Issue #263 — independent of Phases 1-6, runs on existing infrastructure):
+
+T019 ──▶ T020 ──▶ T021 ──┬──▶ T022 ──┐
+       │                 ├──▶ T023 ──┤
+       │                 └──▶ T024 ──┤
+       └──▶ T025 ───────────────────┤
+                                    ▼
+                                   T026
 ```
 
 ---
@@ -309,6 +428,7 @@ T014 ──▶ T015 ──┬──▶ T016 ──▶ T018
 |-------|------|---------|
 | #172 | 2026-03-12 | Initial feature spec |
 | #214 | 2026-04-16 | Add Phase 6: Gemini CLI support (T014–T018) |
+| #263 | 2026-04-24 | Add Phase 7: Codex skill installer support (T019–T026) |
 
 ---
 

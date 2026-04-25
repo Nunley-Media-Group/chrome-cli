@@ -639,6 +639,11 @@ pub fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: Some(vec!["--tool".into()]),
                 },
                 ExampleEntry {
+                    cmd: "agentchrome skill install --tool codex".into(),
+                    description: "Install the AgentChrome skill for Codex".into(),
+                    flags: Some(vec!["--tool".into()]),
+                },
+                ExampleEntry {
                     cmd: "agentchrome skill list".into(),
                     description: "List supported tools and installation status".into(),
                     flags: None,

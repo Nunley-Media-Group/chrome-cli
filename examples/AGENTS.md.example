@@ -2,6 +2,12 @@
 
 This project uses [AgentChrome](https://github.com/Nunley-Media-Group/AgentChrome) for browser automation. AgentChrome is a native CLI tool that controls Chrome via the DevTools Protocol.
 
+Codex users can install the persistent AgentChrome skill with:
+
+```sh
+agentchrome skill install --tool codex
+```
+
 ## Quick Start
 
 ```sh

@@ -646,7 +646,8 @@ EXAMPLES:
     /// Agentic tool skill installation and management
     #[command(
         long_about = "Install, update, uninstall, or list agentchrome skill files for agentic \
-            coding tools (Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor). \
+            coding tools (Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor, \
+            Gemini CLI, Codex). \
             The skill file is a minimal signpost that tells the AI agent what agentchrome is \
             and how to discover its capabilities via the CLI's built-in help system. Auto-detects \
             the active agentic environment, or use --tool to target a specific tool.",
@@ -657,6 +658,9 @@ EXAMPLES:
 
   # Install for a specific tool
   agentchrome skill install --tool claude-code
+
+  # Install for Codex
+  agentchrome skill install --tool codex
 
   # List supported tools and installation status
   agentchrome skill list
@@ -2074,7 +2078,10 @@ EXAMPLES:
   agentchrome skill install
 
   # Install for a specific tool
-  agentchrome skill install --tool claude-code"
+  agentchrome skill install --tool claude-code
+
+  # Install for Codex
+  agentchrome skill install --tool codex"
     )]
     Install(SkillInstallArgs),
 
@@ -2145,6 +2152,7 @@ pub enum ToolName {
     CopilotJb,
     Cursor,
     Gemini,
+    Codex,
 }
 
 /// Mouse button for decomposed mouse events.

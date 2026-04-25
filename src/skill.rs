@@ -110,6 +110,13 @@ pub(crate) static TOOLS: &[ToolInfo] = &[
             path_template: "~/.gemini/instructions/agentchrome.md",
         },
     },
+    ToolInfo {
+        name: "codex",
+        detection: "CODEX_HOME env var or ~/.codex/ directory exists",
+        install_mode: InstallMode::Standalone {
+            path_template: "$CODEX_HOME/skills/agentchrome/SKILL.md",
+        },
+    },
 ];
 
 // =============================================================================
@@ -200,6 +207,9 @@ fn detect_tool() -> Option<&'static ToolInfo> {
     if has_env_prefix("GEMINI_") {
         return find_tool("gemini");
     }
+    if std::env::var("CODEX_HOME").is_ok_and(|value| !value.is_empty()) {
+        return find_tool("codex");
+    }
 
     // Tier 2: Parent process name
     if let Ok(parent) = std::env::var("_") {
@@ -229,6 +239,9 @@ fn detect_tool() -> Option<&'static ToolInfo> {
     if home.join(".gemini").is_dir() {
         return find_tool("gemini");
     }
+    if home.join(".codex").is_dir() {
+        return find_tool("codex");
+    }
 
     None
 }
@@ -250,6 +263,7 @@ fn tool_for_name(name: &ToolName) -> &'static ToolInfo {
         ToolName::CopilotJb => "copilot-jb",
         ToolName::Cursor => "cursor",
         ToolName::Gemini => "gemini",
+        ToolName::Codex => "codex",
     };
     find_tool(key).expect("all ToolName variants have a matching ToolInfo entry")
 }
@@ -263,7 +277,10 @@ fn home_dir() -> Option<std::path::PathBuf> {
 }
 
 pub(crate) fn resolve_path(template: &str) -> Result<std::path::PathBuf, AppError> {
-    if let Some(rest) = template.strip_prefix("~/") {
+    if let Some(rest) = template.strip_prefix("$CODEX_HOME/") {
+        let root = codex_home_root(std::env::var_os("CODEX_HOME"), home_dir())?;
+        Ok(root.join(rest))
+    } else if let Some(rest) = template.strip_prefix("~/") {
         let home = home_dir().ok_or_else(|| AppError {
             message: "could not determine home directory".into(),
             code: ExitCode::GeneralError,
@@ -273,6 +290,22 @@ pub(crate) fn resolve_path(template: &str) -> Result<std::path::PathBuf, AppErro
     } else {
         Ok(std::path::PathBuf::from(template))
     }
+}
+
+fn codex_home_root(
+    codex_home: Option<std::ffi::OsString>,
+    home: Option<std::path::PathBuf>,
+) -> Result<std::path::PathBuf, AppError> {
+    if let Some(root) = codex_home.filter(|value| !value.is_empty()) {
+        return Ok(std::path::PathBuf::from(root));
+    }
+
+    home.map(|path| path.join(".codex"))
+        .ok_or_else(|| AppError {
+            message: "could not determine home directory".into(),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })
 }
 
 pub(crate) fn path_template(tool: &ToolInfo) -> &'static str {
@@ -718,10 +751,11 @@ pub fn execute_skill(global: &GlobalOpts, args: &SkillArgs) -> Result<(), AppErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
 
     #[test]
-    fn tool_registry_has_seven_tools() {
-        assert_eq!(TOOLS.len(), 7);
+    fn tool_registry_has_eight_tools() {
+        assert_eq!(TOOLS.len(), 8);
     }
 
     #[test]
@@ -757,6 +791,7 @@ mod tests {
         assert_eq!(tool_for_name(&ToolName::CopilotJb).name, "copilot-jb");
         assert_eq!(tool_for_name(&ToolName::Cursor).name, "cursor");
         assert_eq!(tool_for_name(&ToolName::Gemini).name, "gemini");
+        assert_eq!(tool_for_name(&ToolName::Codex).name, "codex");
     }
 
     #[test]
@@ -846,6 +881,27 @@ mod tests {
     fn resolve_path_relative_stays_relative() {
         let path = resolve_path(".cursor/rules/test.mdc").unwrap();
         assert_eq!(path.to_str().unwrap(), ".cursor/rules/test.mdc");
+    }
+
+    #[test]
+    fn codex_home_root_uses_codex_home_when_set() {
+        let home = std::path::PathBuf::from("/home/user");
+        let root = codex_home_root(Some(OsString::from("/custom/codex")), Some(home)).unwrap();
+        assert_eq!(root, std::path::PathBuf::from("/custom/codex"));
+    }
+
+    #[test]
+    fn codex_home_root_falls_back_when_unset() {
+        let home = std::path::PathBuf::from("/home/user");
+        let root = codex_home_root(None, Some(home)).unwrap();
+        assert_eq!(root, std::path::PathBuf::from("/home/user/.codex"));
+    }
+
+    #[test]
+    fn codex_home_root_falls_back_when_empty() {
+        let home = std::path::PathBuf::from("/home/user");
+        let root = codex_home_root(Some(OsString::from("")), Some(home)).unwrap();
+        assert_eq!(root, std::path::PathBuf::from("/home/user/.codex"));
     }
 
     #[test]
@@ -1035,7 +1091,7 @@ mod tests {
     #[test]
     fn list_output_has_all_tools() {
         let output = list_tools().unwrap();
-        assert_eq!(output.tools.len(), 7);
+        assert_eq!(output.tools.len(), 8);
         let names: Vec<&str> = output.tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"claude-code"));
         assert!(names.contains(&"windsurf"));
@@ -1044,6 +1100,7 @@ mod tests {
         assert!(names.contains(&"copilot-jb"));
         assert!(names.contains(&"cursor"));
         assert!(names.contains(&"gemini"));
+        assert!(names.contains(&"codex"));
     }
 
     #[test]
@@ -1052,7 +1109,7 @@ mod tests {
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let tools = parsed["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
         for tool in tools {
             assert!(tool["name"].is_string());
             assert!(tool["detection"].is_string());

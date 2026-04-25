@@ -32,7 +32,7 @@ Feature: Skill command group for agentic tool integration
     When I run "agentchrome skill list"
     Then the exit code is 0
     And stdout contains valid JSON with a "tools" array
-    And the "tools" array contains entries for "claude-code", "windsurf", "aider", "continue", "copilot-jb", "cursor", and "gemini"
+    And the "tools" array contains entries for "claude-code", "windsurf", "aider", "continue", "copilot-jb", "cursor", "gemini", and "codex"
     And each tool entry has "name", "detection", "path", and "installed" fields
 
   Scenario: Uninstall skill (AC4)
@@ -176,6 +176,74 @@ Feature: Skill command group for agentic tool integration
     Given the project README.md exists
     When I read the skill installer documentation
     Then it lists "gemini" or "Gemini CLI" as a supported tool
+
+  # --- Codex Support (Added by issue #263) ---
+
+  Scenario: Codex skill installs explicitly with CODEX_HOME (AC19)
+    Given no particular agentic environment is active
+    And CODEX_HOME points to a temp Codex home
+    When I run "agentchrome skill install --tool codex"
+    Then the exit code is 0
+    And stdout contains valid JSON with "tool" equal to "codex"
+    And stdout contains "action" equal to "installed"
+    And the skill file exists at "$CODEX_HOME/skills/agentchrome/SKILL.md"
+
+  Scenario: Codex skill installs explicitly with default home fallback (AC19)
+    Given no particular agentic environment is active
+    And CODEX_HOME is not set
+    When I run "agentchrome skill install --tool codex"
+    Then the exit code is 0
+    And stdout contains valid JSON with "tool" equal to "codex"
+    And the skill file exists at "~/.codex/skills/agentchrome/SKILL.md"
+
+  Scenario: Codex appears in skill list (AC20)
+    Given the skill command is available
+    When I run "agentchrome skill list"
+    Then the exit code is 0
+    And the "tools" array contains an entry with "name" equal to "codex"
+    And the codex entry has "path" equal to "$CODEX_HOME/skills/agentchrome/SKILL.md" or "~/.codex/skills/agentchrome/SKILL.md"
+    And the codex entry has "detection" and "installed" fields
+
+  Scenario: Codex auto-detection via CODEX_HOME (AC21)
+    Given CODEX_HOME points to a temp Codex home
+    And no higher-priority tool signals are present
+    When I run "agentchrome skill install"
+    Then the exit code is 0
+    And stdout contains valid JSON with "tool" equal to "codex"
+    And stdout contains "action" equal to "installed"
+    And the skill file exists at "$CODEX_HOME/skills/agentchrome/SKILL.md"
+
+  Scenario: Codex auto-detection via config directory (AC21)
+    Given the "~/.codex/" directory exists
+    And CODEX_HOME is not set
+    And no higher-priority tool signals are present
+    When I run "agentchrome skill install"
+    Then the exit code is 0
+    And stdout contains valid JSON with "tool" equal to "codex"
+
+  Scenario: Codex skill lifecycle commands work (AC22)
+    Given a skill was previously installed for "codex"
+    When I run "agentchrome skill update --tool codex"
+    Then the exit code is 0
+    And stdout contains valid JSON with "action" equal to "updated"
+    And the Codex skill file contains the updated version
+    When I run "agentchrome skill uninstall --tool codex"
+    Then the exit code is 0
+    And stdout contains valid JSON with "action" equal to "uninstalled"
+    And the Codex skill file no longer exists
+
+  Scenario: Codex stale skill is included in staleness checks (AC23)
+    Given an installed skill for codex with version "0.1.0" planted in a temp Codex home
+    When I invoke agentchrome with the planted Codex home
+    Then stderr contains a line starting with "note: installed agentchrome skill for codex"
+    And stderr contains exactly one staleness notice line
+
+  Scenario: Codex documentation and tests are present (AC24)
+    Given Codex support is implemented
+    When I review the skill installer documentation and BDD tests
+    Then README.md documents Codex as a supported skill installer target
+    And docs/codex.md shows "agentchrome skill install --tool codex"
+    And BDD or unit tests cover Codex install, list, detection, update, uninstall, and staleness behavior
 
   # =============================================================================
   # Issue #220 — Enrich SKILL.md template with YAML frontmatter and discovery paths
