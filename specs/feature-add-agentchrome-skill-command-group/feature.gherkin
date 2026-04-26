@@ -244,3 +244,54 @@ Feature: Skill command group for agentic tool integration
     Then README.md documents Codex as a supported skill installer target
     And docs/codex.md shows "agentchrome skill install --tool codex"
     And BDD or unit tests cover Codex install, list, detection, update, uninstall, and staleness behavior
+
+  # Added by issue #268
+
+  Scenario: Bare update refreshes every stale installed skill (AC25)
+    Given installed AgentChrome skills for "claude-code" and "codex" have stale versions in a temp home
+    When I run "agentchrome skill update" without a --tool flag
+    Then the exit code is 0
+    And stdout contains batch JSON results for "claude-code" and "codex"
+    And each batch result has status "ok" and action "updated"
+    And a subsequent AgentChrome invocation with the same temp home emits no staleness notice
+
+  Scenario: Bare update does not stop at the first detected tool (AC26)
+    Given a higher-priority Claude Code detection signal is present
+    And a stale Codex AgentChrome skill is installed in the same temp home
+    When I run "agentchrome skill update" without a --tool flag
+    Then the exit code is 0
+    And stdout contains a batch result for "codex" with action "updated"
+    And the Codex skill file contains the current AgentChrome version
+
+  Scenario: Bare install installs into all detected agents (AC27)
+    Given detection signals for "claude-code" and "codex" are present in a temp home
+    When I run "agentchrome skill install" without a --tool flag
+    Then the exit code is 0
+    And stdout contains batch JSON results for "claude-code" and "codex"
+    And each batch result has status "ok" and action "installed"
+    And the skill files exist at both detected install paths
+
+  Scenario: Explicit targeting remains single-target (AC28)
+    Given detection signals for "claude-code" and "codex" are present in a temp home
+    When I run "agentchrome skill install --tool codex"
+    Then the exit code is 0
+    And stdout contains valid JSON with "tool" equal to "codex"
+    And stdout does not contain a batch "results" array
+    And no Claude Code skill file is created
+
+  Scenario: Multi-target failures are reported per target (AC29)
+    Given bare skill install will target "claude-code" and "codex"
+    And the Codex target path cannot be written
+    When I run "agentchrome skill install" without a --tool flag
+    Then the exit code is non-zero
+    And stdout contains a batch result for "claude-code" with status "ok"
+    And stdout contains a batch result for "codex" with status "error"
+    And the successful Claude Code skill file remains installed
+
+  Scenario: Staleness notice guidance is actionable for multiple tools (AC30)
+    Given installed AgentChrome skills for "claude-code" and "codex" have stale versions in a temp home
+    When any AgentChrome command is invoked with the temp home
+    Then stderr contains one staleness notice naming "claude-code" and "codex"
+    When I run "agentchrome skill update" without a --tool flag
+    Then the exit code is 0
+    And a subsequent AgentChrome invocation with the same temp home emits no staleness notice

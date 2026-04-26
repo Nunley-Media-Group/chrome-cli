@@ -17,9 +17,9 @@ pub(crate) type Version = (u32, u32, u32);
 
 /// A tool whose installed skill file carries an older version marker than the
 /// currently running binary.
-struct StaleTool {
-    name: &'static str,
-    installed_version: Version,
+pub(crate) struct StaleTool {
+    pub(crate) tool: &'static crate::skill::ToolInfo,
+    pub(crate) installed_version: Version,
 }
 
 // =============================================================================
@@ -29,8 +29,12 @@ struct StaleTool {
 /// Line budget for scanning the version marker out of a skill file.
 ///
 /// Version markers live in the YAML frontmatter or the first few lines of
-/// the skill body; reading past this bounds the hot-path work.
+/// standalone skill files. Append-section installs may live deeper in shared
+/// instruction files, so they are also scanned inside `AgentChrome` section
+/// markers wherever the section appears.
 const VERSION_SCAN_LINES: usize = 20;
+const SECTION_START: &str = "<!-- agentchrome:start -->";
+const SECTION_END: &str = "<!-- agentchrome:end -->";
 
 /// Try to parse a version triple out of the first few lines of a skill file.
 ///
@@ -46,7 +50,18 @@ pub(crate) fn read_version_marker(path: &Path) -> Option<Version> {
 }
 
 fn parse_version_from_content(content: &str) -> Option<Version> {
-    for line in content.lines().take(VERSION_SCAN_LINES) {
+    parse_version_from_lines(content.lines().take(VERSION_SCAN_LINES)).or_else(|| {
+        let start = content.find(SECTION_START)?;
+        let after_start = start + SECTION_START.len();
+        let end = content[after_start..]
+            .find(SECTION_END)
+            .map_or(content.len(), |offset| after_start + offset);
+        parse_version_from_lines(content[after_start..end].lines())
+    })
+}
+
+fn parse_version_from_lines<'a>(lines: impl Iterator<Item = &'a str>) -> Option<Version> {
+    for line in lines {
         let trimmed = line.trim();
 
         // YAML frontmatter: version: "X.Y.Z"  or  version: X.Y.Z
@@ -111,7 +126,7 @@ fn binary_version() -> Version {
 ///
 /// I/O errors (missing file, unreadable) are silently skipped for that tool —
 /// a missing install is not a stale install.
-fn stale_tools() -> Vec<StaleTool> {
+pub(crate) fn stale_tools() -> Vec<StaleTool> {
     let bin_ver = binary_version();
     let mut result = Vec::with_capacity(crate::skill::TOOLS.len());
 
@@ -125,7 +140,7 @@ fn stale_tools() -> Vec<StaleTool> {
         };
         if installed_ver < bin_ver {
             result.push(StaleTool {
-                name: tool.name,
+                tool,
                 installed_version: installed_ver,
             });
         }
@@ -151,13 +166,13 @@ fn format_notice(stale: &[StaleTool]) -> Option<String> {
     if stale.len() == 1 {
         let tool = &stale[0];
         let installed_ver = format_version(tool.installed_version);
-        let name = tool.name;
+        let name = tool.tool.name;
         Some(format!(
             "note: installed agentchrome skill for {name} is v{installed_ver} but binary is v{bin_ver} \
              — run 'agentchrome skill update' to refresh"
         ))
     } else {
-        let names: Vec<&str> = stale.iter().map(|t| t.name).collect();
+        let names: Vec<&str> = stale.iter().map(|t| t.tool.name).collect();
         let name_list = names.join(", ");
         let oldest_ver = stale
             .iter()
@@ -258,6 +273,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_append_section_marker_after_long_shared_file_preamble() {
+        let preamble = (0..25)
+            .map(|i| format!("shared instruction line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let content = format!(
+            "{preamble}\n{SECTION_START}\n<!-- agentchrome-version: 1.39.4 -->\n\n# agentchrome\n{SECTION_END}\n"
+        );
+
+        assert_eq!(parse_version_from_content(&content), Some((1, 39, 4)));
+    }
+
+    #[test]
     fn missing_file_returns_none() {
         let path = Path::new("/nonexistent/path/to/SKILL.md");
         assert_eq!(read_version_marker(path), None);
@@ -295,7 +323,7 @@ mod tests {
     #[test]
     fn format_notice_single_tool() {
         let stale = vec![StaleTool {
-            name: "claude-code",
+            tool: crate::skill::find_tool("claude-code").unwrap(),
             installed_version: (1, 40, 0),
         }];
         let bin_ver = format_version(binary_version());
@@ -322,11 +350,11 @@ mod tests {
     fn format_notice_multi_tool() {
         let stale = vec![
             StaleTool {
-                name: "claude-code",
+                tool: crate::skill::find_tool("claude-code").unwrap(),
                 installed_version: (1, 40, 0),
             },
             StaleTool {
-                name: "cursor",
+                tool: crate::skill::find_tool("cursor").unwrap(),
                 installed_version: (1, 38, 0),
             },
         ];

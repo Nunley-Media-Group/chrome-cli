@@ -1,7 +1,7 @@
 # Tasks: Add agentchrome skill Command Group
 
-**Issues**: #172, #214, #263
-**Date**: 2026-04-24
+**Issues**: #172, #214, #263, #268
+**Date**: 2026-04-25
 **Status**: Planning
 **Author**: Claude (AI-assisted)
 
@@ -18,7 +18,8 @@
 | Documentation | 1 | [ ] |
 | Gemini CLI (#214) | 5 | [ ] |
 | Codex Support (#263) | 8 | [ ] |
-| **Total** | **26** | |
+| Multi-Target Install/Update (#268) | 8 | [x] |
+| **Total** | **34** | |
 
 ---
 
@@ -389,6 +390,116 @@
 
 ---
 
+## Phase 8: Multi-Target Install/Update (Issue #268)
+
+### T027: Define multi-target skill output types
+
+**File(s)**: `src/skill.rs`
+**Type**: Modify
+**Depends**: T019-T026
+**Acceptance**:
+- [x] Add a serializable batch output type with `results` as the top-level field
+- [x] Add a serializable per-target outcome type with `tool`, `path`, `action`, `version`, `status`, and optional `error`
+- [x] Single-target `SkillResult` output remains unchanged for explicit `--tool` invocations
+- [x] Unit tests cover success and failure serialization
+
+**Notes**: Keep the batch shape specific to omitted-`--tool` install/update. Do not change `skill list`, explicit install/update/uninstall, or explicit error contracts.
+
+### T028: Implement detected-target collection for bare install
+
+**File(s)**: `src/skill.rs`
+**Type**: Modify
+**Depends**: T027
+**Acceptance**:
+- [x] Bare `skill install` collects every supported tool with a positive detection signal
+- [x] Collection preserves registry order for deterministic output
+- [x] Detection checks cover env-var, parent-process, and config-directory signals already documented for each tool
+- [x] No detected target is skipped merely because a higher-priority target also exists
+- [x] Empty detection still returns an actionable JSON error listing supported tools and detection methods
+
+**Notes**: This helper complements `detect_tool()` rather than replacing it. Existing first-match detection remains available for command paths that still need one target.
+
+### T029: Implement stale-installed target collection for bare update
+
+**File(s)**: `src/skill.rs`, `src/skill_check.rs`
+**Type**: Modify
+**Depends**: T027
+**Acceptance**:
+- [x] Bare `skill update` collects every supported target with an installed AgentChrome skill older than the running binary
+- [x] Target collection uses the same version-marker parsing and path resolution rules as the staleness notice
+- [x] Missing installs and unreadable non-stale installs are skipped consistently with `src/skill_check.rs`
+- [x] Empty stale-target collection returns an actionable JSON error stating no stale installed AgentChrome skills were found
+- [x] Unit tests prove Codex plus at least one other tool are selected in the same stale scan
+
+**Notes**: Prefer shared structured helpers over parsing the human-readable stale notice line.
+
+### T030: Wire explicit vs bare install/update dispatch
+
+**File(s)**: `src/skill.rs`, `src/cli/mod.rs`
+**Type**: Modify
+**Depends**: T028, T029
+**Acceptance**:
+- [x] `skill install --tool <name>` still calls the single-target install path and returns the existing object shape
+- [x] `skill update --tool <name>` still calls the single-target update path and returns the existing object shape
+- [x] `skill uninstall --tool <name>` remains single-target
+- [x] Bare `skill install` executes install for every detected target and returns batch JSON
+- [x] Bare `skill update` executes update for every stale installed target and returns batch JSON
+- [x] Multi-target execution attempts every target before returning
+- [x] Any per-target failure is represented in `results` and makes the process exit non-zero
+- [x] `src/cli/mod.rs` long help explains bare multi-target behavior and explicit single-target behavior
+
+### T031: Add multi-target BDD scenarios
+
+**File(s)**: `tests/features/skill-command-group.feature`, `tests/features/skill-staleness.feature`
+**Type**: Modify
+**Depends**: T030
+**Acceptance**:
+- [x] Scenario covers bare update refreshing every stale installed skill
+- [x] Scenario covers bare update updating a lower-priority stale install despite a higher-priority detection signal
+- [x] Scenario covers bare install installing into all detected agents
+- [x] Scenario covers explicit `--tool` remaining single-target
+- [x] Scenario covers multi-target partial failure reporting per target with non-zero exit
+- [x] Scenario covers a multi-tool stale notice being cleared by bare `agentchrome skill update`
+
+### T032: Implement BDD steps and temp-home fixtures
+
+**File(s)**: `tests/bdd.rs`
+**Type**: Modify
+**Depends**: T031
+**Acceptance**:
+- [x] Steps can plant stale AgentChrome skill files for Codex plus at least one other tool in the same temp home
+- [x] Steps can create multiple detection signals without touching the real user home
+- [x] Steps can assert batch JSON contains all expected tools, paths, actions, versions, and per-target statuses
+- [x] Steps can simulate or provoke a per-target write/resolve failure without leaving temp artifacts behind
+- [x] Steps verify a subsequent invocation emits no stale notice after bare update succeeds
+
+### T033: Add focused unit coverage for target selection and batch semantics
+
+**File(s)**: `src/skill.rs`, `src/skill_check.rs`
+**Type**: Modify
+**Depends**: T030
+**Acceptance**:
+- [x] Unit tests cover detected-target collection with multiple simultaneous signals
+- [x] Unit tests cover stale-target collection with multiple stale installed skills
+- [x] Unit tests cover explicit-target single-result serialization remains unchanged
+- [x] Unit tests cover batch partial failure serialization and exit-code decision
+- [x] Unit tests cover shared stale-scan behavior remains aligned with notice formatting
+
+### T034: Verify multi-target skill workflow
+
+**File(s)**: (focused verification)
+**Type**: Verify
+**Depends**: T032, T033
+**Acceptance**:
+- [x] `cargo fmt --check` passes
+- [x] Focused `cargo test` coverage for `skill` and `skill_check` passes
+- [x] Focused BDD coverage for `tests/features/skill-command-group.feature` passes or is run as part of `cargo test --test bdd`
+- [x] Focused BDD coverage for `tests/features/skill-staleness.feature` passes or is run as part of `cargo test --test bdd`
+- [x] Manual temp-home smoke proves bare update clears a multi-tool stale notice in one invocation
+- [x] Manual temp-home smoke proves bare install writes multiple detected targets in one invocation
+
+---
+
 ## Dependency Graph
 
 ```
@@ -418,6 +529,14 @@ T019 ──▶ T020 ──▶ T021 ──┬──▶ T022 ──┐
        └──▶ T025 ───────────────────┤
                                     ▼
                                    T026
+
+Phase 8 (Issue #268 — builds on shipped skill installer and Codex support):
+
+T027 ──┬──▶ T028 ──┐
+       └──▶ T029 ──┴──▶ T030 ──┬──▶ T031 ──▶ T032 ──┐
+                                └──▶ T033 ───────────┤
+                                                      ▼
+                                                     T034
 ```
 
 ---
@@ -429,6 +548,7 @@ T019 ──▶ T020 ──▶ T021 ──┬──▶ T022 ──┐
 | #172 | 2026-03-12 | Initial feature spec |
 | #214 | 2026-04-16 | Add Phase 6: Gemini CLI support (T014–T018) |
 | #263 | 2026-04-24 | Add Phase 7: Codex skill installer support (T019–T026) |
+| #268 | 2026-04-25 | Add Phase 8: multi-target bare skill install/update support (T027–T034) |
 
 ---
 

@@ -1170,10 +1170,10 @@ async fn send_on_session(world: &mut CdpWorld, session_label: String) {
         .unwrap_or_else(|| panic!("No session '{session_label}'"));
     let _ = session.send_command("Runtime.evaluate", None).await;
     // Record the message
-    if let Some(rx) = world.mock_record_rx.as_mut() {
-        if let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
-            world.recorded_messages.push(msg);
-        }
+    if let Some(rx) = world.mock_record_rx.as_mut()
+        && let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+    {
+        world.recorded_messages.push(msg);
     }
 }
 
@@ -1236,10 +1236,10 @@ async fn send_method_on_session(world: &mut CdpWorld, method: String, session_la
         Err(e) => world.last_result = Some(Err(e.to_string())),
     }
     // Record the message
-    if let Some(rx) = world.mock_record_rx.as_mut() {
-        if let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
-            world.recorded_messages.push(msg);
-        }
+    if let Some(rx) = world.mock_record_rx.as_mut()
+        && let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+    {
+        world.recorded_messages.push(msg);
     }
 }
 
@@ -2817,6 +2817,7 @@ fn examples_run_command(world: &mut ExamplesWorld, command_line: String) {
 
     let output = std::process::Command::new(binary)
         .args(args)
+        .env("AGENTCHROME_NO_SKILL_CHECK", "1")
         .output()
         .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
 
@@ -3329,20 +3330,20 @@ fn caps_flag_has_four_values(
             for sub in subs {
                 if let Some(flags) = sub.get("flags").and_then(|f| f.as_array()) {
                     for flag in flags {
-                        if flag["name"].as_str() == Some(flag_name.as_str()) {
-                            if let Some(values) = flag.get("values").and_then(|v| v.as_array()) {
-                                let actual: Vec<String> = values
-                                    .iter()
-                                    .map(|v| v.as_str().unwrap_or("").to_string())
-                                    .collect();
-                                for exp in &expected {
-                                    assert!(
-                                        actual.contains(exp),
-                                        "Flag '{flag_name}' values {actual:?} missing '{exp}'"
-                                    );
-                                }
-                                return;
+                        if flag["name"].as_str() == Some(flag_name.as_str())
+                            && let Some(values) = flag.get("values").and_then(|v| v.as_array())
+                        {
+                            let actual: Vec<String> = values
+                                .iter()
+                                .map(|v| v.as_str().unwrap_or("").to_string())
+                                .collect();
+                            for exp in &expected {
+                                assert!(
+                                    actual.contains(exp),
+                                    "Flag '{flag_name}' values {actual:?} missing '{exp}'"
+                                );
                             }
+                            return;
                         }
                     }
                 }
@@ -3826,19 +3827,17 @@ impl CodexGuideWorld {
                 continue;
             }
 
-            if !in_code_block {
-                if let Some(stripped) = line.strip_prefix('#') {
-                    let level = 1 + stripped.len() - stripped.trim_start_matches('#').len();
-                    let heading_text = stripped.trim_start_matches('#').trim();
-                    if in_section && level <= section_level {
-                        break;
-                    }
-                    if heading_text.to_lowercase().contains(&heading_lower) {
-                        in_section = true;
-                        section_level = level;
-                        section_lines.push(*line);
-                        continue;
-                    }
+            if !in_code_block && let Some(stripped) = line.strip_prefix('#') {
+                let level = 1 + stripped.len() - stripped.trim_start_matches('#').len();
+                let heading_text = stripped.trim_start_matches('#').trim();
+                if in_section && level <= section_level {
+                    break;
+                }
+                if heading_text.to_lowercase().contains(&heading_lower) {
+                    in_section = true;
+                    section_level = level;
+                    section_lines.push(*line);
+                    continue;
                 }
             }
             if in_section {
@@ -4816,6 +4815,52 @@ impl SkillWorld {
     }
 }
 
+fn skill_world_path_for_tool(world: &mut SkillWorld, tool: &str) -> PathBuf {
+    let temp_home = world.ensure_temp_home();
+    match tool {
+        "claude-code" => temp_home.join(".claude/skills/agentchrome/SKILL.md"),
+        "windsurf" => temp_home.join(".codeium/windsurf/memories/global_rules.md"),
+        "codex" => temp_home.join(".codex/skills/agentchrome/SKILL.md"),
+        "gemini" => temp_home.join(".gemini/instructions/agentchrome.md"),
+        "cursor" => temp_home.join(".cursor/rules/agentchrome.mdc"),
+        other => panic!("unsupported SkillWorld tool path for {other}"),
+    }
+}
+
+fn plant_skill_in_skill_world(world: &mut SkillWorld, tool: &str, version: &str) {
+    let skill_path = skill_world_path_for_tool(world, tool);
+    std::fs::create_dir_all(skill_path.parent().unwrap()).unwrap();
+    let content = if tool == "windsurf" {
+        let preamble = (0..25)
+            .map(|i| format!("existing shared instruction line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "{preamble}\n<!-- agentchrome:start -->\n<!-- agentchrome-version: {version} -->\n\n# stale agentchrome skill\n<!-- agentchrome:end -->\n"
+        )
+    } else {
+        format!("---\nname: agentchrome\nversion: \"{version}\"\n---\n\n# agentchrome skill\n")
+    };
+    std::fs::write(&skill_path, content).unwrap();
+}
+
+fn add_detection_signal(world: &mut SkillWorld, tool: &str) {
+    match tool {
+        "claude-code" => world.extra_env.push(("CLAUDE_CODE".into(), "1".into())),
+        "codex" => {
+            let temp_home = world.ensure_temp_home();
+            std::fs::create_dir_all(temp_home.join(".codex")).unwrap();
+        }
+        "gemini" => world
+            .extra_env
+            .push(("GEMINI_API_KEY".into(), "test".into())),
+        "cursor" => world
+            .extra_env
+            .push(("CURSOR_TRACE_ID".into(), "test".into())),
+        other => panic!("unsupported detection signal for {other}"),
+    }
+}
+
 // --- Skill Given steps ---
 
 #[given("an agentic coding tool environment is active with env var \"CLAUDE_CODE\" set")]
@@ -4950,6 +4995,59 @@ fn skill_codex_dir_exists(world: &mut SkillWorld) {
     std::fs::create_dir_all(temp_home.join(".codex")).unwrap();
 }
 
+#[given(
+    expr = "installed AgentChrome skills for {string} and {string} have stale versions in a temp home"
+)]
+fn skill_two_stale_installs(world: &mut SkillWorld, first: String, second: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    plant_skill_in_skill_world(world, &first, "0.1.0");
+    plant_skill_in_skill_world(world, &second, "0.1.0");
+}
+
+#[given("a higher-priority Claude Code detection signal is present")]
+fn skill_higher_priority_claude_signal(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.extra_env.push(("CLAUDE_CODE".into(), "1".into()));
+}
+
+#[given("a stale Codex AgentChrome skill is installed in the same temp home")]
+fn skill_stale_codex_same_home(world: &mut SkillWorld) {
+    plant_skill_in_skill_world(world, "codex", "0.1.0");
+}
+
+#[given(expr = "detection signals for {string} and {string} are present in a temp home")]
+fn skill_detection_signals_for_tools(world: &mut SkillWorld, first: String, second: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    add_detection_signal(world, &first);
+    add_detection_signal(world, &second);
+}
+
+#[given(expr = "bare skill install will target {string} and {string}")]
+fn skill_bare_install_targets(world: &mut SkillWorld, first: String, second: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    add_detection_signal(world, &first);
+    add_detection_signal(world, &second);
+}
+
+#[given("the Codex target path cannot be written")]
+fn skill_codex_target_unwritable(world: &mut SkillWorld) {
+    let temp_home = world.ensure_temp_home();
+    let blocker = temp_home.join("codex-blocker");
+    std::fs::write(&blocker, "not a directory").unwrap();
+    world.extra_env.retain(|(key, _)| key != "CODEX_HOME");
+    world
+        .extra_env
+        .push(("CODEX_HOME".into(), blocker.display().to_string()));
+}
+
 #[given("no GEMINI_* environment variables are set")]
 fn skill_no_gemini_env(_world: &mut SkillWorld) {
     // env_clear() in run_skill_command_with_env ensures no GEMINI_* vars are set
@@ -4980,9 +5078,24 @@ fn skill_run_command(world: &mut SkillWorld, command_line: String) {
     world.run_skill_command_with_env(&command_line, refs);
 }
 
+#[when(expr = "I run {string} without a --tool flag")]
+fn skill_run_command_without_tool(world: &mut SkillWorld, command_line: String) {
+    skill_run_command(world, command_line);
+}
+
 #[when(expr = "I run {string} again")]
 fn skill_run_command_again(world: &mut SkillWorld, command_line: String) {
     world.run_skill_command(&command_line);
+}
+
+#[when("any AgentChrome command is invoked with the temp home")]
+fn skill_any_command_invoked(world: &mut SkillWorld) {
+    let env_vars: Vec<(String, String)> = world.extra_env.clone();
+    let refs: Vec<(&str, &str)> = env_vars
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    world.run_skill_command_with_env("agentchrome skill list", refs);
 }
 
 #[when("I read the Claude Code Integration section")]
@@ -5029,6 +5142,16 @@ fn skill_exit_code_nonzero(world: &mut SkillWorld) {
 fn skill_stdout_json_field_equals(world: &mut SkillWorld, field: String, expected: String) {
     let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    if json[&field].is_null()
+        && field == "tool"
+        && json["results"].as_array().is_some_and(|results| {
+            results
+                .iter()
+                .any(|result| result["tool"].as_str() == Some(expected.as_str()))
+        })
+    {
+        return;
+    }
     assert_eq!(
         json[&field].as_str(),
         Some(expected.as_str()),
@@ -5041,6 +5164,27 @@ fn skill_stdout_json_field_equals(world: &mut SkillWorld, field: String, expecte
 fn skill_stdout_contains_field(world: &mut SkillWorld, field: String, expected: String) {
     let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    if json[&field].is_null()
+        && field == "tool"
+        && json["results"].as_array().is_some_and(|results| {
+            results
+                .iter()
+                .any(|result| result["tool"].as_str() == Some(expected.as_str()))
+        })
+    {
+        return;
+    }
+    if json[&field].is_null()
+        && field == "action"
+        && json["results"].as_array().is_some_and(|results| {
+            !results.is_empty()
+                && results
+                    .iter()
+                    .all(|result| result["action"].as_str() == Some(expected.as_str()))
+        })
+    {
+        return;
+    }
     assert_eq!(
         json[&field].as_str(),
         Some(expected.as_str()),
@@ -5053,7 +5197,15 @@ fn skill_stdout_contains_field(world: &mut SkillWorld, field: String, expected: 
 fn skill_stdout_has_path(world: &mut SkillWorld) {
     let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
-    let path = json["path"].as_str().expect("missing 'path' field");
+    let path = json["path"]
+        .as_str()
+        .or_else(|| {
+            json["results"]
+                .as_array()
+                .and_then(|results| results.first())
+                .and_then(|result| result["path"].as_str())
+        })
+        .expect("missing 'path' field");
     assert!(!path.is_empty(), "path field is empty");
 }
 
@@ -5061,7 +5213,15 @@ fn skill_stdout_has_path(world: &mut SkillWorld) {
 fn skill_file_exists_at_path(world: &mut SkillWorld) {
     let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
         .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
-    let path = json["path"].as_str().expect("missing 'path' field");
+    let path = json["path"]
+        .as_str()
+        .or_else(|| {
+            json["results"]
+                .as_array()
+                .and_then(|results| results.first())
+                .and_then(|result| result["path"].as_str())
+        })
+        .expect("missing 'path' field");
     assert!(
         std::path::Path::new(path).exists(),
         "Skill file does not exist at {path}"
@@ -5587,6 +5747,144 @@ fn skill_codex_tests_cover_lifecycle(world: &mut SkillWorld) {
     }
 }
 
+fn skill_batch_results(world: &SkillWorld) -> Vec<serde_json::Value> {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    json["results"]
+        .as_array()
+        .unwrap_or_else(|| panic!("stdout does not contain a results array: {}", world.stdout))
+        .clone()
+}
+
+fn skill_batch_result_for(world: &SkillWorld, tool: &str) -> serde_json::Value {
+    skill_batch_results(world)
+        .into_iter()
+        .find(|result| result["tool"].as_str() == Some(tool))
+        .unwrap_or_else(|| {
+            panic!(
+                "batch result for {tool} not found\nstdout: {}",
+                world.stdout
+            )
+        })
+}
+
+#[then(expr = "stdout contains batch JSON results for {string} and {string}")]
+fn skill_stdout_batch_results_for(world: &mut SkillWorld, first: String, second: String) {
+    let _ = skill_batch_result_for(world, &first);
+    let _ = skill_batch_result_for(world, &second);
+}
+
+#[then(expr = "each batch result has status {string} and action {string}")]
+fn skill_each_batch_result_has_status_and_action(
+    world: &mut SkillWorld,
+    status: String,
+    action: String,
+) {
+    let results = skill_batch_results(world);
+    assert!(!results.is_empty(), "batch results must not be empty");
+    for result in results {
+        assert_eq!(result["status"].as_str(), Some(status.as_str()));
+        assert_eq!(result["action"].as_str(), Some(action.as_str()));
+        assert!(result["version"].is_string(), "missing version in {result}");
+        assert!(result["path"].is_string(), "missing path in {result}");
+    }
+}
+
+#[then("a subsequent AgentChrome invocation with the same temp home emits no staleness notice")]
+fn skill_subsequent_invocation_no_stale_notice(world: &mut SkillWorld) {
+    let env_vars: Vec<(String, String)> = world.extra_env.clone();
+    let refs: Vec<(&str, &str)> = env_vars
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    world.run_skill_command_with_env("agentchrome skill list", refs);
+    assert!(
+        !world.stderr.contains("note: installed agentchrome skill"),
+        "Unexpected staleness notice after update\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then("the Codex skill file contains the current AgentChrome version")]
+fn skill_codex_file_current_version(world: &mut SkillWorld) {
+    let path = skill_world_path_for_tool(world, "codex");
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    assert!(
+        content.contains(env!("CARGO_PKG_VERSION")),
+        "Codex skill does not contain current version\ncontent: {content}"
+    );
+}
+
+#[then("the skill files exist at both detected install paths")]
+fn skill_files_exist_at_detected_paths(world: &mut SkillWorld) {
+    for tool in ["claude-code", "codex"] {
+        let path = skill_world_path_for_tool(world, tool);
+        assert!(
+            path.exists(),
+            "expected {tool} skill file at {}",
+            path.display()
+        );
+    }
+}
+
+#[then("stdout does not contain a batch \"results\" array")]
+fn skill_stdout_no_batch_results(world: &mut SkillWorld) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    assert!(
+        json.get("results").is_none(),
+        "explicit command unexpectedly returned batch results: {json}"
+    );
+}
+
+#[then("no Claude Code skill file is created")]
+fn skill_no_claude_skill_created(world: &mut SkillWorld) {
+    let path = skill_world_path_for_tool(world, "claude-code");
+    assert!(
+        !path.exists(),
+        "Claude Code skill file should not exist at {}",
+        path.display()
+    );
+}
+
+#[then(expr = "stdout contains a batch result for {string} with action {string}")]
+fn skill_batch_result_action(world: &mut SkillWorld, tool: String, action: String) {
+    let result = skill_batch_result_for(world, &tool);
+    assert_eq!(result["action"].as_str(), Some(action.as_str()));
+    assert_eq!(result["status"].as_str(), Some("ok"));
+}
+
+#[then(expr = "stdout contains a batch result for {string} with status {string}")]
+fn skill_batch_result_status(world: &mut SkillWorld, tool: String, status: String) {
+    let result = skill_batch_result_for(world, &tool);
+    assert_eq!(result["status"].as_str(), Some(status.as_str()));
+}
+
+#[then("the successful Claude Code skill file remains installed")]
+fn skill_successful_claude_remains_installed(world: &mut SkillWorld) {
+    let path = skill_world_path_for_tool(world, "claude-code");
+    assert!(
+        path.exists(),
+        "Claude Code skill file should remain installed at {}",
+        path.display()
+    );
+}
+
+#[then(expr = "stderr contains one staleness notice naming {string} and {string}")]
+fn skill_stderr_one_notice_names(world: &mut SkillWorld, first: String, second: String) {
+    skill_stderr_one_staleness_notice(world);
+    let notice = world
+        .stderr
+        .lines()
+        .find(|line| line.starts_with("note: installed agentchrome skill"))
+        .expect("missing staleness notice");
+    assert!(
+        notice.contains(&first) && notice.contains(&second),
+        "notice does not name both tools {first} and {second}: {notice}"
+    );
+}
+
 // --- SKILL.md enrichment Then steps ---
 
 /// Read the installed SKILL.md from the path reported in stdout JSON.
@@ -5889,6 +6187,25 @@ fn stale_run_skill_update(world: &mut StaleSkillWorld, tool: String) {
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .output()
         .unwrap_or_else(|e| panic!("failed to run skill update: {e}"));
+
+    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    world.exit_code = Some(output.status.code().unwrap_or(-1));
+}
+
+#[when("I run bare skill update with the planted home")]
+fn stale_run_bare_skill_update(world: &mut StaleSkillWorld) {
+    let binary = world.binary_path.clone().unwrap_or_else(binary_path);
+    let temp_home = world.ensure_temp_home().path().to_path_buf();
+
+    let output = std::process::Command::new(&binary)
+        .args(["skill", "update"])
+        .env_clear()
+        .env("HOME", &temp_home)
+        .env("USERPROFILE", &temp_home)
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run bare skill update: {e}"));
 
     world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
     world.stderr = String::from_utf8_lossy(&output.stderr).to_string();

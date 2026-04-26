@@ -1,9 +1,9 @@
-# Verification Report: Add Codex Support to Skill Installer
+# Verification Report: Multi-Target Skill Install and Update
 
-**Date**: 2026-04-24
-**Issue**: #263
+**Date**: 2026-04-26
+**Issue**: #268
 **Reviewer**: Codex
-**Scope**: Verify Codex skill installer support against amended spec
+**Scope**: Verify bare `agentchrome skill install` and `agentchrome skill update` multi-target behavior against the amended skill-command spec
 
 ---
 
@@ -20,7 +20,7 @@
 | **Overall** | 4.8 |
 
 **Status**: Pass
-**Total Issues**: 1 found, 1 fixed, 0 remaining
+**Total Issues**: 2 found, 2 fixed, 0 remaining
 
 ---
 
@@ -28,12 +28,12 @@
 
 | AC | Description | Status | Evidence |
 |----|-------------|--------|----------|
-| AC19 | Codex installs explicitly with `CODEX_HOME` and default fallback | Pass | `src/skill.rs:113`, `src/skill.rs:279`, `src/skill.rs:295`; BDD scenarios in `tests/features/skill-command-group.feature` |
-| AC20 | Codex appears in `skill list` with path, detection, and installed fields | Pass | `src/skill.rs:477`; BDD `Codex appears in skill list` |
-| AC21 | Codex auto-detection works via `CODEX_HOME` and `~/.codex/` without changing higher-priority signals | Pass | `src/skill.rs:193`, `src/skill.rs:225`; BDD detection scenarios |
-| AC22 | Codex update and uninstall lifecycle commands work | Pass | Shared lifecycle path in `src/skill.rs`; BDD `Codex skill lifecycle commands work` |
-| AC23 | Staleness check includes Codex in single-tool and aggregated notices | Pass | `src/skill_check.rs:114`; `tests/features/skill-staleness.feature:38` and `:51` |
-| AC24 | Documentation and tests cover Codex | Pass | `README.md:21`, `docs/codex.md:28`, `examples/AGENTS.md.example:5`, executable BDD scenarios |
+| AC25 | Bare update refreshes every stale installed skill, including append-section installs after long shared-file preambles | Pass | `src/skill.rs` batch update path; `src/skill_check.rs` section-marker fallback; BDD scenarios in `tests/features/skill-command-group.feature`; temp smoke updated `claude-code`, `windsurf`, and `codex` |
+| AC26 | Bare update does not stop at the first detected tool | Pass | `src/skill.rs` stale-target collection uses `skill_check::stale_tools()` rather than `detect_tool()`; BDD `Bare update does not stop at the first detected tool` |
+| AC27 | Bare install installs into all detected agents | Pass | `src/skill.rs` detected-target collection preserves registry order; BDD and temp smoke installed `claude-code` and `codex` in one command |
+| AC28 | Explicit targeting remains single-target | Pass | `execute_skill()` dispatch keeps explicit `--tool` on single-result paths; BDD asserts no batch `results` for explicit Codex install |
+| AC29 | Multi-target failures are reported per target | Pass | `run_skill_batch()` records per-target `ok`/`error` results and returns non-zero if any target fails; BDD partial-failure scenario passes |
+| AC30 | Staleness notice guidance is actionable | Pass | Bare `agentchrome skill update` clears stale notices in BDD and temp smoke |
 
 ---
 
@@ -41,70 +41,35 @@
 
 | Task | Description | Status | Notes |
 |------|-------------|--------|-------|
-| T019 | Add Codex CLI enum and registry mapping | Complete | `ToolName::Codex`, `tool_for_name`, and `TOOLS` entry present |
-| T020 | Implement `CODEX_HOME`-aware path resolution | Complete | Exact `$CODEX_HOME/` handling plus unset/empty fallback |
-| T021 | Add Codex detection without changing priority semantics | Complete | Codex checked after existing Tier 1 signals and after existing config dirs |
-| T022 | Extend Codex lifecycle BDD coverage | Complete | Fixed during verification by adding executable scenarios to `tests/features/skill-command-group.feature` |
-| T023 | Extend staleness coverage for Codex | Complete | Codex-only and multi-tool stale scenarios pass |
-| T024 | Update unit tests for registry and paths | Complete | Registry count, mapping, path root, and list assertions present |
-| T025 | Update Codex documentation | Complete | README, Codex guide, AGENTS example, examples data, and man pages updated |
-| T026 | Verify Codex skill workflow | Complete | Gates and manual lifecycle smoke passed |
+| T027 | Define multi-target skill output types | Complete | Batch output uses top-level `results` with per-target status |
+| T028 | Implement detected-target collection for bare install | Complete | Registry-driven multi-detection added |
+| T029 | Implement stale-installed target collection for bare update | Complete | Shared staleness scan drives update targets |
+| T030 | Wire explicit vs bare install/update dispatch | Complete | Explicit commands remain single-target |
+| T031 | Add multi-target BDD scenarios | Complete | AC25-AC30 covered |
+| T032 | Implement BDD steps and temp-home fixtures | Complete | Temp-home stale installs and detection signals covered |
+| T033 | Add focused unit coverage | Complete | Target selection, batch serialization, and append-section version parsing covered |
+| T034 | Verify multi-target skill workflow | Complete | Required gates and temp-home smoke tests passed |
 
 ---
 
 ## Architecture Assessment
 
-### SOLID Compliance
-
-| Principle | Score (1-5) | Notes |
-|-----------|-------------|-------|
-| Single Responsibility | 4 | Change stays in the existing skill registry, path resolver, and detection path. |
-| Open/Closed | 4 | New tool added through the established registry pattern; resolver has one exact Codex-specific branch as designed. |
-| Liskov Substitution | 5 | Not inheritance-heavy; Codex uses the same `ToolInfo` and install mode contract as other standalone tools. |
-| Interface Segregation | 4 | Existing focused structs remain small. |
-| Dependency Inversion | 4 | Filesystem and environment are still accessed directly as in existing code; tests use process-level isolation. |
-
-### Layer Separation
-
-CLI parsing remains in `src/cli/mod.rs`; registry and skill behavior remain in `src/skill.rs`; staleness behavior remains in `src/skill_check.rs`. No CDP or browser layers are touched.
-
-### Dependency Flow
-
-The staleness check depends on the public skill registry and shared path resolver, so install/list/update/uninstall and stale checking use the same Codex path semantics.
-
----
-
-## Security Assessment
-
-No authentication or network surface is added. The feature writes only to user-controlled Codex locations, uses clap enum validation for `--tool codex`, and does not introduce shell execution or untrusted path interpolation.
-
----
-
-## Performance Assessment
-
-The feature adds constant-time registry entries, environment checks, and filesystem existence checks. No Chrome/CDP startup, network calls, or long-running processes are added to skill commands.
+| Area | Score (1-5) | Notes |
+|------|-------------|-------|
+| SOLID Principles | 4 | Multi-target behavior is layered on the existing registry/resolver model; `src/skill.rs` remains broad but follows the established command-module pattern. |
+| Security | 5 | No network, shell execution, or secret handling added; writes remain limited to user-controlled skill paths. |
+| Performance | 5 | Bare update scans a bounded registry and parses only installed skill files; append-section fallback avoids unbounded behavior beyond the relevant section parse. |
+| Testability | 5 | Unit tests, BDD scenarios, and temp-home smoke tests cover the new multi-target behavior. |
+| Error Handling | 5 | Partial failures are structured per target and produce a non-zero process exit without skipping later targets. |
 
 ---
 
 ## Test Coverage
 
-### BDD Scenarios
-
-| Acceptance Criterion | Has Scenario | Has Steps | Passes |
-|---------------------|-------------|-----------|--------|
-| AC19 | Yes | Yes | Yes |
-| AC20 | Yes | Yes | Yes |
-| AC21 | Yes | Yes | Yes |
-| AC22 | Yes | Yes | Yes |
-| AC23 | Yes | Yes | Yes |
-| AC24 | Yes | Yes | Yes |
-
-### Coverage Summary
-
-- Feature files: 8 Codex scenarios in `tests/features/skill-command-group.feature`, plus 2 Codex staleness scenarios in `tests/features/skill-staleness.feature`.
+- BDD scenarios: 6/6 issue #268 acceptance criteria covered and passing.
 - Step definitions: Implemented in `tests/bdd.rs`.
-- Unit tests: Registry count, mapping, path root behavior, and list output covered in `src/skill.rs`.
-- Manual smoke: temp `CODEX_HOME` install, list, update, uninstall, default fallback, and auto-detection all passed.
+- Unit tests: `src/skill.rs` covers detection/batch serialization; `src/skill_check.rs` covers append-section version parsing after long preambles.
+- Test execution: `cargo test --test bdd` passed.
 
 ---
 
@@ -113,10 +78,10 @@ The feature adds constant-time registry entries, environment checks, and filesys
 | Gate | Status | Evidence |
 |------|--------|----------|
 | Debug Build | Pass | `cargo build` exited 0 |
-| Unit Tests | Pass | `cargo test --lib` exited 0; 251 passed |
+| Unit Tests | Pass | `cargo test --lib` exited 0; 255 passed |
 | Clippy | Pass | `cargo clippy --all-targets` exited 0 |
 | Format Check | Pass | `cargo fmt --check` exited 0 |
-| Feature Exercise | Pass | Temp `CODEX_HOME` manual lifecycle smoke passed; executable BDD Codex scenarios passed |
+| Feature Exercise | Pass | Temp-home smoke proved bare update clears `claude-code`, `windsurf`, and `codex` stale installs; bare install wrote `claude-code` and `codex` detected targets |
 
 **Gate Summary**: 5/5 gates passed, 0 failed, 0 incomplete
 
@@ -126,7 +91,8 @@ The feature adds constant-time registry entries, environment checks, and filesys
 
 | Severity | Category | Location | Original Issue | Fix Applied | Routing |
 |----------|----------|----------|----------------|-------------|---------|
-| Medium | Testing | `tests/features/skill-command-group.feature` | Codex lifecycle scenarios existed only in spec Gherkin, not executable BDD feature | Added executable Codex scenarios for install, list, detection, lifecycle, staleness, and docs/tests coverage | direct |
+| High | Spec Compliance | `src/skill_check.rs` | Stale scanning only inspected the first 20 lines, so append-section installs in long shared files could be missed by bare update | Added section-marker fallback parsing and amended AC25/FR32a/design plus BDD coverage for late `windsurf` markers | direct |
+| Medium | Testing | `tests/bdd.rs` | Generic examples BDD runner inherited host stale-skill notices, causing unrelated stderr-empty assertions to fail | Suppressed skill staleness checks only in `ExamplesWorld`; dedicated staleness worlds remain unsuppressed | direct |
 
 ## Remaining Issues
 
@@ -134,16 +100,8 @@ None.
 
 ---
 
-## Positive Observations
-
-- Codex support is added through the existing registry-driven skill installer architecture.
-- `$CODEX_HOME` fallback is centralized in the shared resolver used by lifecycle and staleness paths.
-- Documentation covers README, Codex guide, AGENTS example, examples data, and generated man pages.
-
----
-
 ## Recommendation
 
 **Ready for PR**
 
-Issue #263 acceptance criteria pass after the BDD coverage fix. No remaining verification findings.
+Issue #268 acceptance criteria pass after the append-section stale-scan fix and test-isolation fix. No remaining verification findings.

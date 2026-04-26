@@ -649,11 +649,12 @@ EXAMPLES:
             coding tools (Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor, \
             Gemini CLI, Codex). \
             The skill file is a minimal signpost that tells the AI agent what agentchrome is \
-            and how to discover its capabilities via the CLI's built-in help system. Auto-detects \
-            the active agentic environment, or use --tool to target a specific tool.",
+            and how to discover its capabilities via the CLI's built-in help system. Without \
+            --tool, install writes to every detected supported agent and update refreshes every \
+            stale installed AgentChrome skill. Use --tool to target exactly one tool.",
         after_long_help = "\
 EXAMPLES:
-  # Auto-detect and install
+  # Install into every detected supported agent
   agentchrome skill install
 
   # Install for a specific tool
@@ -665,7 +666,10 @@ EXAMPLES:
   # List supported tools and installation status
   agentchrome skill list
 
-  # Update installed skill to current version
+  # Update every stale installed AgentChrome skill
+  agentchrome skill update
+
+  # Update one explicit target
   agentchrome skill update --tool claude-code
 
   # Remove an installed skill
@@ -2069,12 +2073,13 @@ pub enum SkillCommand {
     /// Install the agentchrome skill for an agentic coding tool
     #[command(
         long_about = "Install a concise agentchrome skill/instruction file for the detected (or \
-            specified) agentic coding tool. The skill tells the AI agent what agentchrome is \
-            and how to discover its capabilities. Re-running install overwrites the existing \
-            skill file (idempotent).",
+            specified) agentic coding tool. Without --tool, installs into every detected \
+            supported agent target. With --tool, installs only into that explicit target. \
+            The skill tells the AI agent what agentchrome is and how to discover its \
+            capabilities. Re-running install overwrites the existing skill file (idempotent).",
         after_long_help = "\
 EXAMPLES:
-  # Auto-detect tool and install
+  # Install into every detected supported agent
   agentchrome skill install
 
   # Install for a specific tool
@@ -2103,10 +2108,12 @@ EXAMPLES:
     /// Update an installed skill to the current version
     #[command(
         long_about = "Replace an installed agentchrome skill file with the current version's \
-            content. Errors if no skill is currently installed for the tool.",
+            content. Without --tool, refreshes every installed AgentChrome skill whose embedded \
+            version is older than the running binary. With --tool, updates only that explicit \
+            target and errors if no skill is currently installed for that tool.",
         after_long_help = "\
 EXAMPLES:
-  # Update for auto-detected tool
+  # Update every stale installed AgentChrome skill
   agentchrome skill update
 
   # Update for a specific tool

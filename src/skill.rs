@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::Serialize;
 
 use agentchrome::error::{AppError, ExitCode};
@@ -40,6 +42,22 @@ struct SkillResult {
     action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SkillBatchOutput {
+    results: Vec<SkillBatchResult>,
+}
+
+#[derive(Serialize)]
+struct SkillBatchResult {
+    tool: String,
+    path: String,
+    action: String,
+    version: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -246,11 +264,69 @@ fn detect_tool() -> Option<&'static ToolInfo> {
     None
 }
 
+fn detected_tools() -> Vec<&'static ToolInfo> {
+    let env: Vec<(String, String)> = std::env::vars().collect();
+    let parent = std::env::var("_").ok();
+    let home = home_dir();
+    detected_tools_with(&env, parent.as_deref(), home.as_deref())
+}
+
+fn detected_tools_with(
+    env: &[(String, String)],
+    parent: Option<&str>,
+    home: Option<&Path>,
+) -> Vec<&'static ToolInfo> {
+    TOOLS
+        .iter()
+        .filter(|tool| tool_detected_with(tool, env, parent, home))
+        .collect()
+}
+
+fn tool_detected_with(
+    tool: &ToolInfo,
+    env: &[(String, String)],
+    parent: Option<&str>,
+    home: Option<&Path>,
+) -> bool {
+    match tool.name {
+        "claude-code" => env_has_key(env, "CLAUDE_CODE") || parent_contains(parent, "claude"),
+        "windsurf" => env_has_prefix(env, "WINDSURF_") || home_has_dir(home, ".codeium"),
+        "aider" => env_has_prefix(env, "AIDER_") || parent_contains(parent, "aider"),
+        "continue" => home_has_dir(home, ".continue"),
+        "copilot-jb" => home_has_dir(home, ".config/github-copilot"),
+        "cursor" => env_has_prefix(env, "CURSOR_") || home_has_dir(home, ".cursor"),
+        "gemini" => env_has_prefix(env, "GEMINI_") || home_has_dir(home, ".gemini"),
+        "codex" => env_has_non_empty_key(env, "CODEX_HOME") || home_has_dir(home, ".codex"),
+        _ => false,
+    }
+}
+
+fn env_has_key(env: &[(String, String)], key: &str) -> bool {
+    env.iter().any(|(candidate, _)| candidate == key)
+}
+
+fn env_has_non_empty_key(env: &[(String, String)], key: &str) -> bool {
+    env.iter()
+        .any(|(candidate, value)| candidate == key && !value.is_empty())
+}
+
+fn env_has_prefix(env: &[(String, String)], prefix: &str) -> bool {
+    env.iter().any(|(key, _)| key.starts_with(prefix))
+}
+
+fn parent_contains(parent: Option<&str>, needle: &str) -> bool {
+    parent.is_some_and(|value| value.to_ascii_lowercase().contains(needle))
+}
+
+fn home_has_dir(home: Option<&Path>, relative: &str) -> bool {
+    home.is_some_and(|root| root.join(relative).is_dir())
+}
+
 fn has_env_prefix(prefix: &str) -> bool {
     std::env::vars().any(|(key, _)| key.starts_with(prefix))
 }
 
-fn find_tool(name: &str) -> Option<&'static ToolInfo> {
+pub(crate) fn find_tool(name: &str) -> Option<&'static ToolInfo> {
     TOOLS.iter().find(|t| t.name == name)
 }
 
@@ -326,18 +402,42 @@ pub(crate) fn path_template(tool: &ToolInfo) -> &'static str {
 fn resolve_tool(tool_flag: Option<&ToolName>) -> Result<&'static ToolInfo, AppError> {
     match tool_flag {
         Some(name) => Ok(tool_for_name(name)),
-        None => detect_tool().ok_or_else(|| {
-            let supported: Vec<&str> = TOOLS.iter().map(|t| t.name).collect();
-            let custom = serde_json::json!({
-                "error": "no supported agentic tool detected",
-                "supported_tools": supported
-            });
-            AppError {
-                message: "no supported agentic tool detected".into(),
-                code: ExitCode::GeneralError,
-                custom_json: Some(custom.to_string()),
-            }
-        }),
+        None => detect_tool().ok_or_else(no_supported_agentic_tool_detected),
+    }
+}
+
+fn no_supported_agentic_tool_detected() -> AppError {
+    let supported: Vec<&str> = TOOLS.iter().map(|t| t.name).collect();
+    let supported_details: Vec<serde_json::Value> = TOOLS
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.name,
+                "detection": tool.detection,
+                "path": path_template(tool),
+            })
+        })
+        .collect();
+    let custom = serde_json::json!({
+        "error": "no supported agentic tool detected",
+        "supported_tools": supported,
+        "supported_tool_details": supported_details,
+    });
+    AppError {
+        message: "no supported agentic tool detected".into(),
+        code: ExitCode::GeneralError,
+        custom_json: Some(custom.to_string()),
+    }
+}
+
+fn no_stale_installed_skills_found() -> AppError {
+    let custom = serde_json::json!({
+        "error": "no stale installed AgentChrome skills found",
+    });
+    AppError {
+        message: "no stale installed AgentChrome skills found".into(),
+        code: ExitCode::GeneralError,
+        custom_json: Some(custom.to_string()),
     }
 }
 
@@ -467,6 +567,87 @@ fn update_skill(tool: &ToolInfo) -> Result<SkillResult, AppError> {
     let mut result = install_skill(tool)?;
     result.action = "updated".into();
     Ok(result)
+}
+
+// =============================================================================
+// Multi-target install/update logic
+// =============================================================================
+
+fn install_detected_skills(global: &GlobalOpts) -> Result<(), AppError> {
+    let tools = detected_tools();
+    if tools.is_empty() {
+        return Err(no_supported_agentic_tool_detected());
+    }
+
+    let batch = run_skill_batch(tools, "installed", install_skill);
+    print_batch_output(global, &batch)
+}
+
+fn update_stale_skills(global: &GlobalOpts) -> Result<(), AppError> {
+    let tools: Vec<&'static ToolInfo> = crate::skill_check::stale_tools()
+        .into_iter()
+        .map(|stale| stale.tool)
+        .collect();
+    if tools.is_empty() {
+        return Err(no_stale_installed_skills_found());
+    }
+
+    let batch = run_skill_batch(tools, "updated", update_skill);
+    print_batch_output(global, &batch)
+}
+
+fn run_skill_batch(
+    tools: Vec<&'static ToolInfo>,
+    action: &'static str,
+    operation: fn(&ToolInfo) -> Result<SkillResult, AppError>,
+) -> SkillBatchOutput {
+    let results = tools
+        .into_iter()
+        .map(|tool| match operation(tool) {
+            Ok(result) => SkillBatchResult {
+                tool: result.tool,
+                path: result.path,
+                action: result.action,
+                version: result
+                    .version
+                    .unwrap_or_else(|| env!("CARGO_PKG_VERSION").into()),
+                status: "ok".into(),
+                error: None,
+            },
+            Err(err) => SkillBatchResult {
+                tool: tool.name.into(),
+                path: batch_path(tool),
+                action: action.into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                status: "error".into(),
+                error: Some(err.message),
+            },
+        })
+        .collect();
+
+    SkillBatchOutput { results }
+}
+
+fn print_batch_output(global: &GlobalOpts, batch: &SkillBatchOutput) -> Result<(), AppError> {
+    let has_error = batch.results.iter().any(|result| result.status == "error");
+    print_output(batch, &global.output)?;
+
+    if has_error {
+        Err(AppError {
+            message: "one or more skill targets failed".into(),
+            code: ExitCode::GeneralError,
+            custom_json: None,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn batch_path(tool: &ToolInfo) -> String {
+    resolve_path(path_template(tool)).map_or_else(
+        |_| path_template(tool).into(),
+        |path| path.display().to_string(),
+    )
 }
 
 // =============================================================================
@@ -729,9 +910,13 @@ fn unpatch_aider_config(config_path: &std::path::Path, skill_path: &str) {
 pub fn execute_skill(global: &GlobalOpts, args: &SkillArgs) -> Result<(), AppError> {
     match &args.command {
         SkillCommand::Install(install_args) => {
-            let tool = resolve_tool(install_args.tool.as_ref())?;
-            let result = install_skill(tool)?;
-            print_output(&result, &global.output)
+            if let Some(tool_name) = install_args.tool.as_ref() {
+                let tool = tool_for_name(tool_name);
+                let result = install_skill(tool)?;
+                print_output(&result, &global.output)
+            } else {
+                install_detected_skills(global)
+            }
         }
         SkillCommand::Uninstall(tool_args) => {
             let tool = resolve_tool(tool_args.tool.as_ref())?;
@@ -739,9 +924,13 @@ pub fn execute_skill(global: &GlobalOpts, args: &SkillArgs) -> Result<(), AppErr
             print_output(&result, &global.output)
         }
         SkillCommand::Update(tool_args) => {
-            let tool = resolve_tool(tool_args.tool.as_ref())?;
-            let result = update_skill(tool)?;
-            print_output(&result, &global.output)
+            if let Some(tool_name) = tool_args.tool.as_ref() {
+                let tool = tool_for_name(tool_name);
+                let result = update_skill(tool)?;
+                print_output(&result, &global.output)
+            } else {
+                update_stale_skills(global)
+            }
         }
         SkillCommand::List => {
             let result = list_tools()?;
@@ -1149,5 +1338,63 @@ mod tests {
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(!json.contains("version"));
+    }
+
+    #[test]
+    fn detected_tools_collects_multiple_env_signals_in_registry_order() {
+        let env = vec![
+            ("CODEX_HOME".to_string(), "/tmp/codex".to_string()),
+            ("CLAUDE_CODE".to_string(), "1".to_string()),
+        ];
+        let tools = detected_tools_with(&env, None, None);
+        let names: Vec<&str> = tools.iter().map(|tool| tool.name).collect();
+        assert_eq!(names, vec!["claude-code", "codex"]);
+    }
+
+    #[test]
+    fn detected_tools_collects_multiple_config_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".continue")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+
+        let tools = detected_tools_with(&[], None, Some(dir.path()));
+        let names: Vec<&str> = tools.iter().map(|tool| tool.name).collect();
+
+        assert_eq!(names, vec!["continue", "codex"]);
+    }
+
+    #[test]
+    fn batch_output_serializes_success_and_failure_results() {
+        let output = SkillBatchOutput {
+            results: vec![
+                SkillBatchResult {
+                    tool: "claude-code".into(),
+                    path: "/tmp/home/.claude/skills/agentchrome/SKILL.md".into(),
+                    action: "installed".into(),
+                    version: "1.8.0".into(),
+                    status: "ok".into(),
+                    error: None,
+                },
+                SkillBatchResult {
+                    tool: "codex".into(),
+                    path: "/tmp/codex/skills/agentchrome/SKILL.md".into(),
+                    action: "installed".into(),
+                    version: "1.8.0".into(),
+                    status: "error".into(),
+                    error: Some("failed to write target".into()),
+                },
+            ],
+        };
+
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let results = parsed["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0]["tool"], "claude-code");
+        assert_eq!(results[0]["status"], "ok");
+        assert!(results[0].get("error").is_none());
+        assert_eq!(results[1]["tool"], "codex");
+        assert_eq!(results[1]["status"], "error");
+        assert_eq!(results[1]["error"], "failed to write target");
     }
 }

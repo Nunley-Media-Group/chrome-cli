@@ -1,7 +1,7 @@
 # Design: Add agentchrome skill Command Group
 
-**Issues**: #172, #214, #263
-**Date**: 2026-04-24
+**Issues**: #172, #214, #263, #268
+**Date**: 2026-04-25
 **Status**: Draft
 **Author**: Claude (AI-assisted)
 
@@ -229,6 +229,7 @@ Parent process inspection uses `std::env::var("_")` on Unix (which contains the 
 3. If agentchrome section markers already present, replace the section content
 4. If no markers present, append section with markers
 5. Section delimiters: `<!-- agentchrome:start -->` / `<!-- agentchrome:end -->`
+6. The section includes `<!-- agentchrome-version: X.Y.Z -->` immediately after the start marker so stale-skill detection can find append-section installs inside shared files.
 
 **Standalone with config** (Aider):
 1. Write standalone skill file to `~/.aider/agentchrome.md`
@@ -358,6 +359,12 @@ Resolution rules:
 | `CODEX_HOME` unset | `~/.codex/skills/agentchrome/SKILL.md` |
 | `CODEX_HOME` set to empty string | Treat as unset and use `~/.codex/skills/agentchrome/SKILL.md` |
 
+### Stale Scan Amendment (#268 Review)
+
+`src/skill_check.rs::read_version_marker()` keeps the 20-line bounded scan for standalone files, where YAML frontmatter and legacy headings belong near the top of the file. For append-section targets, shared instruction files may already contain arbitrary user content before the AgentChrome section. After the initial bounded scan, the parser must search for `<!-- agentchrome:start -->`, restrict parsing to the matching AgentChrome section, and accept the `<!-- agentchrome-version: X.Y.Z -->` marker from that section even when the section starts after line 20.
+
+This keeps bare `agentchrome skill update` aligned with AC25/AC30: it can refresh every stale installed skill named by the staleness notice, including Windsurf and Copilot installs appended to existing shared files.
+
 This resolver is shared by `install`, `update`, `uninstall`, `list`, and `skill_check`, so one implementation point keeps lifecycle behavior and staleness checks aligned.
 
 ### Skill Check Amendment
@@ -400,6 +407,111 @@ Extend existing tests instead of creating a parallel test harness:
 | Codex detection could preempt an existing tool signal in mixed-agent environments | Low | Medium | Preserve the existing detection tier order and place Codex after existing Tier 1 signals. |
 | Empty `CODEX_HOME` creates a relative or invalid path | Low | Medium | Treat empty values as unset and fall back to `~/.codex`. |
 | Registry-count tests become brittle when adding the eighth tool | Medium | Low | Update expected count from 7 to 8 and add a per-tool assertion for Codex. |
+
+---
+
+## Design Amendment: Multi-Target Bare Install and Update (#268)
+
+Issue #268 changes only the omitted-`--tool` behavior for `agentchrome skill install` and `agentchrome skill update`. Explicit `--tool` invocations remain single-target and keep the existing JSON object/error contract.
+
+### Current Root Cause
+
+`src/skill.rs::execute_skill()` currently routes `Install`, `Uninstall`, and `Update` through `resolve_tool()`. When `--tool` is omitted, `resolve_tool()` calls `detect_tool()` and returns one `ToolInfo`. That is correct for historical single-target auto-detection, but it conflicts with the newer registry-wide staleness notice in `src/skill_check.rs`, which can name multiple stale installed tools and recommends `agentchrome skill update`.
+
+### Target Selection
+
+Add command-specific target selection instead of using `resolve_tool()` for every omitted-`--tool` operation:
+
+| Command shape | Selection behavior |
+|---------------|--------------------|
+| `skill install --tool <name>` | Existing `tool_for_name()` path; one target |
+| `skill update --tool <name>` | Existing `tool_for_name()` path; one target |
+| `skill uninstall --tool <name>` | Existing `tool_for_name()` path; one target |
+| `skill install` | Iterate `TOOLS` and include every target with a positive detection signal |
+| `skill update` | Iterate `TOOLS` and include every target with an installed AgentChrome skill whose embedded version is older than the binary |
+| `skill uninstall` | Keep current omitted-`--tool` first-detected behavior unless a separate issue changes uninstall semantics |
+
+Bare install needs a per-tool detection predicate rather than `detect_tool()`'s first-match result. The implementation can preserve the same tier concepts by introducing a helper such as `detected_tools()` that checks each registry entry's env/config signals and returns all matches in registry order. Parent-process detection can still contribute only the tools it can identify reliably (`claude-code`, `aider`).
+
+Bare update should not parse the human stderr notice. It should reuse a small registry-based stale scan primitive, either by exposing structured stale-scan data from `src/skill_check.rs` or by moving shared version-marker helpers behind a crate-visible function that both `skill_check` and `skill` call.
+
+### Batch Output Shape
+
+Single-target output remains unchanged:
+
+```json
+{"tool":"codex","path":"/tmp/codex/skills/agentchrome/SKILL.md","action":"updated","version":"1.52.0"}
+```
+
+Bare multi-target install/update returns a batch payload:
+
+```json
+{
+  "results": [
+    {
+      "tool": "claude-code",
+      "path": "/tmp/home/.claude/skills/agentchrome/SKILL.md",
+      "action": "updated",
+      "version": "1.52.0",
+      "status": "ok"
+    },
+    {
+      "tool": "codex",
+      "path": "/tmp/codex/skills/agentchrome/SKILL.md",
+      "action": "updated",
+      "version": "1.52.0",
+      "status": "ok"
+    }
+  ]
+}
+```
+
+For partial failures, include the successful targets and failed targets in the same `results` array, set failed entries to `status: "error"`, include `error`, and return `ExitCode::GeneralError` after all targets have been attempted. Successful writes are not rolled back.
+
+### Dispatcher Amendment
+
+`execute_skill()` should branch by command and tool flag:
+
+1. `Install(Some(tool))` -> existing `install_skill(tool_for_name(tool))`.
+2. `Install(None)` -> collect all detected targets, run `install_skill()` for each target, emit batch output.
+3. `Update(Some(tool))` -> existing `update_skill(tool_for_name(tool))`.
+4. `Update(None)` -> collect stale installed targets, run `update_skill()` for each target, emit batch output.
+5. `Uninstall(_)` -> existing behavior.
+6. `List` -> existing behavior.
+
+If a bare multi-target command finds no targets, return a JSON error that remains actionable. For install, list supported tools and detection methods. For update, say no stale installed AgentChrome skills were found.
+
+### Help and Documentation
+
+Update `src/cli/mod.rs` long help examples so users can see the split:
+
+- `agentchrome skill install` installs into all detected supported agents.
+- `agentchrome skill install --tool codex` installs into one explicit target.
+- `agentchrome skill update` refreshes all stale installed AgentChrome skills.
+- `agentchrome skill update --tool codex` refreshes one explicit target.
+
+No new user-facing command or flag is introduced.
+
+### Test Amendment
+
+Extend existing tests rather than creating a parallel harness:
+
+| File | Coverage |
+|------|----------|
+| `tests/features/skill-command-group.feature` | Bare install multi-detection, bare update multi-stale, explicit `--tool` compatibility, partial failure reporting |
+| `tests/features/skill-staleness.feature` | Multi-tool stale notice followed by bare update clears the notice |
+| `tests/bdd.rs` | Temp-home fixtures for multiple detected tools, stale installed files, unwritable/failing target setup, batch JSON assertions |
+| `src/skill.rs` unit tests | Target collection, batch result serialization, explicit-vs-bare dispatcher behavior |
+| `src/skill_check.rs` unit tests | Shared stale-scan behavior remains aligned with notice formatting |
+
+### Risk Amendment (#268)
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Existing scripts expect bare install/update to return one object | Medium | Medium | Preserve explicit `--tool` single-object output; document that omitted `--tool` is now aggregate behavior |
+| Update target selection diverges from staleness notice selection | Medium | High | Share structured stale-scan logic or helper functions between `skill_check` and `skill`; add BDD that the notice is cleared by bare update |
+| One failing target hides successful updates | Low | Medium | Always return per-target outcomes and attempt every target before returning non-zero |
+| Bare install accidentally writes to an unintended target from weak detection | Low | Medium | Limit detected-target collection to the same explicit env/config/parent signals already documented by the registry; keep explicit `--tool` for precise control |
 
 ---
 
@@ -465,6 +577,7 @@ Extend existing tests instead of creating a parallel test harness:
 | #172 | 2026-03-12 | Initial feature spec |
 | #214 | 2026-04-16 | Add Gemini CLI: `Gemini` variant in `ToolName`, `ToolInfo` entry with `Standalone` mode, Tier 1 + Tier 3 detection, README update |
 | #263 | 2026-04-24 | Add Codex target with CODEX_HOME-aware path resolution, registry support, staleness coverage, docs, and tests |
+| #268 | 2026-04-25 | Add multi-target bare install/update design while preserving explicit-target compatibility |
 
 ---
 

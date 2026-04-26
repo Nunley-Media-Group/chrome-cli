@@ -6,7 +6,7 @@ skill \- Agentic tool skill installation and management
 .SH SYNOPSIS
 \fBskill\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
-Install, update, uninstall, or list agentchrome skill files for agentic coding tools (Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor, Gemini CLI, Codex). The skill file is a minimal signpost that tells the AI agent what agentchrome is and how to discover its capabilities via the CLI\*(Aqs built\-in help system. Auto\-detects the active agentic environment, or use \-\-tool to target a specific tool.
+Install, update, uninstall, or list agentchrome skill files for agentic coding tools (Claude Code, Windsurf, Aider, Continue.dev, GitHub Copilot, Cursor, Gemini CLI, Codex). The skill file is a minimal signpost that tells the AI agent what agentchrome is and how to discover its capabilities via the CLI\*(Aqs built\-in help system. Without \-\-tool, install writes to every detected supported agent and update refreshes every stale installed AgentChrome skill. Use \-\-tool to target exactly one tool.
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -29,7 +29,7 @@ skill\-help(1)
 Print this message or the help of the given subcommand(s)
 .SH EXTRA
 EXAMPLES:
-  # Auto\-detect and install
+  # Install into every detected supported agent
   agentchrome skill install
 
   # Install for a specific tool
@@ -41,7 +41,10 @@ EXAMPLES:
   # List supported tools and installation status
   agentchrome skill list
 
-  # Update installed skill to current version
+  # Update every stale installed AgentChrome skill
+  agentchrome skill update
+
+  # Update one explicit target
   agentchrome skill update \-\-tool claude\-code
 
   # Remove an installed skill

@@ -1,7 +1,7 @@
 # Requirements: Add agentchrome skill Command Group
 
-**Issues**: #172, #214, #263
-**Date**: 2026-04-24
+**Issues**: #172, #214, #263, #268
+**Date**: 2026-04-25
 **Status**: Draft
 **Author**: Claude (AI-assisted)
 
@@ -221,6 +221,56 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 **And** the docs show `agentchrome skill install --tool codex`
 **And** focused BDD or unit tests cover install, list, detection, update, uninstall, and staleness behavior for Codex
 
+### AC25: Bare update refreshes every stale installed skill
+
+**Given** AgentChrome skills are installed for multiple supported tools
+**And** more than one installed skill has an embedded version older than the running AgentChrome binary
+**When** the user runs `agentchrome skill update` without `--tool`
+**Then** AgentChrome scans all supported skill locations for outdated AgentChrome skills
+**And** append-section installs are discovered by scanning the AgentChrome section markers even when shared-file content places that section after the first 20 lines
+**And** every stale installed skill whose path can be resolved and written is updated to the current version
+**And** stdout returns structured JSON naming every target touched, with each target's tool name, path, action, and version
+**And** a subsequent AgentChrome invocation no longer emits stale notices for those updated targets
+
+### AC26: Bare update does not stop at the first detected tool
+
+**Given** one supported agent has a higher-priority detection signal
+**And** another supported agent also has an installed stale AgentChrome skill
+**When** the user runs `agentchrome skill update` without `--tool`
+**Then** the lower-priority stale install is updated too
+**And** the result is not limited to the tool that `detect_tool()` would have returned first
+
+### AC27: Bare install installs into all detected agents
+
+**Given** signals for multiple supported agentic tools are present
+**When** the user runs `agentchrome skill install` without `--tool`
+**Then** AgentChrome installs the current skill into every detected supported agent target
+**And** stdout returns structured JSON naming every installed target and path
+**And** no detected target is skipped merely because another target appeared earlier in detection priority
+
+### AC28: Explicit targeting remains single-target
+
+**Given** the user passes `--tool <name>` to `skill install`, `skill update`, or `skill uninstall`
+**When** the command runs
+**Then** AgentChrome operates only on the specified target
+**And** the existing explicit-target JSON/error contract remains compatible
+
+### AC29: Multi-target failures are reported per target
+
+**Given** a bare multi-target install or update finds more than one relevant target
+**And** one target cannot be written or cannot be resolved
+**When** the command runs
+**Then** AgentChrome reports success or failure for each target in structured output
+**And** successful targets remain updated or installed
+**And** the process exits non-zero if any target failed
+
+### AC30: Staleness notice guidance is actionable
+
+**Given** AgentChrome emits a stale notice that names multiple tools and recommends `agentchrome skill update`
+**When** the user runs that exact command
+**Then** the command updates all stale tools named in the notice where the target paths are writable
+**And** the user does not need to rerun `agentchrome skill update --tool <name>` for each stale tool
+
 ---
 
 ## Functional Requirements
@@ -257,6 +307,13 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | FR28 | Include Codex in the staleness-check registry behavior. | Must | Issue #263 |
 | FR29 | Update README, Codex guide, and examples to list Codex as a supported tool and show the install/update workflow. | Must | Issue #263 |
 | FR30 | Add focused BDD and/or unit coverage for Codex install, listing, auto-detection, lifecycle commands, and stale-skill notice behavior. | Must | Issue #263 |
+| FR31 | Bare `skill install` discovers all currently detected supported agent targets instead of selecting only the first detected target. | Must | Issue #268; applies only when `--tool` is omitted |
+| FR32 | Bare `skill update` scans all supported AgentChrome skill locations for outdated installed skills instead of selecting only the first detected target. | Must | Issue #268; align with existing staleness scan behavior |
+| FR32a | Stale-skill scanning discovers version markers inside append-section installs wherever the AgentChrome section appears in a shared instructions file. | Must | Issue #268 review amendment; prevents stale Windsurf/Copilot sections from being skipped after long preambles |
+| FR33 | Explicit `--tool` commands keep existing single-target behavior for install, update, and uninstall. | Must | Issue #268; preserve script compatibility |
+| FR34 | Multi-target success output is structured JSON with per-target tool, path, action, and version details. | Must | Issue #268; preserve machine readability for AI agents |
+| FR35 | Multi-target partial failure output identifies which targets succeeded and failed. | Must | Issue #268; preserve typed exit-code behavior and actionable errors |
+| FR36 | Tests cover Codex plus at least one other installed or detected tool in the same command run. | Must | Issue #268; prevents regression to first-detected behavior |
 
 ---
 
@@ -296,6 +353,18 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | `action` | String | One of: `installed`, `uninstalled`, `updated` |
 | `version` | String | agentchrome version (for install/update) |
 
+### Output Data Amendment (#268): Bare multi-target install/update
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `results` | Array | Per-target outcomes for a bare multi-target `install` or `update` invocation |
+| `results[].tool` | String | Supported tool identifier |
+| `results[].path` | String | File path where skill was installed or updated |
+| `results[].action` | String | `installed` or `updated` for successful targets |
+| `results[].version` | String | AgentChrome version written for successful install/update targets |
+| `results[].status` | String | `ok` or `error` |
+| `results[].error` | String or null | Failure reason for targets that could not be resolved or written |
+
 ### Output Data (list)
 
 | Field | Type | Description |
@@ -320,6 +389,16 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | Cursor | `CURSOR_*` env or `~/.cursor/` exists | `.cursor/rules/agentchrome.mdc` (project-level only) |
 | Gemini CLI | `GEMINI_*` env var or `~/.gemini/` directory exists | `~/.gemini/instructions/agentchrome.md` |
 | Codex | `CODEX_HOME` env var or `~/.codex/` directory exists | `$CODEX_HOME/skills/agentchrome/SKILL.md`, or `~/.codex/skills/agentchrome/SKILL.md` when `CODEX_HOME` is unset |
+
+### Multi-Target Selection Amendment (#268)
+
+| Command shape | Target selection |
+|---------------|------------------|
+| `skill install --tool <name>` | The named single target only |
+| `skill update --tool <name>` | The named single target only |
+| `skill uninstall --tool <name>` | The named single target only |
+| `skill install` | Every supported target with a positive detection signal |
+| `skill update` | Every supported target with an installed AgentChrome skill older than the running binary |
 
 ---
 
@@ -369,6 +448,14 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | Codex lifecycle round-trip | install → list shows installed → update rewrites → uninstall removes → list shows not installed | Focused Codex BDD or unit coverage |
 | Staleness coverage | Codex stale installs are included in single-tool and aggregated stale-tool notices | Staleness tests with Codex-only and multi-tool stale fixtures |
 
+### Success Metrics Amendment (#268)
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Bare update coverage | Multi-tool stale notice cleared by one `agentchrome skill update` invocation | BDD scenario with Codex plus at least one other stale installed skill |
+| Bare install coverage | Multiple detected tools installed by one `agentchrome skill install` invocation | BDD scenario with multiple temp-home detection signals |
+| Explicit-target compatibility | Explicit install/update/uninstall still return the existing single-target JSON shape | Unit or BDD assertion for `--tool codex` plus another explicit target |
+
 ---
 
 ## Open Questions
@@ -384,6 +471,7 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | #172 | 2026-03-12 | Initial feature spec |
 | #214 | 2026-04-16 | Add Gemini CLI as 7th supported tool (AC13–AC18, FR16–FR22) |
 | #263 | 2026-04-24 | Add Codex as a supported skill installer target |
+| #268 | 2026-04-25 | Make bare skill install/update cover all detected or stale agent targets |
 
 ---
 

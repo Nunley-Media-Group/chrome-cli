@@ -611,7 +611,7 @@ async fn reconnection_after_disconnection() {
     assert!(result.is_ok(), "command after reconnect failed: {result:?}");
 }
 
-/// AC13b: Reconnection failure after retries exhausted
+/// `AC13b`: Reconnection failure after retries exhausted
 #[tokio::test]
 async fn reconnection_failure() {
     // Start a server, connect, then stop it

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.52.0] - 2026-04-26
+
+### Added
+
+- Make bare `agentchrome skill install` target every detected supported agent and bare `agentchrome skill update` refresh every stale installed AgentChrome skill, with structured per-target batch results while preserving explicit `--tool` single-target behavior. (#268)
+
 ## [1.51.5] - 2026-04-25
 
 ### Changed

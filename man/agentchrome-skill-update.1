@@ -6,7 +6,7 @@ update \- Update an installed skill to the current version
 .SH SYNOPSIS
 \fBupdate\fR [\fB\-\-tool\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Replace an installed agentchrome skill file with the current version\*(Aqs content. Errors if no skill is currently installed for the tool.
+Replace an installed agentchrome skill file with the current version\*(Aqs content. Without \-\-tool, refreshes every installed AgentChrome skill whose embedded version is older than the running binary. With \-\-tool, updates only that explicit target and errors if no skill is currently installed for that tool.
 .SH OPTIONS
 .TP
 \fB\-\-tool\fR \fI<TOOL>\fR
@@ -38,7 +38,7 @@ codex
 Print help (see a summary with \*(Aq\-h\*(Aq)
 .SH EXTRA
 EXAMPLES:
-  # Update for auto\-detected tool
+  # Update every stale installed AgentChrome skill
   agentchrome skill update
 
   # Update for a specific tool
