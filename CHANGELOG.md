@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.53.0] - 2026-04-26
+
+### Fixed
+
+- Fix `emulate status` so CPU throttle and geolocation set by `emulate set` persist across invocations and are reported correctly, with focused regression coverage for the persisted-state readback path. (#253)
+
 ## [1.52.0] - 2026-04-26
 
 ### Added

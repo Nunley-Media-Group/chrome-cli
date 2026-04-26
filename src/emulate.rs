@@ -1370,9 +1370,13 @@ mod tests {
 
     fn temp_state_path(name: &str) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        cleanup_temp_dir(&dir);
         let path = dir.join("emulate-state.json");
         (dir, path)
+    }
+
+    fn cleanup_temp_dir(dir: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn cpu_geolocation_set_args() -> EmulateSetArgs {
@@ -1450,11 +1454,11 @@ mod tests {
         assert_eq!(bvp.width, 756);
         assert_eq!(bvp.height, 417);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        cleanup_temp_dir(&dir);
     }
 
     #[test]
-    fn emulate_set_state_merge_persists_cpu_geolocation_for_status_readback() {
+    fn emulate_state_set_merge_persists_cpu_geolocation_for_status_readback() {
         let (dir, path) = temp_state_path("agentchrome-test-emstate-set-status");
 
         let mut persisted = EmulateState {
@@ -1501,11 +1505,11 @@ mod tests {
         assert_eq!(json["deviceScaleFactor"], 2.0);
         assert_eq!(json["mobile"], true);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        cleanup_temp_dir(&dir);
     }
 
     #[test]
-    fn emulate_reset_state_absence_omits_cpu_and_geolocation_from_status() {
+    fn emulate_state_reset_absence_omits_cpu_and_geolocation_from_status() {
         let (dir, path) = temp_state_path("agentchrome-test-emstate-reset-status");
         let state = EmulateState {
             mobile: false,
@@ -1547,7 +1551,7 @@ mod tests {
         assert_eq!(json["viewport"]["height"], 417);
         assert_eq!(json["deviceScaleFactor"], 1.0);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        cleanup_temp_dir(&dir);
     }
 
     #[test]
@@ -1573,7 +1577,7 @@ mod tests {
         delete_emulate_state_from(&path).unwrap();
         assert!(!path.exists());
 
-        let _ = std::fs::remove_dir_all(&dir);
+        cleanup_temp_dir(&dir);
     }
 
     #[test]
