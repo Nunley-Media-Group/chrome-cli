@@ -50,6 +50,14 @@ struct SkillBatchOutput {
 }
 
 #[derive(Serialize)]
+struct SkillUpdateNoopOutput {
+    results: Vec<SkillBatchResult>,
+    status: String,
+    action: String,
+    message: String,
+}
+
+#[derive(Serialize)]
 struct SkillBatchResult {
     tool: String,
     path: String,
@@ -430,17 +438,6 @@ fn no_supported_agentic_tool_detected() -> AppError {
     }
 }
 
-fn no_stale_installed_skills_found() -> AppError {
-    let custom = serde_json::json!({
-        "error": "no stale installed AgentChrome skills found",
-    });
-    AppError {
-        message: "no stale installed AgentChrome skills found".into(),
-        code: ExitCode::GeneralError,
-        custom_json: Some(custom.to_string()),
-    }
-}
-
 // =============================================================================
 // Install logic
 // =============================================================================
@@ -584,16 +581,37 @@ fn install_detected_skills(global: &GlobalOpts) -> Result<(), AppError> {
 }
 
 fn update_stale_skills(global: &GlobalOpts) -> Result<(), AppError> {
-    let tools: Vec<&'static ToolInfo> = crate::skill_check::stale_tools()
-        .into_iter()
-        .map(|stale| stale.tool)
+    let inventory = crate::skill_check::installed_skill_inventory();
+    let tools: Vec<&'static ToolInfo> = inventory
+        .iter()
+        .filter_map(|entry| match entry.status {
+            crate::skill_check::InstalledSkillStatus::Stale { .. } => Some(entry.tool),
+            crate::skill_check::InstalledSkillStatus::Missing
+            | crate::skill_check::InstalledSkillStatus::Current => None,
+        })
         .collect();
+
     if tools.is_empty() {
-        return Err(no_stale_installed_skills_found());
+        let message = if inventory.iter().any(|entry| entry.status.is_installed()) {
+            "all installed AgentChrome skills are up to date"
+        } else {
+            "no AgentChrome skills are installed"
+        };
+        return print_update_noop_output(global, message);
     }
 
     let batch = run_skill_batch(tools, "updated", update_skill);
     print_batch_output(global, &batch)
+}
+
+fn print_update_noop_output(global: &GlobalOpts, message: &str) -> Result<(), AppError> {
+    let output = SkillUpdateNoopOutput {
+        results: Vec::new(),
+        status: "ok".into(),
+        action: "noop".into(),
+        message: message.into(),
+    };
+    print_output(&output, &global.output)
 }
 
 fn run_skill_batch(

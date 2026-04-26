@@ -4760,6 +4760,7 @@ struct SkillWorld {
     stderr: String,
     exit_code: Option<i32>,
     temp_home: Option<tempfile::TempDir>,
+    temp_cwd: Option<tempfile::TempDir>,
     readme_content: String,
     /// Extra env vars to set for the next command run.
     extra_env: Vec<(String, String)>,
@@ -4771,6 +4772,13 @@ impl SkillWorld {
             self.temp_home = Some(tempfile::tempdir().expect("failed to create temp dir"));
         }
         self.temp_home.as_ref().unwrap().path().to_path_buf()
+    }
+
+    fn ensure_temp_cwd(&mut self) -> PathBuf {
+        if self.temp_cwd.is_none() {
+            self.temp_cwd = Some(tempfile::tempdir().expect("failed to create temp cwd"));
+        }
+        self.temp_cwd.as_ref().unwrap().path().to_path_buf()
     }
 
     fn run_skill_command(&mut self, args: &str) {
@@ -4799,7 +4807,12 @@ impl SkillWorld {
         cmd.args(&cmd_args)
             .env_clear()
             .env("HOME", temp_home.to_str().unwrap())
+            .env("USERPROFILE", temp_home.to_str().unwrap())
             .env("PATH", std::env::var("PATH").unwrap_or_default());
+
+        if let Some(cwd) = &self.temp_cwd {
+            cmd.current_dir(cwd.path());
+        }
 
         for (key, val) in env_vars {
             cmd.env(key, val);
@@ -4908,6 +4921,16 @@ fn skill_no_detection(world: &mut SkillWorld) {
     world.ensure_temp_home();
 }
 
+#[given("no active agentic tool signal is present")]
+fn skill_no_active_tool_signal(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.extra_env.clear();
+    world.ensure_temp_home();
+    world.ensure_temp_cwd();
+}
+
 #[given(expr = "a skill was installed via {string}")]
 fn skill_installed_via_command(world: &mut SkillWorld, command: String) {
     let path = binary_path();
@@ -5004,6 +5027,23 @@ fn skill_two_stale_installs(world: &mut SkillWorld, first: String, second: Strin
     world.binary_path = Some(path);
     plant_skill_in_skill_world(world, &first, "0.1.0");
     plant_skill_in_skill_world(world, &second, "0.1.0");
+}
+
+#[given(expr = "a skill installed at the current binary version for {string} in a temp home")]
+fn skill_current_install(world: &mut SkillWorld, tool: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    plant_skill_in_skill_world(world, &tool, env!("CARGO_PKG_VERSION"));
+}
+
+#[given("no AgentChrome skill is installed in a temp home")]
+fn skill_no_agentchrome_skill_installed(world: &mut SkillWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.ensure_temp_home();
+    world.ensure_temp_cwd();
 }
 
 #[given("a higher-priority Claude Code detection signal is present")]
@@ -5838,6 +5878,32 @@ fn skill_stdout_no_batch_results(world: &mut SkillWorld) {
     );
 }
 
+#[then(expr = "stdout contains an informational skill update message {string}")]
+fn skill_stdout_informational_update_message(world: &mut SkillWorld, expected: String) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    assert_eq!(json["status"].as_str(), Some("ok"));
+    assert_eq!(json["action"].as_str(), Some("noop"));
+    assert_eq!(json["message"].as_str(), Some(expected.as_str()));
+    assert_eq!(
+        json["results"].as_array().map(Vec::len),
+        Some(0),
+        "no-op update output should include an empty results array: {json}"
+    );
+}
+
+#[then("stderr does not contain a JSON error object")]
+fn skill_stderr_no_json_error(world: &mut SkillWorld) {
+    for line in world.stderr.lines().filter(|line| !line.trim().is_empty()) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+            assert!(
+                json.get("error").is_none(),
+                "stderr contains JSON error object: {json}"
+            );
+        }
+    }
+}
+
 #[then("no Claude Code skill file is created")]
 fn skill_no_claude_skill_created(world: &mut SkillWorld) {
     let path = skill_world_path_for_tool(world, "claude-code");
@@ -5868,6 +5934,28 @@ fn skill_successful_claude_remains_installed(world: &mut SkillWorld) {
         path.exists(),
         "Claude Code skill file should remain installed at {}",
         path.display()
+    );
+}
+
+#[then("the Claude Code skill file contains the current AgentChrome version")]
+fn skill_claude_file_current_version(world: &mut SkillWorld) {
+    let path = skill_world_path_for_tool(world, "claude-code");
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    assert!(
+        content.contains(env!("CARGO_PKG_VERSION")),
+        "Claude Code skill does not contain current version\ncontent: {content}"
+    );
+}
+
+#[then("the Codex skill file remains stale")]
+fn skill_codex_file_remains_stale(world: &mut SkillWorld) {
+    let path = skill_world_path_for_tool(world, "codex");
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    assert!(
+        content.contains("version: \"0.1.0\""),
+        "Codex skill should remain at the planted stale version\ncontent: {content}"
     );
 }
 
@@ -6741,6 +6829,9 @@ async fn main() {
 
     // Skill command group — uses temp dirs, no Chrome needed.
     SkillWorld::run("tests/features/skill-command-group.feature").await;
+
+    // Issue #254 — bare skill update no-op and explicit-target regression coverage.
+    SkillWorld::run("tests/features/254-fix-skill-update-auto-detect.feature").await;
 
     // Skill staleness check — all scenarios plant versioned skill files in a temp
     // home and verify the stderr notice (no Chrome needed).
