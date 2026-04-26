@@ -6702,6 +6702,16 @@ async fn main() {
         )
         .await;
 
+    // Issue #253 — persistence scenarios require a running Chrome instance and
+    // cross-invocation state. Focused Rust tests in src/emulate.rs provide the
+    // CI regression gate for CPU/geolocation set-to-status readback.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/253-fix-emulate-status-cpu-throttle-rate-not-reflected-after-emulate-set-cpu.feature",
+            |_feature, _rule, _scenario| false,
+        )
+        .await;
+
     // Configuration file support — all scenarios are CLI-testable (no Chrome needed).
     ConfigWorld::run("tests/features/config.feature").await;
 

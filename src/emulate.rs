@@ -222,6 +222,82 @@ fn delete_emulate_state() -> Result<(), AppError> {
     delete_emulate_state_from(&path)
 }
 
+#[derive(Default)]
+struct DetectedEmulateStatus {
+    viewport: Option<ViewportOutput>,
+    user_agent: Option<String>,
+    color_scheme: Option<String>,
+    device_scale_factor: Option<f64>,
+}
+
+fn merge_set_status_into_emulate_state(
+    persisted: &mut EmulateState,
+    args: &EmulateSetArgs,
+    status: &EmulateStatusOutput,
+) {
+    if args.mobile || args.viewport.is_some() {
+        persisted.mobile = args.mobile;
+    }
+    if args.network.is_some() {
+        persisted.network.clone_from(&status.network);
+    }
+    if args.cpu.is_some() {
+        persisted.cpu = status.cpu;
+    }
+    if args.user_agent.is_some() {
+        persisted.user_agent.clone_from(&status.user_agent);
+    } else if args.no_user_agent {
+        persisted.user_agent = None;
+    }
+    if args.device_scale.is_some() {
+        persisted.device_scale_factor = status.device_scale_factor;
+    }
+    if args.geolocation.is_some() {
+        persisted.geolocation = status.geolocation.as_ref().map(|g| GeolocationState {
+            latitude: g.latitude,
+            longitude: g.longitude,
+        });
+    } else if args.no_geolocation {
+        persisted.geolocation = None;
+    }
+    if args.color_scheme.is_some() {
+        persisted.color_scheme.clone_from(&status.color_scheme);
+    }
+    if args.viewport.is_some() {
+        persisted.viewport = status.viewport.as_ref().map(|v| ViewportState {
+            width: v.width,
+            height: v.height,
+        });
+    }
+}
+
+fn status_output_from_emulate_state(
+    persisted: EmulateState,
+    detected: DetectedEmulateStatus,
+) -> EmulateStatusOutput {
+    EmulateStatusOutput {
+        network: persisted.network,
+        cpu: persisted.cpu,
+        geolocation: persisted.geolocation.map(|g| GeolocationOutput {
+            latitude: g.latitude,
+            longitude: g.longitude,
+        }),
+        user_agent: persisted.user_agent.or(detected.user_agent),
+        color_scheme: persisted.color_scheme.or(detected.color_scheme),
+        viewport: persisted
+            .viewport
+            .map(|v| ViewportOutput {
+                width: v.width,
+                height: v.height,
+            })
+            .or(detected.viewport),
+        device_scale_factor: persisted
+            .device_scale_factor
+            .or(detected.device_scale_factor),
+        mobile: persisted.mobile,
+    }
+}
+
 // =============================================================================
 // Re-apply persisted emulation state to a new session
 // =============================================================================
@@ -761,40 +837,7 @@ async fn execute_set(global: &GlobalOpts, args: &EmulateSetArgs) -> Result<(), A
     }
 
     // --- Persist CDP-only state ---
-    if args.mobile || args.viewport.is_some() {
-        persisted.mobile = args.mobile;
-    }
-    if args.network.is_some() {
-        persisted.network.clone_from(&status.network);
-    }
-    if args.cpu.is_some() {
-        persisted.cpu = status.cpu;
-    }
-    if args.user_agent.is_some() {
-        persisted.user_agent.clone_from(&status.user_agent);
-    } else if args.no_user_agent {
-        persisted.user_agent = None;
-    }
-    if args.device_scale.is_some() {
-        persisted.device_scale_factor = status.device_scale_factor;
-    }
-    if args.geolocation.is_some() {
-        persisted.geolocation = status.geolocation.as_ref().map(|g| GeolocationState {
-            latitude: g.latitude,
-            longitude: g.longitude,
-        });
-    } else if args.no_geolocation {
-        persisted.geolocation = None;
-    }
-    if args.color_scheme.is_some() {
-        persisted.color_scheme.clone_from(&status.color_scheme);
-    }
-    if args.viewport.is_some() {
-        persisted.viewport = status.viewport.as_ref().map(|v| ViewportState {
-            width: v.width,
-            height: v.height,
-        });
-    }
+    merge_set_status_into_emulate_state(&mut persisted, args, &status);
     write_emulate_state(&persisted)?;
 
     // Output
@@ -967,25 +1010,15 @@ async fn execute_status(global: &GlobalOpts) -> Result<(), AppError> {
     // Read persisted state — persisted overrides take precedence over JS-queried values
     let persisted = read_emulate_state()?.unwrap_or_default();
 
-    let status = EmulateStatusOutput {
-        network: persisted.network,
-        cpu: persisted.cpu,
-        geolocation: persisted.geolocation.map(|g| GeolocationOutput {
-            latitude: g.latitude,
-            longitude: g.longitude,
-        }),
-        user_agent: persisted.user_agent.or(user_agent),
-        color_scheme: persisted.color_scheme.or(color_scheme),
-        viewport: persisted
-            .viewport
-            .map(|v| ViewportOutput {
-                width: v.width,
-                height: v.height,
-            })
-            .or(viewport),
-        device_scale_factor: persisted.device_scale_factor.or(device_scale_factor),
-        mobile: persisted.mobile,
-    };
+    let status = status_output_from_emulate_state(
+        persisted,
+        DetectedEmulateStatus {
+            viewport,
+            user_agent,
+            color_scheme,
+            device_scale_factor,
+        },
+    );
 
     if global.output.plain {
         print!("{status}");
@@ -1335,11 +1368,47 @@ mod tests {
     // EmulateState persistence tests
     // =========================================================================
 
-    #[test]
-    fn emulate_state_round_trip() {
-        let dir = std::env::temp_dir().join("agentchrome-test-emstate-rt");
+    fn temp_state_path(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("emulate-state.json");
+        (dir, path)
+    }
+
+    fn cpu_geolocation_set_args() -> EmulateSetArgs {
+        EmulateSetArgs {
+            network: None,
+            cpu: Some(4),
+            geolocation: Some("37.7749,-122.4194".to_string()),
+            no_geolocation: false,
+            user_agent: None,
+            no_user_agent: false,
+            color_scheme: None,
+            viewport: None,
+            device_scale: None,
+            mobile: false,
+        }
+    }
+
+    fn cpu_geolocation_status() -> EmulateStatusOutput {
+        EmulateStatusOutput {
+            network: None,
+            cpu: Some(4),
+            geolocation: Some(GeolocationOutput {
+                latitude: 37.7749,
+                longitude: -122.4194,
+            }),
+            user_agent: None,
+            color_scheme: None,
+            viewport: None,
+            device_scale_factor: None,
+            mobile: false,
+        }
+    }
+
+    #[test]
+    fn emulate_state_round_trip() {
+        let (dir, path) = temp_state_path("agentchrome-test-emstate-rt");
 
         let state = EmulateState {
             mobile: true,
@@ -1385,6 +1454,103 @@ mod tests {
     }
 
     #[test]
+    fn emulate_set_state_merge_persists_cpu_geolocation_for_status_readback() {
+        let (dir, path) = temp_state_path("agentchrome-test-emstate-set-status");
+
+        let mut persisted = EmulateState {
+            mobile: true,
+            network: Some("3g".to_string()),
+            cpu: None,
+            user_agent: Some("TestBot/1.0".to_string()),
+            device_scale_factor: Some(2.0),
+            geolocation: None,
+            color_scheme: Some("dark".to_string()),
+            viewport: Some(ViewportState {
+                width: 375,
+                height: 812,
+            }),
+            baseline_viewport: Some(ViewportState {
+                width: 756,
+                height: 417,
+            }),
+        };
+
+        merge_set_status_into_emulate_state(
+            &mut persisted,
+            &cpu_geolocation_set_args(),
+            &cpu_geolocation_status(),
+        );
+        write_emulate_state_to(&path, &persisted).unwrap();
+
+        let read = read_emulate_state_from(&path).unwrap().unwrap();
+        assert_eq!(read.cpu, Some(4));
+        let geo = read.geolocation.as_ref().unwrap();
+        assert!((geo.latitude - 37.7749).abs() < f64::EPSILON);
+        assert!((geo.longitude - (-122.4194)).abs() < f64::EPSILON);
+
+        let output = status_output_from_emulate_state(read, DetectedEmulateStatus::default());
+        let json: serde_json::Value = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["cpu"], 4);
+        assert_eq!(json["geolocation"]["latitude"], 37.7749);
+        assert_eq!(json["geolocation"]["longitude"], -122.4194);
+        assert_eq!(json["network"], "3g");
+        assert_eq!(json["userAgent"], "TestBot/1.0");
+        assert_eq!(json["colorScheme"], "dark");
+        assert_eq!(json["viewport"]["width"], 375);
+        assert_eq!(json["viewport"]["height"], 812);
+        assert_eq!(json["deviceScaleFactor"], 2.0);
+        assert_eq!(json["mobile"], true);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn emulate_reset_state_absence_omits_cpu_and_geolocation_from_status() {
+        let (dir, path) = temp_state_path("agentchrome-test-emstate-reset-status");
+        let state = EmulateState {
+            mobile: false,
+            network: None,
+            cpu: Some(4),
+            user_agent: None,
+            device_scale_factor: None,
+            geolocation: Some(GeolocationState {
+                latitude: 37.7749,
+                longitude: -122.4194,
+            }),
+            color_scheme: None,
+            viewport: None,
+            baseline_viewport: None,
+        };
+
+        write_emulate_state_to(&path, &state).unwrap();
+        delete_emulate_state_from(&path).unwrap();
+
+        let persisted = read_emulate_state_from(&path).unwrap().unwrap_or_default();
+        let output = status_output_from_emulate_state(
+            persisted,
+            DetectedEmulateStatus {
+                viewport: Some(ViewportOutput {
+                    width: 756,
+                    height: 417,
+                }),
+                user_agent: Some("Detected UA".to_string()),
+                color_scheme: Some("light".to_string()),
+                device_scale_factor: Some(1.0),
+            },
+        );
+        let json: serde_json::Value = serde_json::to_value(&output).unwrap();
+        assert!(json.get("cpu").is_none());
+        assert!(json.get("geolocation").is_none());
+        assert_eq!(json["userAgent"], "Detected UA");
+        assert_eq!(json["colorScheme"], "light");
+        assert_eq!(json["viewport"]["width"], 756);
+        assert_eq!(json["viewport"]["height"], 417);
+        assert_eq!(json["deviceScaleFactor"], 1.0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn emulate_state_read_when_missing_returns_none() {
         let path = Path::new("/tmp/agentchrome-test-emstate-missing/emulate-state.json");
         let result = read_emulate_state_from(path).unwrap();
@@ -1399,10 +1565,8 @@ mod tests {
 
     #[test]
     fn emulate_state_delete_existing_removes_file() {
-        let dir = std::env::temp_dir().join("agentchrome-test-emstate-del");
-        let _ = std::fs::remove_dir_all(&dir);
+        let (dir, path) = temp_state_path("agentchrome-test-emstate-del");
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("emulate-state.json");
         std::fs::write(&path, "{}").unwrap();
         assert!(path.exists());
 

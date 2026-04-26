@@ -1,0 +1,52 @@
+# File: tests/features/253-fix-emulate-status-cpu-throttle-rate-not-reflected-after-emulate-set-cpu.feature
+#
+# Generated from: specs/bug-fix-emulate-status-cpu-throttle-rate-not-reflected-after-emulate-set-cpu/requirements.md
+# Issue: #253
+# Type: Defect regression
+
+@regression
+Feature: emulate status reports CPU and geolocation persisted by emulate set
+  The emulate status command omitted CPU throttling and geolocation after
+  emulate set reported those values as applied. This was fixed by ensuring the
+  set path writes CPU and geolocation into persisted emulation state and the
+  status path reads the same state.
+
+  # --- Bug Is Fixed: CPU ---
+
+  @regression
+  Scenario: CPU throttle is shown after set
+    Given Chrome is running with CDP enabled
+    And no prior emulation state is active
+    When I run "agentchrome emulate set --cpu 4 --pretty"
+    And I run "agentchrome emulate status --pretty"
+    Then the JSON output field "cpu" should be 4
+
+  # --- Bug Is Fixed: Geolocation ---
+
+  @regression
+  Scenario: Geolocation is shown after set
+    Given Chrome is running with CDP enabled
+    And no prior emulation state is active
+    When I run "agentchrome emulate set --geolocation 37.7749,-122.4194 --pretty"
+    And I run "agentchrome emulate status --pretty"
+    Then the JSON output field "geolocation.latitude" should be 37.7749
+    And the JSON output field "geolocation.longitude" should be -122.4194
+
+  # --- Reset Still Works ---
+
+  @regression
+  Scenario: Reset clears CPU and geolocation from status
+    Given Chrome is running with CDP enabled
+    And CPU and geolocation overrides have been set
+    When I run "agentchrome emulate reset --pretty"
+    And I run "agentchrome emulate status --pretty"
+    Then the JSON output should not contain field "cpu"
+    And the JSON output should not contain field "geolocation"
+
+  # --- Executable Coverage ---
+
+  @regression
+  Scenario: State persistence path has executable regression coverage
+    Given the focused emulate persistence tests are available
+    When I run "cargo test emulate"
+    Then the tests prove CPU and geolocation values written by the set path are read by the status path
