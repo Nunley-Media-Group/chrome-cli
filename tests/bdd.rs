@@ -7570,6 +7570,17 @@ async fn main() {
         )
         .await;
 
+    // Same-document URL navigation fragment wait fix (issue #277) — all scenarios require a
+    // running Chrome instance with the deterministic fixture loaded. The feature file documents
+    // the regression scenarios; the fix is validated by unit tests in navigate.rs and manual
+    // smoke during verification.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/277-fix-same-document-url-navigation-waits-for-fragment-only-navigations.feature",
+            |_feature, _rule, _scenario| false, // Require real Chrome + fixture
+        )
+        .await;
+
     // Wait-until flag for interact click commands (issue #148) — only CLI argument validation
     // scenarios can be tested without Chrome. Scenarios requiring actual click+wait behavior
     // need a running Chrome instance.

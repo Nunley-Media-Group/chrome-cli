@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.57.0] - 2026-04-27
+
+### Fixed
+
+- Fix `agentchrome navigate <url>` so fragment-only same-document navigations now complete successfully for `--wait-until load` and `--wait-until domcontentloaded`, while preserving existing cross-document waits and URL-navigation output contracts. (#277)
+
 ## [1.56.1] - 2026-04-27
 
 ### Fixed

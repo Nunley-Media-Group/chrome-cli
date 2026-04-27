@@ -83,34 +83,9 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    // Enable required domains
-    managed.ensure_domain("Page").await?;
-    managed.ensure_domain("Network").await?;
-
-    // Subscribe to events BEFORE navigating
-    let response_rx = managed.subscribe("Network.responseReceived").await?;
-
-    // Subscribe for wait strategy
-    let wait_rx = match args.wait_until {
-        WaitUntil::Load => Some(managed.subscribe("Page.loadEventFired").await?),
-        WaitUntil::Domcontentloaded => Some(managed.subscribe("Page.domContentEventFired").await?),
-        WaitUntil::Networkidle | WaitUntil::None => None,
-    };
-
-    // For network idle, we need request tracking subscriptions
-    let network_subs = if args.wait_until == WaitUntil::Networkidle {
-        let req_rx = managed.subscribe("Network.requestWillBeSent").await?;
-        let fin_rx = managed.subscribe("Network.loadingFinished").await?;
-        let fail_rx = managed.subscribe("Network.loadingFailed").await?;
-        Some((req_rx, fin_rx, fail_rx))
-    } else {
-        None
-    };
-
-    // Build navigate params
-    let params = serde_json::json!({ "url": url });
     if args.ignore_cache {
         // Page.navigate doesn't have ignoreCache; we use Network.setCacheDisabled instead
+        managed.ensure_domain("Network").await?;
         managed
             .send_command(
                 "Network.setCacheDisabled",
@@ -119,32 +94,11 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
             .await?;
     }
 
-    // Navigate
-    let result = managed.send_command("Page.navigate", Some(params)).await?;
-
-    // Check for navigation errors (e.g., DNS failure)
-    if let Some(error_text) = result["errorText"].as_str()
-        && !error_text.is_empty()
-    {
-        return Err(AppError::navigation_failed(error_text));
-    }
-
-    let frame_id = result["frameId"].as_str().unwrap_or_default().to_string();
-
-    // Wait according to strategy
-    match args.wait_until {
-        WaitUntil::Load | WaitUntil::Domcontentloaded => {
-            if let Some(rx) = wait_rx {
-                wait_for_event(rx, timeout_ms, &format!("{:?}", args.wait_until)).await?;
-            }
-        }
-        WaitUntil::Networkidle => {
-            if let Some((req_rx, fin_rx, fail_rx)) = network_subs {
-                wait_for_network_idle(req_rx, fin_rx, fail_rx, timeout_ms).await?;
-            }
-        }
-        WaitUntil::None => {}
-    }
+    let NavigateResult {
+        url: mut page_url,
+        title: mut page_title,
+        status,
+    } = navigate_and_wait(&mut managed, url, args.wait_until, timeout_ms).await?;
 
     // Optional: wait for a CSS selector to appear after the primary wait strategy
     if let Some(ref selector) = args.wait_for_selector {
@@ -177,13 +131,10 @@ async fn execute_url(global: &GlobalOpts, args: &NavigateUrlArgs) -> Result<(), 
                 }
             }
         }
+
+        // Selector polling can allow late SPA updates, so refresh the final page info.
+        (page_url, page_title) = get_page_info(&managed).await?;
     }
-
-    // Extract HTTP status from responseReceived events
-    let status = extract_http_status(response_rx, &frame_id);
-
-    // Get final page info
-    let (page_url, page_title) = get_page_info(&managed).await?;
 
     let output = NavigateOutput {
         url: page_url,
@@ -223,10 +174,16 @@ pub(crate) async fn navigate_and_wait(
     let response_rx = managed.subscribe("Network.responseReceived").await?;
 
     // Subscribe for wait strategy
-    let wait_rx = match wait_until {
-        WaitUntil::Load => Some(managed.subscribe("Page.loadEventFired").await?),
-        WaitUntil::Domcontentloaded => Some(managed.subscribe("Page.domContentEventFired").await?),
-        WaitUntil::Networkidle | WaitUntil::None => None,
+    let (wait_rx, within_doc_rx) = match wait_until {
+        WaitUntil::Load => (
+            Some(managed.subscribe("Page.loadEventFired").await?),
+            Some(managed.subscribe("Page.navigatedWithinDocument").await?),
+        ),
+        WaitUntil::Domcontentloaded => (
+            Some(managed.subscribe("Page.domContentEventFired").await?),
+            Some(managed.subscribe("Page.navigatedWithinDocument").await?),
+        ),
+        WaitUntil::Networkidle | WaitUntil::None => (None, None),
     };
 
     // For network idle, we need request tracking subscriptions
@@ -255,8 +212,15 @@ pub(crate) async fn navigate_and_wait(
     // Wait according to strategy
     match wait_until {
         WaitUntil::Load | WaitUntil::Domcontentloaded => {
-            if let Some(rx) = wait_rx {
-                wait_for_event(rx, timeout_ms, &format!("{wait_until:?}")).await?;
+            if let (Some(rx), Some(within_doc_rx)) = (wait_rx, within_doc_rx) {
+                wait_for_url_navigation(
+                    rx,
+                    within_doc_rx,
+                    timeout_ms,
+                    &format!("{wait_until:?}"),
+                    url,
+                )
+                .await?;
             }
         }
         WaitUntil::Networkidle => {
@@ -474,6 +438,81 @@ pub async fn wait_for_event(
             Err(AppError::navigation_timeout(timeout_ms, strategy))
         }
     }
+}
+
+/// Wait for direct URL navigation to complete through either the selected
+/// load-style event or Chrome's same-document navigation event.
+async fn wait_for_url_navigation(
+    mut wait_rx: tokio::sync::mpsc::Receiver<CdpEvent>,
+    mut within_doc_rx: tokio::sync::mpsc::Receiver<CdpEvent>,
+    timeout_ms: u64,
+    strategy: &str,
+    target_url: &str,
+) -> Result<(), AppError> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let parsed_target_url = url::Url::parse(target_url).ok();
+    let mut wait_closed = false;
+    let mut within_doc_closed = false;
+
+    loop {
+        if wait_closed && within_doc_closed {
+            return Err(AppError {
+                message: format!("Event channel closed while waiting for {strategy}"),
+                code: ExitCode::GeneralError,
+                custom_json: None,
+            });
+        }
+
+        tokio::select! {
+            event = wait_rx.recv(), if !wait_closed => {
+                match event {
+                    Some(_) => return Ok(()),
+                    None => wait_closed = true,
+                }
+            }
+            event = within_doc_rx.recv(), if !within_doc_closed => {
+                match event {
+                    Some(event)
+                        if within_document_event_matches(
+                            &event,
+                            target_url,
+                            parsed_target_url.as_ref(),
+                        ) =>
+                    {
+                        return Ok(());
+                    }
+                    Some(_) => {}
+                    None => within_doc_closed = true,
+                }
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                return Err(AppError::navigation_timeout(timeout_ms, strategy));
+            }
+        }
+    }
+}
+
+fn within_document_event_matches(
+    event: &CdpEvent,
+    target_url: &str,
+    parsed_target_url: Option<&url::Url>,
+) -> bool {
+    let Some(event_url) = event.params["url"].as_str() else {
+        return false;
+    };
+
+    if event_url == target_url {
+        return true;
+    }
+
+    let Ok(event_url) = url::Url::parse(event_url) else {
+        return false;
+    };
+    let Some(target_url) = parsed_target_url else {
+        return false;
+    };
+
+    event_url == *target_url
 }
 
 /// Wait for either `Page.frameNavigated` (cross-document) or
@@ -820,6 +859,81 @@ mod tests {
             params: serde_json::Value::Null,
             session_id: None,
         }
+    }
+
+    fn mock_within_document_event(url: &str) -> CdpEvent {
+        CdpEvent {
+            method: "Page.navigatedWithinDocument".to_string(),
+            params: serde_json::json!({ "url": url }),
+            session_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn url_navigation_resolves_on_load_style_event() {
+        let (wait_tx, wait_rx) = tokio::sync::mpsc::channel(1);
+        let (_within_tx, within_rx) = tokio::sync::mpsc::channel(1);
+
+        wait_tx
+            .send(mock_cdp_event("Page.loadEventFired"))
+            .await
+            .unwrap();
+
+        let result =
+            wait_for_url_navigation(wait_rx, within_rx, 1000, "Load", "https://example.com/").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn url_navigation_resolves_on_matching_within_document_event() {
+        let (_wait_tx, wait_rx) = tokio::sync::mpsc::channel(1);
+        let (within_tx, within_rx) = tokio::sync::mpsc::channel(1);
+
+        within_tx
+            .send(mock_within_document_event("https://example.com/#S06"))
+            .await
+            .unwrap();
+
+        let result =
+            wait_for_url_navigation(wait_rx, within_rx, 1000, "Load", "https://example.com#S06")
+                .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn url_navigation_ignores_unrelated_within_document_event() {
+        let (_wait_tx, wait_rx) = tokio::sync::mpsc::channel(1);
+        let (within_tx, within_rx) = tokio::sync::mpsc::channel(1);
+
+        within_tx
+            .send(mock_within_document_event("https://example.com/#other"))
+            .await
+            .unwrap();
+
+        let result =
+            wait_for_url_navigation(wait_rx, within_rx, 50, "Load", "https://example.com/#S06")
+                .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn url_navigation_ignores_within_document_event_without_url() {
+        let (_wait_tx, wait_rx) = tokio::sync::mpsc::channel(1);
+        let (within_tx, within_rx) = tokio::sync::mpsc::channel(1);
+
+        within_tx
+            .send(mock_cdp_event("Page.navigatedWithinDocument"))
+            .await
+            .unwrap();
+
+        let result =
+            wait_for_url_navigation(wait_rx, within_rx, 50, "Load", "https://example.com/#S06")
+                .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("timed out"));
     }
 
     #[tokio::test]

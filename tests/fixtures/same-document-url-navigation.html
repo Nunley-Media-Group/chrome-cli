@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- Covers issue #277 AC1 and AC2: same-document fragment URL navigation with load-style waits. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Same Document URL Navigation Fixture</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        line-height: 1.5;
+        margin: 2rem;
+      }
+
+      section {
+        min-height: 30vh;
+        padding: 1rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Same Document URL Navigation Fixture</h1>
+    <nav aria-label="Fixture fragment targets">
+      <a href="#S06">S06</a>
+      <a href="#S07">S07</a>
+    </nav>
+    <section id="S06">
+      <h2>Section S06</h2>
+      <p>Fragment target for load wait regression coverage.</p>
+    </section>
+    <section id="S07">
+      <h2>Section S07</h2>
+      <p>Fragment target for DOMContentLoaded wait regression coverage.</p>
+    </section>
+  </body>
+</html>
