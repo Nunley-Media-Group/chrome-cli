@@ -7191,6 +7191,17 @@ async fn main() {
     // output against a real page is exercised via the manual smoke test.
     CliWorld::run("tests/features/dom-tree-positional-root.feature").await;
 
+    // DOM selector auto-frame targeting (issue #275) — all scenarios require a
+    // running Chrome instance with iframe fixture state. The feature file
+    // documents the regression scenarios; the fix is validated by focused Rust
+    // tests and the manual smoke test during verification.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/275-fix-frame-auto-selector-targeting-in-dom-commands.feature",
+            |_feature, _rule, _scenario| false,
+        )
+        .await;
+
     run_dialog_features().await;
 
     // Cookie management — only CLI-testable scenarios (argument validation) can run without Chrome.

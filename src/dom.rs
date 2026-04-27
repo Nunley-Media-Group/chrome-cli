@@ -21,6 +21,8 @@ use crate::snapshot;
 struct DomElement {
     #[serde(rename = "nodeId")]
     node_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frame: Option<u32>,
     tag: String,
     attributes: HashMap<String, String>,
     #[serde(rename = "textContent")]
@@ -165,6 +167,10 @@ async fn get_document_root(
     doc["root"]["nodeId"]
         .as_i64()
         .ok_or_else(|| AppError::node_not_found("root"))
+}
+
+fn dom_css_selector(selector: &str) -> &str {
+    selector.strip_prefix("css:").unwrap_or(selector)
 }
 
 /// Run `document.querySelector(selector)` via `Runtime.evaluate` in a specific
@@ -503,6 +509,7 @@ async fn describe_element(session: &ManagedSession, node_id: i64) -> Result<DomE
 
     Ok(DomElement {
         node_id: backend_node_id,
+        frame: None,
         tag,
         attributes,
         text_content,
@@ -768,8 +775,24 @@ async fn execute_select(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let mut frame_ctx =
-        crate::output::resolve_optional_frame(&client, &mut managed, frame, None).await?;
+    let selector_target = if args.xpath {
+        None
+    } else {
+        Some(agentchrome::frame::AutoFrameTarget::CssSelector(
+            &args.selector,
+        ))
+    };
+    let resolved_frame = crate::output::resolve_optional_frame_with_target(
+        &client,
+        &mut managed,
+        frame,
+        selector_target,
+    )
+    .await?;
+    let auto_frame_index = resolved_frame
+        .as_ref()
+        .and_then(|resolved| resolved.auto_frame_index);
+    let mut frame_ctx = resolved_frame.map(|resolved| resolved.context);
 
     {
         let eff_mut = if let Some(ref mut ctx) = frame_ctx {
@@ -846,20 +869,17 @@ async fn execute_select(
         ids
     } else if let Some(ctx_id) = same_origin_ctx_id {
         // Same-origin frame: use JS-based query (strip css: prefix if present)
-        let css_selector = if snapshot::is_css_selector(&args.selector) {
-            &args.selector[4..]
-        } else {
-            &args.selector
-        };
+        let css_selector = dom_css_selector(&args.selector);
         query_selector_all_in_context(effective, css_selector, ctx_id).await?
     } else {
+        let css_selector = dom_css_selector(&args.selector);
         // CSS via DOM.querySelectorAll
         let query = effective
             .send_command(
                 "DOM.querySelectorAll",
                 Some(serde_json::json!({
                     "nodeId": root_id,
-                    "selector": args.selector,
+                    "selector": css_selector,
                 })),
             )
             .await
@@ -883,7 +903,8 @@ async fn execute_select(
     if pierce_shadow
         && node_ids.is_empty()
         && !args.xpath
-        && let Ok(shadow_ids) = find_in_shadow_dom(effective, &args.selector).await
+        && let Ok(shadow_ids) =
+            find_in_shadow_dom(effective, dom_css_selector(&args.selector)).await
     {
         node_ids = shadow_ids;
     }
@@ -891,7 +912,8 @@ async fn execute_select(
     // Describe each node
     let mut elements = Vec::with_capacity(node_ids.len());
     for nid in node_ids {
-        if let Ok(el) = describe_element(effective, nid).await {
+        if let Ok(mut el) = describe_element(effective, nid).await {
+            el.frame = auto_frame_index;
             elements.push(el);
         }
     }
@@ -2362,6 +2384,7 @@ mod tests {
     fn dom_element_serialization() {
         let el = DomElement {
             node_id: 42,
+            frame: None,
             tag: "h1".to_string(),
             attributes: HashMap::from([("class".to_string(), "title".to_string())]),
             text_content: "Hello".to_string(),
@@ -2371,6 +2394,7 @@ mod tests {
         assert_eq!(json["tag"], "h1");
         assert_eq!(json["attributes"]["class"], "title");
         assert_eq!(json["textContent"], "Hello");
+        assert!(json.get("frame").is_none());
     }
 
     #[test]

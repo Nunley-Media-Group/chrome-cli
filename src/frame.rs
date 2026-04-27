@@ -19,6 +19,15 @@ pub enum FrameArg {
     Auto,
 }
 
+/// Target kind used by `--frame auto` resolution.
+#[derive(Debug, Clone, Copy)]
+pub enum AutoFrameTarget<'a> {
+    /// Snapshot/accessibility UID target, such as `s5`.
+    Uid(&'a str),
+    /// CSS selector target for DOM commands.
+    CssSelector(&'a str),
+}
+
 /// Metadata for a single frame in the page hierarchy.
 #[derive(Debug, Clone, Serialize)]
 pub struct FrameInfo {
@@ -504,6 +513,35 @@ async fn resolve_frame_by_path(
 /// Maximum number of frames to search in `--frame auto` mode.
 const MAX_AUTO_FRAMES: usize = 50;
 
+/// Search all frames for an auto-frame target and return the first matching frame context.
+///
+/// Returns `(FrameContext, frame_index)` so callers can include the frame index
+/// in their output.
+///
+/// UID targets use the existing snapshot/accessibility lookup path. CSS selector
+/// targets resolve candidate frame contexts and evaluate the selector in the
+/// frame's execution context.
+///
+/// # Errors
+///
+/// Returns `AppError::element_not_in_any_frame()` if the target is not found in
+/// any frame.
+pub async fn resolve_frame_auto<S: ::std::hash::BuildHasher>(
+    client: &CdpClient,
+    session: &mut ManagedSession,
+    target: AutoFrameTarget<'_>,
+    snapshot_hint: Option<(u32, &std::collections::HashMap<String, i64, S>)>,
+) -> Result<(FrameContext, u32), AppError> {
+    match target {
+        AutoFrameTarget::Uid(uid) => {
+            resolve_frame_auto_uid(client, session, uid, snapshot_hint).await
+        }
+        AutoFrameTarget::CssSelector(selector) => {
+            resolve_frame_auto_selector(client, session, selector).await
+        }
+    }
+}
+
 /// Search all frames for a UID and return the first matching frame context.
 ///
 /// Returns `(FrameContext, frame_index)` so callers can include the frame index
@@ -524,7 +562,7 @@ const MAX_AUTO_FRAMES: usize = 50;
 ///
 /// Returns `AppError::element_not_in_any_frame()` if the UID is not found in
 /// any frame.
-pub async fn resolve_frame_auto<S: ::std::hash::BuildHasher>(
+async fn resolve_frame_auto_uid<S: ::std::hash::BuildHasher>(
     client: &CdpClient,
     session: &mut ManagedSession,
     uid: &str,
@@ -579,6 +617,102 @@ pub async fn resolve_frame_auto<S: ::std::hash::BuildHasher>(
     }
 
     Err(AppError::element_not_in_any_frame())
+}
+
+/// Search child frames, then the main frame, for a CSS selector.
+///
+/// `--frame auto` is primarily a frame-discovery mode. Checking child frames
+/// before the main frame lets broad document selectors such as `body` resolve to
+/// iframe contents while still falling back to the main frame when no child
+/// frame contains the selector.
+async fn resolve_frame_auto_selector(
+    client: &CdpClient,
+    session: &mut ManagedSession,
+    selector: &str,
+) -> Result<(FrameContext, u32), AppError> {
+    let frames = list_frames(session).await?;
+    let limit = frames.len().min(MAX_AUTO_FRAMES);
+
+    for frame in frames.iter().take(limit).filter(|frame| frame.index != 0) {
+        let mut ctx = resolve_frame_by_info(client, session, frame).await?;
+        if selector_exists_in_frame(session, &mut ctx, selector).await? {
+            return Ok((ctx, frame.index));
+        }
+    }
+
+    if frames.iter().take(limit).any(|frame| frame.index == 0)
+        && selector_exists_in_session(session, selector, None).await?
+    {
+        return Ok((FrameContext::MainFrame, 0));
+    }
+
+    Err(AppError::element_not_in_any_frame())
+}
+
+async fn selector_exists_in_frame(
+    page_session: &mut ManagedSession,
+    ctx: &mut FrameContext,
+    selector: &str,
+) -> Result<bool, AppError> {
+    let context_id = execution_context_id(ctx);
+    let effective = frame_session_mut(ctx, page_session);
+    selector_exists_in_session(effective, selector, context_id).await
+}
+
+async fn selector_exists_in_session(
+    session: &mut ManagedSession,
+    selector: &str,
+    context_id: Option<i64>,
+) -> Result<bool, AppError> {
+    session
+        .ensure_domain("Runtime")
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to enable Runtime domain during auto-search: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    let selector = css_selector_for_auto_search(selector);
+    let selector_json = serde_json::to_string(selector).map_err(|e| AppError {
+        message: format!("Failed to prepare CSS selector for auto-search: {e}"),
+        code: ExitCode::GeneralError,
+        custom_json: None,
+    })?;
+    let expression = format!("document.querySelector({selector_json}) !== null");
+    let mut params = serde_json::json!({
+        "expression": expression,
+        "returnByValue": true,
+    });
+    if let Some(context_id) = context_id {
+        params["contextId"] = serde_json::json!(context_id);
+    }
+
+    let result = session
+        .send_command("Runtime.evaluate", Some(params))
+        .await
+        .map_err(|e| AppError {
+            message: format!("CSS selector query failed during auto-search: {e}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        })?;
+
+    if let Some(exception) = result.get("exceptionDetails") {
+        let description = exception["exception"]["description"]
+            .as_str()
+            .unwrap_or("unknown error");
+        return Err(AppError {
+            message: format!("CSS selector query failed during auto-search: {description}"),
+            code: ExitCode::ProtocolError,
+            custom_json: None,
+        });
+    }
+
+    Ok(result["result"]["value"].as_bool().unwrap_or(false))
+}
+
+fn css_selector_for_auto_search(selector: &str) -> &str {
+    selector.strip_prefix("css:").unwrap_or(selector)
 }
 
 /// Take a minimal accessibility snapshot of one frame and return a UID → backendDOMNodeId
@@ -743,6 +877,12 @@ mod tests {
     fn parse_auto() {
         let arg = parse_frame_arg("auto").unwrap();
         assert!(matches!(arg, FrameArg::Auto));
+    }
+
+    #[test]
+    fn css_selector_for_auto_search_strips_prefix() {
+        assert_eq!(css_selector_for_auto_search("css:#button"), "#button");
+        assert_eq!(css_selector_for_auto_search("body"), "body");
     }
 
     #[test]

@@ -208,6 +208,12 @@ pub async fn setup_session_with_interceptors(
 // Frame resolution
 // =============================================================================
 
+/// Resolved `--frame` context plus metadata about automatic selection.
+pub struct ResolvedFrame {
+    pub context: agentchrome::frame::FrameContext,
+    pub auto_frame_index: Option<u32>,
+}
+
 /// Resolve the optional `--frame` argument and return a `FrameContext`.
 ///
 /// `uid` is the target element identifier; it is required when `frame` is
@@ -218,12 +224,33 @@ pub async fn resolve_optional_frame(
     frame: Option<&str>,
     uid: Option<&str>,
 ) -> Result<Option<agentchrome::frame::FrameContext>, AppError> {
+    Ok(resolve_optional_frame_with_target(
+        client,
+        managed,
+        frame,
+        uid.map(agentchrome::frame::AutoFrameTarget::Uid),
+    )
+    .await?
+    .map(|resolved| resolved.context))
+}
+
+/// Resolve the optional `--frame` argument and retain auto-frame metadata.
+///
+/// `target` is only used for automatic frame discovery. UID targets preserve the
+/// existing snapshot-state fast path; CSS selector targets search frame
+/// documents.
+pub async fn resolve_optional_frame_with_target(
+    client: &CdpClient,
+    managed: &mut ManagedSession,
+    frame: Option<&str>,
+    target: Option<agentchrome::frame::AutoFrameTarget<'_>>,
+) -> Result<Option<ResolvedFrame>, AppError> {
     // Aggregate-snapshot UID auto-routing (T029). When a UID-based command is
     // invoked against a snapshot produced by `page snapshot --include-iframes`,
     // UIDs can point into any frame. Consult the aggregate UID ranges to pick
     // the right frame automatically, and verify the recorded frame_id is still
     // attached to the live frame tree.
-    if let Some(uid_str) = uid
+    if let Some(agentchrome::frame::AutoFrameTarget::Uid(uid_str)) = target
         && snapshot::is_uid(uid_str)
         && let Some(state) = snapshot::read_snapshot_state().ok().flatten()
         && let Some(uid_frame_idx) = snapshot::aggregate_frame_for_uid(&state, uid_str)
@@ -251,24 +278,45 @@ pub async fn resolve_optional_frame(
             }
             let arg = agentchrome::frame::FrameArg::Index(uid_frame_idx);
             let ctx = agentchrome::frame::resolve_frame(client, managed, &arg).await?;
-            return Ok(Some(ctx));
+            return Ok(Some(ResolvedFrame {
+                context: ctx,
+                auto_frame_index: Some(uid_frame_idx),
+            }));
         }
     }
 
     if let Some(frame_str) = frame {
         let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
         if matches!(arg, agentchrome::frame::FrameArg::Auto) {
-            let target_uid = uid.unwrap_or_default();
-            let state = snapshot::read_snapshot_state().ok().flatten();
-            let hint = state
-                .as_ref()
-                .and_then(|s| s.frame_index.map(|idx| (idx, &s.uid_map)));
-            let (ctx, _frame_idx) =
-                agentchrome::frame::resolve_frame_auto(client, managed, target_uid, hint).await?;
-            Ok(Some(ctx))
+            let target = target.unwrap_or(agentchrome::frame::AutoFrameTarget::Uid(""));
+            let (ctx, frame_idx) = match target {
+                agentchrome::frame::AutoFrameTarget::Uid(_) => {
+                    let state = snapshot::read_snapshot_state().ok().flatten();
+                    let hint = state
+                        .as_ref()
+                        .and_then(|s| s.frame_index.map(|idx| (idx, &s.uid_map)));
+                    agentchrome::frame::resolve_frame_auto(client, managed, target, hint).await?
+                }
+                agentchrome::frame::AutoFrameTarget::CssSelector(_) => {
+                    agentchrome::frame::resolve_frame_auto(
+                        client,
+                        managed,
+                        target,
+                        None::<(u32, &std::collections::HashMap<String, i64>)>,
+                    )
+                    .await?
+                }
+            };
+            Ok(Some(ResolvedFrame {
+                context: ctx,
+                auto_frame_index: Some(frame_idx),
+            }))
         } else {
             let ctx = agentchrome::frame::resolve_frame(client, managed, &arg).await?;
-            Ok(Some(ctx))
+            Ok(Some(ResolvedFrame {
+                context: ctx,
+                auto_frame_index: None,
+            }))
         }
     } else {
         Ok(None)
