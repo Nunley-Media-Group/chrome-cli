@@ -13,12 +13,14 @@ use crate::coords::CoordValue;
 #[command(
     name = "agentchrome",
     version,
-    about = "Browser automation via the Chrome DevTools Protocol",
+    about = "Browser automation and lighthouse auditing via the Chrome DevTools Protocol",
     long_about = "agentchrome is a command-line tool for browser automation via the Chrome DevTools \
         Protocol (CDP). It provides subcommands for connecting to Chrome/Chromium instances, \
         managing tabs, navigating pages, inspecting the DOM, executing JavaScript, monitoring \
         console output, intercepting network requests, simulating user interactions, filling forms, \
-        emulating devices, and collecting performance metrics.\n\n\
+        emulating devices, and collecting performance metrics. Lighthouse-backed auditing is \
+        available through `agentchrome audit lighthouse` and requires the lighthouse npm \
+        package.\n\n\
         Designed for AI agents and shell scripting, every subcommand produces structured JSON \
         output on stdout and structured JSON errors on stderr. Global flags control connection \
         settings, output format, and target tab selection.",
