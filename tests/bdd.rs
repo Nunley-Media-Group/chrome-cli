@@ -539,65 +539,19 @@ fn exit_code_should_not_be(world: &mut CliWorld, rejected: i32) {
 
 const DEFAULT_MARKDOWN_MAX_INPUT_BYTES_FOR_TEST: usize = 1_048_576;
 const CLEAN_HTML_MARKDOWN_FIXTURE_PATH: &str = "tests/fixtures/clean-html-markdown.html";
+const CLEAN_HTML_MARKDOWN_FIXTURE: &str = include_str!("fixtures/clean-html-markdown.html");
 
 fn clean_html_markdown_fixture() -> &'static str {
-    r##"<!doctype html>
-<html>
-<head>
-  <title>Agentic Scraping Field Notes</title>
-  <style>.hidden { display: none; }</style>
-  <script>function trackingPixel(){ return true; }</script>
-</head>
-<body>
-  <!-- AC1/AC3: surrounding chrome should be removed. -->
-  <header>Global navigation</header>
-  <nav>Global navigation links</nav>
-  <aside class="sidebar">Newsletter signup</aside>
-  <div class="cookie-banner">Cookie preferences</div>
-  <svg><text>Icon sprite</text></svg>
-  <div hidden>Hidden offer</div>
-  <main>
-    <article>
-      <h1>Agentic Scraping Field Notes</h1>
-      <p>Primary article paragraph for clean markdown conversion.</p>
-      <ul>
-        <li>Preserve semantic structure</li>
-        <li>Reduce boilerplate context</li>
-      </ul>
-      <!-- AC5: relative links, anchors, and images exercise deterministic link/image handling. -->
-      <p><a href="/reference">Reference</a> and <a href="#appendix">Appendix anchor</a></p>
-      <img src="images/architecture.png" alt="Architecture diagram">
-      <!-- AC6: blockquote, code, separator, content table, and layout table exercise structure preservation. -->
-      <blockquote>Keep source context small.</blockquote>
-      <pre><code class="language-rust">fn scrape() {
-    println!("clean");
-}</code></pre>
-      <hr>
-      <table>
-        <tr><th>Field</th><th>Meaning</th></tr>
-        <tr><td>url</td><td>source address</td></tr>
-      </table>
-      <table class="layout">
-        <tr><td>Layout table text</td></tr>
-      </table>
-    </article>
-    <!-- AC4: selector scoping targets this region without including the primary article. -->
-    <section id="appendix">
-      <h2>Appendix</h2>
-      <p>Selector-only appendix content.</p>
-    </section>
-  </main>
-  <footer>Footer links</footer>
-</body>
-</html>
-"##
+    CLEAN_HTML_MARKDOWN_FIXTURE
 }
 
 fn ensure_clean_html_fixture(world: &mut CliWorld) -> PathBuf {
     let path = project_root().join(CLEAN_HTML_MARKDOWN_FIXTURE_PATH);
-    std::fs::create_dir_all(path.parent().expect("fixture parent should exist"))
-        .expect("failed to create fixture directory");
-    std::fs::write(&path, clean_html_markdown_fixture()).expect("failed to write fixture");
+    assert!(
+        path.is_file(),
+        "expected tracked fixture at {}",
+        path.display()
+    );
     world.fixture_path = Some(path.clone());
     path
 }
@@ -985,7 +939,7 @@ fn stdout_valid_json_with_four_keys(
 }
 
 /// Fixture content for script test files.
-/// Fixtures are written on demand because tests/fixtures/ is git-ignored.
+/// These remain inline because the script fixtures are generated on demand.
 fn script_fixture_content(filename: &str) -> Option<&'static str> {
     match filename {
         "simple.json" => Some(
