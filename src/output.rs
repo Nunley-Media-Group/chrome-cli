@@ -289,24 +289,14 @@ pub async fn resolve_optional_frame_with_target(
         let arg = agentchrome::frame::parse_frame_arg(frame_str)?;
         if matches!(arg, agentchrome::frame::FrameArg::Auto) {
             let target = target.unwrap_or(agentchrome::frame::AutoFrameTarget::Uid(""));
-            let (ctx, frame_idx) = match target {
-                agentchrome::frame::AutoFrameTarget::Uid(_) => {
-                    let state = snapshot::read_snapshot_state().ok().flatten();
-                    let hint = state
-                        .as_ref()
-                        .and_then(|s| s.frame_index.map(|idx| (idx, &s.uid_map)));
-                    agentchrome::frame::resolve_frame_auto(client, managed, target, hint).await?
-                }
-                agentchrome::frame::AutoFrameTarget::CssSelector(_) => {
-                    agentchrome::frame::resolve_frame_auto(
-                        client,
-                        managed,
-                        target,
-                        None::<(u32, &std::collections::HashMap<String, i64>)>,
-                    )
-                    .await?
-                }
-            };
+            let state = matches!(target, agentchrome::frame::AutoFrameTarget::Uid(_))
+                .then(|| snapshot::read_snapshot_state().ok().flatten())
+                .flatten();
+            let hint = state
+                .as_ref()
+                .and_then(|s| s.frame_index.map(|idx| (idx, &s.uid_map)));
+            let (ctx, frame_idx) =
+                agentchrome::frame::resolve_frame_auto(client, managed, target, hint).await?;
             Ok(Some(ResolvedFrame {
                 context: ctx,
                 auto_frame_index: Some(frame_idx),

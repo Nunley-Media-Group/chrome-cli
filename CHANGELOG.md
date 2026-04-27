@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.56.1] - 2026-04-27
+
+### Fixed
+
+- Fix `dom --frame auto select <selector>` so selector-based auto frame targeting now searches child frames in document order, preserves the existing JSON target-error contract when nothing matches, and keeps explicit frame targeting plus UID-based auto targeting unchanged. (#275)
+
 ## [1.56.0] - 2026-04-26
 
 ### Added

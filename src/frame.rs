@@ -640,9 +640,7 @@ async fn resolve_frame_auto_selector(
         }
     }
 
-    if frames.iter().take(limit).any(|frame| frame.index == 0)
-        && selector_exists_in_session(session, selector, None).await?
-    {
+    if !frames.is_empty() && selector_exists_in_session(session, selector, None).await? {
         return Ok((FrameContext::MainFrame, 0));
     }
 

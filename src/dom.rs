@@ -775,11 +775,12 @@ async fn execute_select(
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
+    let css_selector = dom_css_selector(&args.selector);
     let selector_target = if args.xpath {
         None
     } else {
         Some(agentchrome::frame::AutoFrameTarget::CssSelector(
-            &args.selector,
+            css_selector,
         ))
     };
     let resolved_frame = crate::output::resolve_optional_frame_with_target(
@@ -868,11 +869,9 @@ async fn execute_select(
 
         ids
     } else if let Some(ctx_id) = same_origin_ctx_id {
-        // Same-origin frame: use JS-based query (strip css: prefix if present)
-        let css_selector = dom_css_selector(&args.selector);
+        // Same-origin frame: use JS-based query.
         query_selector_all_in_context(effective, css_selector, ctx_id).await?
     } else {
-        let css_selector = dom_css_selector(&args.selector);
         // CSS via DOM.querySelectorAll
         let query = effective
             .send_command(
@@ -903,8 +902,7 @@ async fn execute_select(
     if pierce_shadow
         && node_ids.is_empty()
         && !args.xpath
-        && let Ok(shadow_ids) =
-            find_in_shadow_dom(effective, dom_css_selector(&args.selector)).await
+        && let Ok(shadow_ids) = find_in_shadow_dom(effective, css_selector).await
     {
         node_ids = shadow_ids;
     }
