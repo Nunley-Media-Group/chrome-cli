@@ -43,6 +43,9 @@ urlencoding = "2.1.3"
 globset = "0.4"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
+kuchiki = "0.8"
+quick_html2md = "0.2"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 
 [dev-dependencies]
 cucumber = "0.21"

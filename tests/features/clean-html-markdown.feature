@@ -1,0 +1,114 @@
+# File: tests/features/clean-html-markdown.feature
+#
+# Generated from: specs/feature-add-clean-html-to-markdown-conversion-for-agentic-scraping/requirements.md
+# Issue: #269
+
+Feature: Clean HTML-to-Markdown conversion for agentic scraping
+  As an AI agent or automation engineer
+  I want AgentChrome to convert noisy browser-page HTML and raw HTML inputs into cleaned Markdown
+  So that scraping and research workflows consume less context and produce clearer downstream reasoning
+
+  Background:
+    Given agentchrome is built
+    And AgentChrome test fixtures are available
+
+  Scenario: Convert the current browser page to cleaned Markdown (AC1)
+    Given Chrome is connected with the clean HTML markdown fixture loaded
+    When I run "agentchrome markdown"
+    Then stdout is valid JSON with keys "markdown", "source", and "metadata"
+    And the "source.kind" field is "page"
+    And the "markdown" field contains "# Agentic Scraping Field Notes"
+    And the "markdown" field contains a Markdown list item "Preserve semantic structure"
+    And the "markdown" field contains a Markdown link to "https://example.test/reference"
+    And the "markdown" field contains a fenced code block
+    And the "markdown" field does not contain "Cookie preferences"
+    And the "markdown" field does not contain "function trackingPixel"
+    And the exit code should be 0
+
+  Scenario: Convert raw HTML from file, stdin, and URL inputs (AC2)
+    Given the clean HTML markdown fixture is available as a file, stdin stream, and local HTTP test URL
+    When I convert the fixture with file, stdin, and URL source modes
+    Then each command exits with code 0
+    And each stdout payload contains equivalent normalized Markdown
+    And the file output has "source.kind" set to "file"
+    And the stdin output has "source.kind" set to "stdin"
+    And the URL output has "source.kind" set to "url"
+    And relative links resolve against the supplied or fetched base URL
+
+  Scenario: Prefer primary content containers when present (AC3)
+    Given HTML contains article content in "main" plus surrounding navigation, header, footer, search, and sidebar regions
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --base-url https://example.test/"
+    Then the "markdown" field contains "Agentic Scraping Field Notes"
+    And the "markdown" field contains "Primary article paragraph"
+    And the "markdown" field does not contain "Global navigation"
+    And the "markdown" field does not contain "Newsletter signup"
+    And the "metadata.primary_region" field is "main" or "article"
+    And the exit code should be 0
+
+  Scenario: Scope extraction explicitly when requested (AC4)
+    Given HTML contains multiple content regions in the clean HTML markdown fixture
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --selector #appendix"
+    Then the "markdown" field contains "Appendix"
+    And the "markdown" field does not contain "Primary article paragraph"
+    And the "metadata.primary_region" field is "selector"
+    And the exit code should be 0
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --selector #does-not-exist"
+    Then stderr contains a JSON error with "selector"
+    And stderr contains a JSON error with "did not match"
+    And the exit code should be nonzero
+
+  Scenario: Control links and images deterministically (AC5)
+    Given the clean HTML markdown fixture contains relative links, absolute links, anchors, and images
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --base-url https://example.test/articles/"
+    Then the "markdown" field contains "[Reference](https://example.test/reference)"
+    And the "markdown" field does not contain "![Architecture diagram]"
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --base-url https://example.test/articles/ --strip-links"
+    Then the "markdown" field contains "Reference"
+    And the "markdown" field does not contain "](https://example.test/reference)"
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --base-url https://example.test/articles/ --include-images"
+    Then the "markdown" field contains "![Architecture diagram](https://example.test/articles/images/architecture.png)"
+
+  Scenario: Preserve code and readable document structure (AC6)
+    Given the clean HTML markdown fixture contains code, headings, lists, blockquotes, separators, content tables, and layout tables
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --base-url https://example.test/"
+    Then the "markdown" field contains "```rust"
+    And the "markdown" field contains "fn scrape()"
+    And the "markdown" field contains "> Keep source context small."
+    And the "markdown" field contains "| Field | Meaning"
+    And the "markdown" field contains "Layout table text"
+    And the "markdown" field does not contain "<table"
+
+  Scenario: Keep AgentChrome output and error contracts (AC7)
+    Given the clean HTML markdown fixture exists
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --plain"
+    Then stdout contains only Markdown content
+    And stdout is not valid JSON
+    And stderr is empty
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --selector #missing"
+    Then stderr contains exactly one JSON error object
+    And the exit code should be nonzero
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html"
+    Then optional source fields that cannot be determined are present as null
+
+  Scenario: Document and expose the new CLI surface (AC8)
+    When I run "agentchrome markdown --help"
+    Then stdout should contain "Convert"
+    And stdout should contain "agentchrome markdown"
+    And stdout should contain "--file"
+    And stdout should contain "--stdin"
+    And stdout should contain "--url"
+    And stdout should contain "--selector"
+    When I run "agentchrome capabilities"
+    Then stdout should contain "markdown"
+    When I generate man pages
+    Then stdout should contain "agentchrome markdown"
+
+  Scenario: Bound raw input and generated output (AC9)
+    Given a raw HTML input larger than the default markdown input limit
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown-large.html"
+    Then stderr contains a JSON error with "input"
+    And stderr contains a JSON error with "limit"
+    And the exit code should be nonzero
+    When I run "agentchrome markdown --file tests/fixtures/clean-html-markdown.html --large-response-threshold 100"
+    Then stdout is valid JSON with keys "output_file", "size_bytes", "command", and "summary"
+    And the "command" field is "markdown"

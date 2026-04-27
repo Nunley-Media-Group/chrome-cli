@@ -198,6 +198,9 @@ pub const CONNECTION_PRECEDENCE: &[&str] = &[
     "default port 9222",
 ];
 
+/// Default raw HTML input limit for `agentchrome markdown` (1 MiB).
+pub const DEFAULT_MARKDOWN_MAX_INPUT_BYTES: usize = 1_048_576;
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Connect to or launch a Chrome instance
@@ -586,7 +589,7 @@ EXAMPLES:
     )]
     Media(MediaArgs),
 
-    /// Run audits against the current page (requires lighthouse CLI — see 'audit lighthouse --help')
+    /// Run current-page audits
     #[command(
         long_about = "Run external audits against the current browser page. Currently supports \
             Google Lighthouse for measuring performance, accessibility, SEO, best practices, \
@@ -642,6 +645,44 @@ EXAMPLES:
   agentchrome diagnose https://app.example.com --wait-until networkidle"
     )]
     Diagnose(DiagnoseArgs),
+
+    /// Clean HTML to Markdown
+    #[command(
+        long_about = "Convert the current browser page or one raw HTML source into cleaned \
+            Markdown for agentic scraping and research workflows. By default, the command \
+            reads the active browser page and returns structured JSON with markdown, source, \
+            and metadata fields. Use --file, --stdin, or --url to convert raw HTML without \
+            requiring a browser connection. Cleanup removes common page chrome and boilerplate, \
+            prefers primary content regions, preserves headings, lists, links, code blocks, \
+            blockquotes, separators, and content tables, and routes large responses through \
+            the shared large-response temp-file gate.",
+        after_long_help = "\
+EXAMPLES:
+  # Convert the current browser page to JSON
+  agentchrome markdown --json
+
+  # Emit only the Markdown body for the current page
+  agentchrome markdown --plain
+
+  # Convert a local HTML file and resolve relative links
+  agentchrome markdown --file article.html --base-url https://example.com/docs/
+
+  # Convert HTML from stdin
+  cat article.html | agentchrome markdown --stdin --base-url https://example.com/
+
+  # Fetch and convert a URL
+  agentchrome markdown --url https://example.com/article
+
+  # Scope extraction to a CSS selector
+  agentchrome markdown --file article.html --selector main
+
+  # Preserve text but strip link destinations
+  agentchrome markdown --file article.html --strip-links
+
+  # Include useful images as Markdown image references
+  agentchrome markdown --file article.html --include-images"
+    )]
+    Markdown(MarkdownArgs),
 
     /// Agentic tool skill installation and management
     #[command(
@@ -2058,6 +2099,51 @@ pub struct DiagnoseArgs {
     /// Navigation timeout in milliseconds (URL mode only; ignored with --current)
     #[arg(long)]
     pub timeout: Option<u64>,
+}
+
+/// Arguments for the `markdown` command.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Args)]
+pub struct MarkdownArgs {
+    /// Read raw HTML from this local file instead of the current browser page.
+    /// Mutually exclusive with --stdin and --url.
+    #[arg(long, conflicts_with_all = ["stdin", "url"])]
+    pub file: Option<PathBuf>,
+
+    /// Read raw HTML from standard input instead of the current browser page.
+    /// Mutually exclusive with --file and --url.
+    #[arg(long, conflicts_with_all = ["file", "url"])]
+    pub stdin: bool,
+
+    /// Fetch raw HTML from this HTTP or HTTPS URL instead of the current browser page.
+    /// Mutually exclusive with --file and --stdin.
+    #[arg(long, value_name = "URL", conflicts_with_all = ["file", "stdin"])]
+    pub url: Option<String>,
+
+    /// Absolute base URL used to resolve relative links and images for --file and --stdin input.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+
+    /// CSS selector that scopes conversion to matching subtree(s) in document order.
+    #[arg(long, value_name = "CSS")]
+    pub selector: Option<String>,
+
+    /// Preserve link text but remove link destinations from Markdown output.
+    #[arg(long)]
+    pub strip_links: bool,
+
+    /// Include useful images as Markdown image references. Images are omitted by default.
+    #[arg(long)]
+    pub include_images: bool,
+
+    /// Maximum raw input bytes accepted from --file, --stdin, or --url.
+    #[arg(
+        long,
+        value_name = "BYTES",
+        value_parser = parse_nonzero_usize,
+        default_value_t = DEFAULT_MARKDOWN_MAX_INPUT_BYTES
+    )]
+    pub max_input_bytes: usize,
 }
 
 /// Arguments for the `skill` subcommand group.

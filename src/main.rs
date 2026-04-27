@@ -17,6 +17,7 @@ mod examples;
 mod form;
 mod interact;
 mod js;
+mod markdown;
 mod media;
 mod navigate;
 mod network;
@@ -197,6 +198,7 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Dialog(args) => dialog::execute_dialog(&global, args).await,
         Command::Audit(args) => audit::execute_audit(&global, args).await,
         Command::Diagnose(args) => diagnose::execute_diagnose(&global, args).await,
+        Command::Markdown(args) => markdown::execute_markdown(&global, args).await,
         Command::Skill(args) => skill::execute_skill(&global, args),
         Command::Examples(args) => examples::execute_examples(&global, args),
         Command::Capabilities(args) => capabilities_cli::execute_capabilities(&global, args),
