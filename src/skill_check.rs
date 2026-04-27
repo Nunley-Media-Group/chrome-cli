@@ -156,12 +156,6 @@ pub(crate) fn installed_skill_inventory() -> Vec<InstalledSkill> {
         .collect()
 }
 
-/// Collect all tools whose installed skill file reports an older version than
-/// the running binary.
-pub(crate) fn stale_tools() -> Vec<StaleTool> {
-    stale_tools_for_notice(None, installed_skill_inventory())
-}
-
 fn stale_tools_for_notice(
     active_tool: Option<&'static crate::skill::ToolInfo>,
     inventory: Vec<InstalledSkill>,
@@ -271,11 +265,10 @@ pub fn emit_stale_notice_if_any(config: &ConfigFile) {
         return;
     }
 
-    let stale = if let Some(active_tool) = crate::skill::detect_active_tool() {
-        stale_tools_for_notice(Some(active_tool), installed_skill_inventory())
-    } else {
-        stale_tools()
-    };
+    let stale = stale_tools_for_notice(
+        crate::skill::detect_active_tool(),
+        installed_skill_inventory(),
+    );
     if let Some(notice) = format_notice(&stale) {
         eprintln!("{notice}");
     }

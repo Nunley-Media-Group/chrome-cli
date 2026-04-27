@@ -323,9 +323,10 @@ fn i_run_command(world: &mut CliWorld, command_line: String) {
         &parts[..]
     };
 
-    // Isolate each run from the developer's real `~/.agentchrome/session.json`
-    // so stderr/stdout assertions are deterministic on machines that have a
-    // stale session file pointing to a port that isn't currently up.
+    // Isolate each run from developer-local state. HOME avoids a real
+    // session/config file; the skill-check suppression avoids relative-path
+    // installs such as `.cursor/rules/agentchrome.mdc` in the repo checkout
+    // while preserving repo-relative fixture paths.
     let isolated_home = std::env::temp_dir().join(format!(
         "agentchrome-bdd-cli-{}-{:p}",
         std::process::id(),
@@ -337,6 +338,7 @@ fn i_run_command(world: &mut CliWorld, command_line: String) {
         .args(args)
         .env("HOME", &isolated_home)
         .env("USERPROFILE", &isolated_home)
+        .env("AGENTCHROME_NO_SKILL_CHECK", "1")
         .output()
         .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
 
@@ -6090,6 +6092,17 @@ struct StaleSkillWorld {
 }
 
 impl StaleSkillWorld {
+    fn ensure_binary_path(&mut self) -> PathBuf {
+        if let Some(path) = &self.binary_path {
+            return path.clone();
+        }
+
+        let path = binary_path();
+        assert!(path.exists(), "Binary not found at {}", path.display());
+        self.binary_path = Some(path.clone());
+        path
+    }
+
     fn ensure_temp_home(&mut self) -> &tempfile::TempDir {
         if self.temp_home.is_none() {
             self.temp_home = Some(tempfile::tempdir().expect("failed to create temp dir"));
@@ -6133,17 +6146,13 @@ impl StaleSkillWorld {
             .unwrap_or_else(|e| panic!("failed to write skill file: {e}"));
     }
 
-    /// Run `agentchrome skill list` (no Chrome needed) with the temp HOME set and optional env vars.
-    ///
-    /// `--version` is handled by clap before `run()` is invoked, so it never triggers the
-    /// staleness check. `skill list` is the lightest command that goes through `run()`.
-    fn run_with_home(&mut self, extra_env: &[(&str, &str)]) {
-        let binary = self.binary_path.clone().unwrap_or_else(binary_path);
+    fn run_agentchrome(&mut self, args: &[&str], extra_env: &[(&str, &str)]) {
+        let binary = self.ensure_binary_path();
         let temp_home = self.ensure_temp_home().path().to_path_buf();
         let temp_cwd = self.ensure_temp_cwd();
 
         let mut cmd = std::process::Command::new(&binary);
-        cmd.args(["skill", "list"])
+        cmd.args(args)
             .env_clear()
             .env("HOME", &temp_home)
             .env("USERPROFILE", &temp_home)
@@ -6163,6 +6172,14 @@ impl StaleSkillWorld {
         self.stdout = String::from_utf8_lossy(&output.stdout).to_string();
         self.stderr = String::from_utf8_lossy(&output.stderr).to_string();
         self.exit_code = Some(output.status.code().unwrap_or(-1));
+    }
+
+    /// Run `agentchrome skill list` (no Chrome needed) with the temp HOME set and optional env vars.
+    ///
+    /// `--version` is handled by clap before `run()` is invoked, so it never triggers the
+    /// staleness check. `skill list` is the lightest command that goes through `run()`.
+    fn run_with_home(&mut self, extra_env: &[(&str, &str)]) {
+        self.run_agentchrome(&["skill", "list"], extra_env);
     }
 
     /// Run a second invocation and capture to `second_stderr`.
@@ -6196,9 +6213,7 @@ impl StaleSkillWorld {
 
 #[given(expr = "an installed skill for {word} with version {string} planted in a temp home")]
 fn stale_skill_planted(world: &mut StaleSkillWorld, tool: String, version: String) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     world.plant_skill(&tool, &version);
 }
 
@@ -6210,9 +6225,7 @@ fn stale_skill_planted_same_home(world: &mut StaleSkillWorld, tool: String, vers
 
 #[given(expr = "a skill installed at the current binary version for {word} in a temp home")]
 fn fresh_skill_planted(world: &mut StaleSkillWorld, tool: String) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     // Use the real binary version so the staleness check reports "not stale".
     let version = env!("CARGO_PKG_VERSION");
     world.plant_skill(&tool, version);
@@ -6220,18 +6233,14 @@ fn fresh_skill_planted(world: &mut StaleSkillWorld, tool: String) {
 
 #[given("no skill is installed in a temp home")]
 fn no_skill_in_temp_home(world: &mut StaleSkillWorld) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     // Just initialize the temp home without planting anything.
     world.ensure_temp_home();
 }
 
 #[given(expr = "the active agentic tool signal is {string}")]
 fn stale_active_tool_signal(world: &mut StaleSkillWorld, tool: String) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     world.ensure_temp_home();
     match tool.as_str() {
         "claude-code" => world.active_env.push(("CLAUDE_CODE".into(), "1".into())),
@@ -6258,18 +6267,14 @@ fn stale_active_tool_signal(world: &mut StaleSkillWorld, tool: String) {
 
 #[given("no active agentic tool signal is present")]
 fn stale_no_active_tool_signal(world: &mut StaleSkillWorld) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     world.active_env.clear();
     world.ensure_temp_home();
 }
 
 #[given(expr = "the installed AgentChrome skill for {string} is current in a temp home")]
 fn stale_current_agentchrome_skill(world: &mut StaleSkillWorld, tool: String) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     world.plant_skill(&tool, env!("CARGO_PKG_VERSION"));
 }
 
@@ -6277,9 +6282,7 @@ fn stale_current_agentchrome_skill(world: &mut StaleSkillWorld, tool: String) {
     expr = "the installed AgentChrome skill for {string} has stale version {string} in a temp home"
 )]
 fn stale_agentchrome_skill(world: &mut StaleSkillWorld, tool: String, version: String) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     world.plant_skill(&tool, &version);
 }
 
@@ -6294,9 +6297,7 @@ fn stale_agentchrome_skill_same_home(world: &mut StaleSkillWorld, tool: String, 
     expr = "installed AgentChrome skills for {string} and {string} have stale versions in a temp home"
 )]
 fn stale_two_agentchrome_skills(world: &mut StaleSkillWorld, first: String, second: String) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    world.ensure_binary_path();
     world.plant_skill(&first, "0.1.0");
     world.plant_skill(&second, "0.1.0");
 }
@@ -6339,44 +6340,12 @@ fn stale_invoke_twice(world: &mut StaleSkillWorld) {
 
 #[when(expr = "I run skill update for {word} with the planted home")]
 fn stale_run_skill_update(world: &mut StaleSkillWorld, tool: String) {
-    let binary = world.binary_path.clone().unwrap_or_else(binary_path);
-    let temp_home = world.ensure_temp_home().path().to_path_buf();
-    let temp_cwd = world.ensure_temp_cwd();
-
-    let output = std::process::Command::new(&binary)
-        .args(["skill", "update", "--tool", &tool])
-        .env_clear()
-        .env("HOME", &temp_home)
-        .env("USERPROFILE", &temp_home)
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .current_dir(&temp_cwd)
-        .output()
-        .unwrap_or_else(|e| panic!("failed to run skill update: {e}"));
-
-    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    world.exit_code = Some(output.status.code().unwrap_or(-1));
+    world.run_agentchrome(&["skill", "update", "--tool", &tool], &[]);
 }
 
 #[when("I run bare skill update with the planted home")]
 fn stale_run_bare_skill_update(world: &mut StaleSkillWorld) {
-    let binary = world.binary_path.clone().unwrap_or_else(binary_path);
-    let temp_home = world.ensure_temp_home().path().to_path_buf();
-    let temp_cwd = world.ensure_temp_cwd();
-
-    let output = std::process::Command::new(&binary)
-        .args(["skill", "update"])
-        .env_clear()
-        .env("HOME", &temp_home)
-        .env("USERPROFILE", &temp_home)
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .current_dir(&temp_cwd)
-        .output()
-        .unwrap_or_else(|e| panic!("failed to run bare skill update: {e}"));
-
-    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    world.exit_code = Some(output.status.code().unwrap_or(-1));
+    world.run_agentchrome(&["skill", "update"], &[]);
 }
 
 #[when("any AgentChrome command is invoked with the temp home")]
