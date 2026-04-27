@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH coords 1  "coords " 
+.TH coords 1  "coords "
 .SH NAME
 coords \- Resolve a selector to frame\-local and page\-global coordinates
 .SH SYNOPSIS
-\fBcoords\fR <\fB\-\-selector\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+\fBcoords\fR <\fB\-\-selector\fR> [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Resolve a CSS selector or snapshot UID to frame\-local and page\-global bounding\-box and center coordinates. Returns a JSON object with \*(Aqframe\*(Aq, \*(AqframeLocal\*(Aq, \*(Aqpage\*(Aq, and \*(AqframeOffset\*(Aq fields. Useful for verifying what coordinates a subsequent \*(Aqinteract click\-at \-\-relative\-to\*(Aq would dispatch, and for diagnosing coordinate mismatches when working with iframes.
 .PP

@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH follow 1  "follow " 
+.TH follow 1  "follow "
 .SH NAME
 follow \- Stream console messages in real\-time (tail \-f style)
 .SH SYNOPSIS
-\fBfollow\fR [\fB\-\-type\fR] [\fB\-\-errors\-only\fR] [\fB\-\-timeout\fR] [\fB\-\-fail\-on\-error\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBfollow\fR [\fB\-\-type\fR] [\fB\-\-errors\-only\fR] [\fB\-\-timeout\fR] [\fB\-\-fail\-on\-error\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Stream new console messages in real time as they are logged, similar to \*(Aqtail \-f\*(Aq. Each message is printed as a JSON line. Use \-\-timeout to auto\-exit after a specified duration. Filter by type or use \-\-errors\-only to stream only error and assert messages.
 .PP

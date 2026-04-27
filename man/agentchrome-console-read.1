@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH read 1  "read " 
+.TH read 1  "read "
 .SH NAME
 read \- List console messages or get details of a specific message
 .SH SYNOPSIS
-\fBread\fR [\fB\-\-type\fR] [\fB\-\-errors\-only\fR] [\fB\-\-limit\fR] [\fB\-\-page\fR] [\fB\-\-include\-preserved\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIMSG_ID\fR] 
+\fBread\fR [\fB\-\-type\fR] [\fB\-\-errors\-only\fR] [\fB\-\-limit\fR] [\fB\-\-page\fR] [\fB\-\-include\-preserved\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIMSG_ID\fR]
 .SH DESCRIPTION
 Read captured console messages from the current page. Without arguments, lists recent messages with their IDs, types, and text. Pass a message ID to get full details including stack trace and arguments. Filter by type or use \-\-errors\-only for error and assert messages only.
 .SH OPTIONS

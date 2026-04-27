@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH seek 1  "seek " 
+.TH seek 1  "seek "
 .SH NAME
 seek \- Seek a media element to a specific time
 .SH SYNOPSIS
-\fBseek\fR [\fB\-\-all\fR] [\fB\-\-time\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fITARGET\fR] [\fITIME_POS\fR] 
+\fBseek\fR [\fB\-\-all\fR] [\fB\-\-time\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fITARGET\fR] [\fITIME_POS\fR]
 .SH DESCRIPTION
 Set the current playback position of a media element to a specific time in seconds. The time is clamped to the element\*(Aqs duration by the browser. Returns the updated playback state as JSON. Use \-\-all with \-\-time to seek all elements.
 .SH OPTIONS

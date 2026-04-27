@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH follow 1  "follow " 
+.TH follow 1  "follow "
 .SH NAME
 follow \- Stream network requests in real\-time (tail \-f style)
 .SH SYNOPSIS
-\fBfollow\fR [\fB\-\-type\fR] [\fB\-\-url\fR] [\fB\-\-method\fR] [\fB\-\-timeout\fR] [\fB\-\-verbose\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBfollow\fR [\fB\-\-type\fR] [\fB\-\-url\fR] [\fB\-\-method\fR] [\fB\-\-timeout\fR] [\fB\-\-verbose\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Stream network requests in real time as they are made, similar to \*(Aqtail \-f\*(Aq. Each request is printed as a JSON line. Filter by resource type, URL pattern, or HTTP method. Use \-\-timeout to auto\-exit after a specified duration. Use \-\-verbose to include request and response headers.
 .SH OPTIONS

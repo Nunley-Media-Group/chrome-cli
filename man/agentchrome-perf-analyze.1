@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH analyze 1  "analyze " 
+.TH analyze 1  "analyze "
 .SH NAME
 analyze \- Analyze a specific performance insight from a trace
 .SH SYNOPSIS
-\fBanalyze\fR <\fB\-\-trace\-file\fR> [\fB\-h\fR|\fB\-\-help\fR] <\fIINSIGHT\fR> 
+\fBanalyze\fR <\fB\-\-trace\-file\fR> [\fB\-h\fR|\fB\-\-help\fR] <\fIINSIGHT\fR>
 .SH DESCRIPTION
 Analyze a previously saved trace file for a specific performance insight. Available insights: DocumentLatency (document request timing), LCPBreakdown (Largest Contentful Paint phases), RenderBlocking (render\-blocking resources), LongTasks (JavaScript tasks > 50ms). Returns structured JSON with the analysis results.
 .SH OPTIONS

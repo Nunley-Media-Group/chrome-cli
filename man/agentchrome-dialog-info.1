@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH info 1  "info " 
+.TH info 1  "info "
 .SH NAME
 info \- Check whether a dialog is currently open
 .SH SYNOPSIS
-\fBinfo\fR [\fB\-h\fR|\fB\-\-help\fR] 
+\fBinfo\fR [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Check whether a JavaScript dialog (alert, confirm, prompt, or beforeunload) is currently open. Returns JSON with the dialog\*(Aqs type, message, and default prompt text if applicable. Returns {"open": false} when no dialog is present.
 .SH OPTIONS

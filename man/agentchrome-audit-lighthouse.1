@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH lighthouse 1  "lighthouse " 
+.TH lighthouse 1  "lighthouse "
 .SH NAME
 lighthouse \- Run a Google Lighthouse audit
 .SH SYNOPSIS
-\fBlighthouse\fR [\fB\-\-only\fR] [\fB\-\-output\-file\fR] [\fB\-\-install\-prereqs\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIURL\fR] 
+\fBlighthouse\fR [\fB\-\-only\fR] [\fB\-\-output\-file\fR] [\fB\-\-install\-prereqs\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIURL\fR]
 .SH DESCRIPTION
 Run a Google Lighthouse audit against the current page (or a given URL). Connects Lighthouse to the managed Chrome session via the CDP port and returns structured JSON category scores on stdout. Use \-\-only to limit which categories are measured. Use \-\-output\-file to save the full Lighthouse JSON report.
 .SH OPTIONS
@@ -47,7 +47,7 @@ EXAMPLES:
   agentchrome audit lighthouse \-\-install\-prereqs
 .SH CAPABILITIES
 .PP
-Run audits against the current page (requires lighthouse CLI — see 'audit lighthouse --help')
+Run current-page audits
 .TP
 .B audit lighthouse
 Run a Google Lighthouse audit

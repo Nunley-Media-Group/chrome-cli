@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH show 1  "show " 
+.TH show 1  "show "
 .SH NAME
 show \- Display the resolved configuration from all sources
 .SH SYNOPSIS
-\fBshow\fR [\fB\-h\fR|\fB\-\-help\fR] 
+\fBshow\fR [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Display the fully resolved configuration by merging all sources in priority order: CLI flags > environment variables > config file > defaults. Returns JSON showing every setting and its effective value. Useful for debugging which settings are active.
 .SH OPTIONS

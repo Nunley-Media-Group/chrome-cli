@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH diagnose 1  "diagnose " 
+.TH diagnose 1  "diagnose "
 .SH NAME
 diagnose \- Pre\-automation challenge scan (iframes, overlays, media gates, frameworks, patterns)
 .SH SYNOPSIS
-\fBdiagnose\fR [\fB\-\-current\fR] [\fB\-\-wait\-until\fR] [\fB\-\-timeout\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIURL\fR] 
+\fBdiagnose\fR [\fB\-\-current\fR] [\fB\-\-wait\-until\fR] [\fB\-\-timeout\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIURL\fR]
 .SH DESCRIPTION
 Scan a page for automation challenges — iframes, overlay blockers, shadow DOM, canvas/WebGL rendering, media playback gates, and framework\-specific interaction quirks — plus named\-pattern matches (e.g., Storyline acc\-blocker, SCORM player, React portal) with actionable agentchrome command suggestions. Accepts a URL to navigate\-then\-analyze, or `\-\-current` to analyze the already\-loaded page in place.
 .PP

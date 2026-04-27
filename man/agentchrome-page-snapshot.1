@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH snapshot 1  "snapshot " 
+.TH snapshot 1  "snapshot "
 .SH NAME
 snapshot \- Capture the accessibility tree of the page
 .SH SYNOPSIS
-\fBsnapshot\fR [\fB\-\-verbose\fR] [\fB\-\-file\fR] [\fB\-\-compact\fR] [\fB\-\-pierce\-shadow\fR] [\fB\-\-include\-iframes\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBsnapshot\fR [\fB\-\-verbose\fR] [\fB\-\-file\fR] [\fB\-\-compact\fR] [\fB\-\-pierce\-shadow\fR] [\fB\-\-include\-iframes\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Capture the accessibility tree (AX tree) of the current page. Each interactive element is assigned a UID (e.g., s1, s2, s3) that can be used with \*(Aqinteract\*(Aq, \*(Aqform\*(Aq, and \*(Aqjs exec \-\-uid\*(Aq commands. Use \-\-verbose to include additional properties like checked, disabled, and level.
 .SH OPTIONS

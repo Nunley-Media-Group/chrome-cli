@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH fill 1  "fill " 
+.TH fill 1  "fill "
 .SH NAME
 fill \- Fill a form field by UID or CSS selector
 .SH SYNOPSIS
-\fBfill\fR [\fB\-\-confirm\-key\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> <\fIVALUE\fR> 
+\fBfill\fR [\fB\-\-confirm\-key\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> <\fIVALUE\fR>
 .SH DESCRIPTION
 Set the value of a form field identified by UID (from \*(Aqpage snapshot\*(Aq, e.g., \*(Aqs5\*(Aq) or CSS selector (prefixed with \*(Aqcss:\*(Aq, e.g., \*(Aqcss:#email\*(Aq). Works with text inputs, textareas, select dropdowns, checkboxes, and ARIA combobox elements (role="combobox"). Combobox elements are automatically detected and filled using a click\-type\-confirm sequence. Dispatches change and input events to trigger form validation.
 .SH OPTIONS

@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH run 1  "run " 
+.TH run 1  "run "
 .SH NAME
 run \- Run a JSON batch script
 .SH SYNOPSIS
-\fBrun\fR [\fB\-\-fail\-fast\fR] [\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> 
+\fBrun\fR [\fB\-\-fail\-fast\fR] [\fB\-\-dry\-run\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR>
 .SH DESCRIPTION
 Run a JSON batch script against the active CDP session. The script file should contain a JSON object with a \*(Aqcommands\*(Aq array. Each command is an argv\-style array of strings. Use \*(Aq\-\*(Aq as the file path to read from stdin.
 .PP

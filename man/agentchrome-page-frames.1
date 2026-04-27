@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH frames 1  "frames " 
+.TH frames 1  "frames "
 .SH NAME
 frames \- List all frames (iframes, framesets) in the page hierarchy
 .SH SYNOPSIS
-\fBframes\fR [\fB\-h\fR|\fB\-\-help\fR] 
+\fBframes\fR [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 List all frames in the current page, including iframes and frameset frames. Returns a JSON array with each frame\*(Aqs index, ID, URL, name, security origin, dimensions, and nesting depth. Use the index with \-\-frame on other commands to target a specific frame.
 .SH OPTIONS

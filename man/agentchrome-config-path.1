@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH path 1  "path " 
+.TH path 1  "path "
 .SH NAME
 path \- Show the active config file path (or null if none)
 .SH SYNOPSIS
-\fBpath\fR [\fB\-h\fR|\fB\-\-help\fR] 
+\fBpath\fR [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Show the path of the active configuration file. Searches in priority order: \-\-config flag, $AGENTCHROME_CONFIG env var, project\-local (.agentchrome.toml), XDG config dir, home directory (~/.agentchrome.toml). Returns JSON with {"path": "..."} or {"path": null} if no config file is found.
 .SH OPTIONS

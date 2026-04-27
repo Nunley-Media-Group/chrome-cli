@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH drag-at 1  "drag-at " 
+.TH drag-at 1  "drag-at "
 .SH NAME
 drag\-at \- Drag from coordinates to coordinates
 .SH SYNOPSIS
-\fBdrag\-at\fR [\fB\-\-relative\-to\fR] [\fB\-\-steps\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFROM_X\fR> <\fIFROM_Y\fR> <\fITO_X\fR> <\fITO_Y\fR> 
+\fBdrag\-at\fR [\fB\-\-relative\-to\fR] [\fB\-\-steps\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFROM_X\fR> <\fIFROM_Y\fR> <\fITO_X\fR> <\fITO_Y\fR>
 .SH DESCRIPTION
 Drag from one set of viewport coordinates to another. Simulates mouse down at the source coordinates, move to the target coordinates, and mouse up at the target. Use \-\-steps to interpolate intermediate mousemove events for applications that track drag movement (e.g., canvas\-based interfaces).
 .SH OPTIONS

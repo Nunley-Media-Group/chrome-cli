@@ -227,6 +227,53 @@ pub fn all_examples() -> Vec<CommandGroupSummary> {
             ],
         },
         CommandGroupSummary {
+            command: "markdown".into(),
+            description: "Convert browser pages or raw HTML into cleaned Markdown".into(),
+            examples: vec![
+                ExampleEntry {
+                    cmd: "agentchrome markdown".into(),
+                    description: "Convert the current browser page to cleaned Markdown JSON"
+                        .into(),
+                    flags: None,
+                },
+                ExampleEntry {
+                    cmd: "agentchrome markdown --plain".into(),
+                    description: "Emit only the Markdown body for the current browser page".into(),
+                    flags: Some(vec!["--plain".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome markdown --file article.html --base-url https://example.com/docs/".into(),
+                    description: "Convert a local HTML file and resolve relative links".into(),
+                    flags: Some(vec!["--file".into(), "--base-url".into()]),
+                },
+                ExampleEntry {
+                    cmd: "cat article.html | agentchrome markdown --stdin --base-url https://example.com/".into(),
+                    description: "Convert raw HTML from stdin".into(),
+                    flags: Some(vec!["--stdin".into(), "--base-url".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome markdown --url https://example.com/article".into(),
+                    description: "Fetch an HTTP/HTTPS URL and convert the response HTML".into(),
+                    flags: Some(vec!["--url".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome markdown --file article.html --selector main".into(),
+                    description: "Scope conversion to a CSS selector".into(),
+                    flags: Some(vec!["--file".into(), "--selector".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome markdown --file article.html --strip-links".into(),
+                    description: "Keep link text while removing link destinations".into(),
+                    flags: Some(vec!["--file".into(), "--strip-links".into()]),
+                },
+                ExampleEntry {
+                    cmd: "agentchrome markdown --file article.html --include-images".into(),
+                    description: "Preserve useful images as Markdown image references".into(),
+                    flags: Some(vec!["--file".into(), "--include-images".into()]),
+                },
+            ],
+        },
+        CommandGroupSummary {
             command: "diagnose".into(),
             description: "Pre-automation challenge scan (iframes, overlays, media gates, frameworks, patterns)".into(),
             examples: vec![

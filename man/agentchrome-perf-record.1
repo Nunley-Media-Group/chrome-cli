@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH record 1  "record " 
+.TH record 1  "record "
 .SH NAME
 record \- Record a performance trace (long\-running, stops on Ctrl+C or \-\-duration)
 .SH SYNOPSIS
-\fBrecord\fR [\fB\-\-reload\fR] [\fB\-\-duration\fR] [\fB\-\-file\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBrecord\fR [\fB\-\-reload\fR] [\fB\-\-duration\fR] [\fB\-\-file\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Record a performance trace in a single long\-running session. The trace captures JavaScript execution, layout, paint, network, and other browser activity. Recording continues until you press Ctrl+C or the \-\-duration timeout elapses. Use \-\-reload to reload the page before recording. The trace is saved to a JSON file that can be opened in Chrome DevTools or analyzed with \*(Aqperf analyze\*(Aq.
 .SH OPTIONS

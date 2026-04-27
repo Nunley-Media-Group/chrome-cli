@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH mouseup-at 1  "mouseup-at " 
+.TH mouseup-at 1  "mouseup-at "
 .SH NAME
 mouseup\-at \- Release mouse button at coordinates
 .SH SYNOPSIS
-\fBmouseup\-at\fR [\fB\-\-relative\-to\fR] [\fB\-\-button\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIX\fR> <\fIY\fR> 
+\fBmouseup\-at\fR [\fB\-\-relative\-to\fR] [\fB\-\-button\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIX\fR> <\fIY\fR>
 .SH DESCRIPTION
 Dispatch only a mouseReleased event at specific viewport coordinates. No mousePressed event is sent, allowing decomposed mouse interactions such as completing a drag started by a prior mousedown\-at invocation. Use \-\-button to specify left, middle, or right mouse button.
 .SH OPTIONS

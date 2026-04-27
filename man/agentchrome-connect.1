@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH connect 1  "connect " 
+.TH connect 1  "connect "
 .SH NAME
 connect \- Connect to or launch a Chrome instance
 .SH SYNOPSIS
-\fBconnect\fR [\fB\-\-launch\fR] [\fB\-\-status\fR] [\fB\-\-disconnect\fR] [\fB\-\-headless\fR] [\fB\-\-channel\fR] [\fB\-\-chrome\-path\fR] [\fB\-\-chrome\-arg\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBconnect\fR [\fB\-\-launch\fR] [\fB\-\-status\fR] [\fB\-\-disconnect\fR] [\fB\-\-headless\fR] [\fB\-\-channel\fR] [\fB\-\-chrome\-path\fR] [\fB\-\-chrome\-arg\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Connect to a running Chrome/Chromium instance via the Chrome DevTools Protocol, or launch a new one. Tests the connection and prints browser metadata (browser version, WebSocket URL, user agent). The session is persisted to a local file so subsequent commands reuse the same connection.
 .SH OPTIONS

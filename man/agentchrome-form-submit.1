@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH submit 1  "submit " 
+.TH submit 1  "submit "
 .SH NAME
 submit \- Submit a form programmatically
 .SH SYNOPSIS
-\fBsubmit\fR [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> 
+\fBsubmit\fR [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR>
 .SH DESCRIPTION
 Submit a form identified by UID (from \*(Aqpage snapshot\*(Aq, e.g., \*(Aqs3\*(Aq) or CSS selector (prefixed with \*(Aqcss:\*(Aq, e.g., \*(Aqcss:#login\-form\*(Aq). The target can be the form element itself or any element inside the form — the parent form is resolved automatically. Uses requestSubmit() to respect browser validation.
 .SH OPTIONS

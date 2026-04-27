@@ -1,0 +1,119 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH markdown 1  "markdown "
+.SH NAME
+markdown \- Clean HTML to Markdown
+.SH SYNOPSIS
+\fBmarkdown\fR [\fB\-\-file\fR] [\fB\-\-stdin\fR] [\fB\-\-url\fR] [\fB\-\-base\-url\fR] [\fB\-\-selector\fR] [\fB\-\-strip\-links\fR] [\fB\-\-include\-images\fR] [\fB\-\-max\-input\-bytes\fR] [\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIPTION
+Convert the current browser page or one raw HTML source into cleaned Markdown for agentic scraping and research workflows. By default, the command reads the active browser page and returns structured JSON with markdown, source, and metadata fields. Use \-\-file, \-\-stdin, or \-\-url to convert raw HTML without requiring a browser connection. Cleanup removes common page chrome and boilerplate, prefers primary content regions, preserves headings, lists, links, code blocks, blockquotes, separators, and content tables, and routes large responses through the shared large\-response temp\-file gate.
+.SH OPTIONS
+.TP
+\fB\-\-file\fR \fI<FILE>\fR
+Read raw HTML from this local file instead of the current browser page. Mutually exclusive with \-\-stdin and \-\-url
+.TP
+\fB\-\-stdin\fR
+Read raw HTML from standard input instead of the current browser page. Mutually exclusive with \-\-file and \-\-url
+.TP
+\fB\-\-url\fR \fI<URL>\fR
+Fetch raw HTML from this HTTP or HTTPS URL instead of the current browser page. Mutually exclusive with \-\-file and \-\-stdin
+.TP
+\fB\-\-base\-url\fR \fI<URL>\fR
+Absolute base URL used to resolve relative links and images for \-\-file and \-\-stdin input
+.TP
+\fB\-\-selector\fR \fI<CSS>\fR
+CSS selector that scopes conversion to matching subtree(s) in document order
+.TP
+\fB\-\-strip\-links\fR
+Preserve link text but remove link destinations from Markdown output
+.TP
+\fB\-\-include\-images\fR
+Include useful images as Markdown image references. Images are omitted by default
+.TP
+\fB\-\-max\-input\-bytes\fR \fI<BYTES>\fR [default: 1048576]
+Maximum raw input bytes accepted from \-\-file, \-\-stdin, or \-\-url
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
+.SH EXTRA
+EXAMPLES:
+  # Convert the current browser page to JSON
+  agentchrome markdown \-\-json
+
+  # Emit only the Markdown body for the current page
+  agentchrome markdown \-\-plain
+
+  # Convert a local HTML file and resolve relative links
+  agentchrome markdown \-\-file article.html \-\-base\-url https://example.com/docs/
+
+  # Convert HTML from stdin
+  cat article.html | agentchrome markdown \-\-stdin \-\-base\-url https://example.com/
+
+  # Fetch and convert a URL
+  agentchrome markdown \-\-url https://example.com/article
+
+  # Scope extraction to a CSS selector
+  agentchrome markdown \-\-file article.html \-\-selector main
+
+  # Preserve text but strip link destinations
+  agentchrome markdown \-\-file article.html \-\-strip\-links
+
+  # Include useful images as Markdown image references
+  agentchrome markdown \-\-file article.html \-\-include\-images
+.SH CAPABILITIES
+.PP
+Clean HTML to Markdown
+.TP
+.B markdown
+Clean HTML to Markdown
+.TP
+.B --file
+Read raw HTML from this local file instead of the current browser page. Mutually exclusive with --stdin and --url
+.TP
+.B --stdin
+Read raw HTML from standard input instead of the current browser page. Mutually exclusive with --file and --url
+.TP
+.B --url
+Fetch raw HTML from this HTTP or HTTPS URL instead of the current browser page. Mutually exclusive with --file and --stdin
+.TP
+.B --base-url
+Absolute base URL used to resolve relative links and images for --file and --stdin input
+.TP
+.B --selector
+CSS selector that scopes conversion to matching subtree(s) in document order
+.TP
+.B --strip-links
+Preserve link text but remove link destinations from Markdown output
+.TP
+.B --include-images
+Include useful images as Markdown image references. Images are omitted by default
+.TP
+.B --max-input-bytes
+Maximum raw input bytes accepted from --file, --stdin, or --url
+.SH EXAMPLES
+.PP
+Examples:
+.TP
+.B \`agentchrome markdown\`
+Convert the current browser page to cleaned Markdown JSON
+.TP
+.B \`agentchrome markdown --plain\`
+Emit only the Markdown body for the current browser page
+.TP
+.B \`agentchrome markdown --file article.html --base-url https://example.com/docs/\`
+Convert a local HTML file and resolve relative links
+.TP
+.B \`cat article.html | agentchrome markdown --stdin --base-url https://example.com/\`
+Convert raw HTML from stdin
+.TP
+.B \`agentchrome markdown --url https://example.com/article\`
+Fetch an HTTP/HTTPS URL and convert the response HTML
+.TP
+.B \`agentchrome markdown --file article.html --selector main\`
+Scope conversion to a CSS selector
+.TP
+.B \`agentchrome markdown --file article.html --strip-links\`
+Keep link text while removing link destinations
+.TP
+.B \`agentchrome markdown --file article.html --include-images\`
+Preserve useful images as Markdown image references

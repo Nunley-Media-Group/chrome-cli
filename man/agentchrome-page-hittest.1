@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH hittest 1  "hittest " 
+.TH hittest 1  "hittest "
 .SH NAME
 hittest \- Hit test at viewport coordinates to identify click targets and overlays
 .SH SYNOPSIS
-\fBhittest\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIX\fR> <\fIY\fR> 
+\fBhittest\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIX\fR> <\fIY\fR>
 .SH DESCRIPTION
 Hit test at the given viewport coordinates to identify which element receives a click event. Returns the actual hit target, any intercepting overlay elements, and the full z\-index stack at those coordinates. Useful for debugging failed click interactions caused by invisible overlays.
 .SH OPTIONS

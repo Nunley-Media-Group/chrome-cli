@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH exec 1  "exec " 
+.TH exec 1  "exec "
 .SH NAME
 exec \- Execute JavaScript in the page context
 .SH SYNOPSIS
-\fBexec\fR [\fB\-\-code\fR] [\fB\-\-stdin\fR] [\fB\-\-file\fR] [\fB\-\-uid\fR] [\fB\-\-no\-await\fR] [\fB\-\-timeout\fR] [\fB\-\-max\-size\fR] [\fB\-\-worker\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fICODE\fR] 
+\fBexec\fR [\fB\-\-code\fR] [\fB\-\-stdin\fR] [\fB\-\-file\fR] [\fB\-\-uid\fR] [\fB\-\-no\-await\fR] [\fB\-\-timeout\fR] [\fB\-\-max\-size\fR] [\fB\-\-worker\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fICODE\fR]
 .SH DESCRIPTION
 Execute a JavaScript expression or script in the page context and return the result as JSON. Code can be provided as an inline argument, via \-\-code (recommended for cross\-platform quoting), read from a file with \-\-file, or piped via stdin using \*(Aq\-\-stdin\*(Aq or \*(Aq\-\*(Aq. When \-\-uid is specified, the code is wrapped in a function that receives the element as its first argument. By default, promise results are awaited; use \-\-no\-await to return immediately.
 .SH OPTIONS

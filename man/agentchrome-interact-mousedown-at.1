@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH mousedown-at 1  "mousedown-at " 
+.TH mousedown-at 1  "mousedown-at "
 .SH NAME
 mousedown\-at \- Press mouse button at coordinates (no release)
 .SH SYNOPSIS
-\fBmousedown\-at\fR [\fB\-\-relative\-to\fR] [\fB\-\-button\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIX\fR> <\fIY\fR> 
+\fBmousedown\-at\fR [\fB\-\-relative\-to\fR] [\fB\-\-button\fR] [\fB\-\-include\-snapshot\fR] [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIX\fR> <\fIY\fR>
 .SH DESCRIPTION
 Dispatch only a mousePressed event at specific viewport coordinates. No mouseReleased event is sent, allowing decomposed mouse interactions such as long\-press, drag sequences across multiple invocations, or custom interaction patterns. Use \-\-button to specify left, middle, or right mouse button.
 .SH OPTIONS

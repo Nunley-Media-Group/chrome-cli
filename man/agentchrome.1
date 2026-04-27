@@ -1,12 +1,12 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH agentchrome 1  "agentchrome 1.55.0"
+.TH agentchrome 1  "agentchrome 1.56.0"
 .SH NAME
-agentchrome \- Browser automation via the Chrome DevTools Protocol
+agentchrome \- Browser automation and lighthouse auditing via the Chrome DevTools Protocol
 .SH SYNOPSIS
 \fBagentchrome\fR [\fB\-\-port\fR] [\fB\-\-host\fR] [\fB\-\-ws\-url\fR] [\fB\-\-timeout\fR] [\fB\-\-tab\fR] [\fB\-\-page\-id\fR] [\fB\-\-auto\-dismiss\-dialogs\fR] [\fB\-\-config\fR] [\fB\-\-keepalive\-interval\fR] [\fB\-\-no\-keepalive\fR] [\fB\-\-json\fR] [\fB\-\-pretty\fR] [\fB\-\-plain\fR] [\fB\-\-large\-response\-threshold\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
-agentchrome is a command\-line tool for browser automation via the Chrome DevTools Protocol (CDP). It provides subcommands for connecting to Chrome/Chromium instances, managing tabs, navigating pages, inspecting the DOM, executing JavaScript, monitoring console output, intercepting network requests, simulating user interactions, filling forms, emulating devices, and collecting performance metrics.
+agentchrome is a command\-line tool for browser automation via the Chrome DevTools Protocol (CDP). It provides subcommands for connecting to Chrome/Chromium instances, managing tabs, navigating pages, inspecting the DOM, executing JavaScript, monitoring console output, intercepting network requests, simulating user interactions, filling forms, emulating devices, and collecting performance metrics. Lighthouse\-backed auditing is available through `agentchrome audit lighthouse` and requires the lighthouse npm package.
 .PP
 Designed for AI agents and shell scripting, every subcommand produces structured JSON output on stdout and structured JSON errors on stderr. Global flags control connection settings, output format, and target tab selection.
 .SH OPTIONS
@@ -121,10 +121,13 @@ agentchrome\-media(1)
 Media element control (list, play, pause, seek)
 .TP
 agentchrome\-audit(1)
-Run audits against the current page (requires lighthouse CLI — see \*(Aqaudit lighthouse \-\-help\*(Aq)
+Run current\-page audits
 .TP
 agentchrome\-diagnose(1)
 Pre\-automation challenge scan (iframes, overlays, media gates, frameworks, patterns)
+.TP
+agentchrome\-markdown(1)
+Clean HTML to Markdown
 .TP
 agentchrome\-skill(1)
 Agentic tool skill installation and management
@@ -201,4 +204,4 @@ ENVIRONMENT VARIABLES:
   AGENTCHROME_TIMEOUT  Default command timeout in milliseconds
   AGENTCHROME_CONFIG   Path to configuration file
 .SH VERSION
-v1.55.0
+v1.56.0

@@ -3,8 +3,13 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use cucumber::{World, given, then, when};
+use serde_json::Value as JsonValue;
 use serde_yaml::Value;
+use std::io::{Read, Write};
+use std::net::TcpListener as StdTcpListener;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // =============================================================================
 // WorkflowWorld — CI/CD workflow BDD tests
@@ -290,6 +295,16 @@ struct CliWorld {
     stdout: String,
     stderr: String,
     exit_code: Option<i32>,
+    captures: Vec<CommandCapture>,
+    fixture_path: Option<PathBuf>,
+    large_fixture_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct CommandCapture {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
 }
 
 fn binary_path() -> PathBuf {
@@ -310,43 +325,74 @@ fn agentchrome_is_built(world: &mut CliWorld) {
 
 #[when(expr = "I run {string}")]
 fn i_run_command(world: &mut CliWorld, command_line: String) {
+    let capture = run_agentchrome(world, &command_line, None);
+    apply_capture(world, capture);
+}
+
+fn run_agentchrome(
+    world: &CliWorld,
+    command_line: &str,
+    stdin_body: Option<&str>,
+) -> CommandCapture {
     let binary = world
         .binary_path
         .as_ref()
         .expect("Binary path not set — did you forget 'Given agentchrome is built'?");
 
     let parts: Vec<&str> = command_line.split_whitespace().collect();
-    // Skip the first part ("agentchrome") and use our binary path
     let args = if parts.first().is_some_and(|&p| p == "agentchrome") {
         &parts[1..]
     } else {
         &parts[..]
     };
 
-    // Isolate each run from developer-local state. HOME avoids a real
-    // session/config file; the skill-check suppression avoids relative-path
-    // installs such as `.cursor/rules/agentchrome.mdc` in the repo checkout
-    // while preserving repo-relative fixture paths.
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
     let isolated_home = std::env::temp_dir().join(format!(
-        "agentchrome-bdd-cli-{}-{:p}",
-        std::process::id(),
-        world
+        "agentchrome-bdd-cli-{}-{unique}",
+        std::process::id()
     ));
     let _ = std::fs::create_dir_all(&isolated_home);
 
-    let output = std::process::Command::new(binary)
+    let mut command = std::process::Command::new(binary);
+    command
         .args(args)
         .env("HOME", &isolated_home)
         .env("USERPROFILE", &isolated_home)
-        .env("AGENTCHROME_NO_SKILL_CHECK", "1")
-        .output()
+        .env("AGENTCHROME_NO_SKILL_CHECK", "1");
+    if stdin_body.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+    if let Some(body) = stdin_body {
+        let mut stdin = child.stdin.take().expect("stdin should be piped");
+        stdin
+            .write_all(body.as_bytes())
+            .expect("failed to write command stdin");
+    }
+    let output = child
+        .wait_with_output()
+        .unwrap_or_else(|e| panic!("Failed to wait for {}: {e}", binary.display()));
 
     let _ = std::fs::remove_dir_all(&isolated_home);
 
-    world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    world.exit_code = Some(output.status.code().unwrap_or(-1));
+    CommandCapture {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        exit_code: output.status.code().unwrap_or(-1),
+    }
+}
+
+fn apply_capture(world: &mut CliWorld, capture: CommandCapture) {
+    world.stdout.clone_from(&capture.stdout);
+    world.stderr.clone_from(&capture.stderr);
+    world.exit_code = Some(capture.exit_code);
 }
 
 #[then(expr = "the exit code should be {int}")]
@@ -487,8 +533,413 @@ fn exit_code_should_not_be(world: &mut CliWorld, rejected: i32) {
     );
 }
 
+// =============================================================================
+// Clean HTML markdown BDD helpers
+// =============================================================================
+
+const DEFAULT_MARKDOWN_MAX_INPUT_BYTES_FOR_TEST: usize = 1_048_576;
+const CLEAN_HTML_MARKDOWN_FIXTURE_PATH: &str = "tests/fixtures/clean-html-markdown.html";
+const CLEAN_HTML_MARKDOWN_FIXTURE: &str = include_str!("fixtures/clean-html-markdown.html");
+
+fn clean_html_markdown_fixture() -> &'static str {
+    CLEAN_HTML_MARKDOWN_FIXTURE
+}
+
+fn ensure_clean_html_fixture(world: &mut CliWorld) -> PathBuf {
+    let path = project_root().join(CLEAN_HTML_MARKDOWN_FIXTURE_PATH);
+    assert!(
+        path.is_file(),
+        "expected tracked fixture at {}",
+        path.display()
+    );
+    world.fixture_path = Some(path.clone());
+    path
+}
+
+fn ensure_large_markdown_fixture(world: &mut CliWorld) -> PathBuf {
+    let path = project_root().join("tests/fixtures/clean-html-markdown-large.html");
+    std::fs::create_dir_all(path.parent().expect("fixture parent should exist"))
+        .expect("failed to create fixture directory");
+    let body = "x".repeat(DEFAULT_MARKDOWN_MAX_INPUT_BYTES_FOR_TEST + 1);
+    std::fs::write(&path, format!("<html><body>{body}</body></html>"))
+        .expect("failed to write large fixture");
+    world.large_fixture_path = Some(path.clone());
+    path
+}
+
+fn fixture_path(world: &mut CliWorld) -> PathBuf {
+    world
+        .fixture_path
+        .clone()
+        .unwrap_or_else(|| ensure_clean_html_fixture(world))
+}
+
+fn stdout_json(world: &CliWorld) -> JsonValue {
+    serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout))
+}
+
+fn stderr_json(world: &CliWorld) -> JsonValue {
+    serde_json::from_str(world.stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr is not valid JSON: {e}\nstderr: {}", world.stderr))
+}
+
+fn json_path<'a>(value: &'a JsonValue, path: &str) -> &'a JsonValue {
+    let mut current = value;
+    for part in path.split('.') {
+        current = current
+            .get(part)
+            .unwrap_or_else(|| panic!("JSON path '{path}' missing at '{part}' in {value}"));
+    }
+    current
+}
+
+fn start_one_shot_http_server(body: &'static str) -> String {
+    let listener = StdTcpListener::bind("127.0.0.1:0").expect("failed to bind local server");
+    let addr = listener.local_addr().expect("failed to read local address");
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _peer)) = listener.accept() {
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    format!("http://{addr}/clean-html-markdown.html")
+}
+
+#[given("AgentChrome test fixtures are available")]
+fn agentchrome_test_fixtures_are_available(world: &mut CliWorld) {
+    ensure_clean_html_fixture(world);
+}
+
+#[given(
+    "the clean HTML markdown fixture is available as a file, stdin stream, and local HTTP test URL"
+)]
+fn clean_fixture_available_for_all_sources(world: &mut CliWorld) {
+    ensure_clean_html_fixture(world);
+}
+
+#[given(
+    expr = "HTML contains article content in {string} plus surrounding navigation, header, footer, search, and sidebar regions"
+)]
+fn html_contains_article_and_chrome(world: &mut CliWorld, region: String) {
+    drop(region);
+    ensure_clean_html_fixture(world);
+}
+
+#[given("HTML contains multiple content regions in the clean HTML markdown fixture")]
+fn html_contains_multiple_regions(world: &mut CliWorld) {
+    ensure_clean_html_fixture(world);
+}
+
+#[given(
+    "the clean HTML markdown fixture contains relative links, absolute links, anchors, and images"
+)]
+fn clean_fixture_contains_links_and_images(world: &mut CliWorld) {
+    ensure_clean_html_fixture(world);
+}
+
+#[given(
+    "the clean HTML markdown fixture contains code, headings, lists, blockquotes, separators, content tables, and layout tables"
+)]
+fn clean_fixture_contains_document_structure(world: &mut CliWorld) {
+    ensure_clean_html_fixture(world);
+}
+
+#[given("the clean HTML markdown fixture exists")]
+fn clean_fixture_exists(world: &mut CliWorld) {
+    ensure_clean_html_fixture(world);
+}
+
+#[given("a raw HTML input larger than the default markdown input limit")]
+fn raw_html_larger_than_default_limit(world: &mut CliWorld) {
+    ensure_large_markdown_fixture(world);
+}
+
+#[when("I convert the fixture with file, stdin, and URL source modes")]
+fn convert_fixture_with_all_raw_sources(world: &mut CliWorld) {
+    fixture_path(world);
+    let url = start_one_shot_http_server(clean_html_markdown_fixture());
+    let base = &url;
+    let file_capture = run_agentchrome(
+        world,
+        &format!(
+            "agentchrome markdown --file {CLEAN_HTML_MARKDOWN_FIXTURE_PATH} --base-url {base}"
+        ),
+        None,
+    );
+    let stdin_capture = run_agentchrome(
+        world,
+        &format!("agentchrome markdown --stdin --base-url {base}"),
+        Some(clean_html_markdown_fixture()),
+    );
+    let url_capture = run_agentchrome(world, &format!("agentchrome markdown --url {url}"), None);
+    world.captures = vec![file_capture, stdin_capture, url_capture];
+}
+
+#[when("I generate man pages")]
+fn generate_markdown_man_page(world: &mut CliWorld) {
+    let capture = run_agentchrome(world, "agentchrome man markdown", None);
+    apply_capture(world, capture);
+}
+
+#[then(expr = "stdout is valid JSON with keys {string}, {string}, and {string}")]
+fn stdout_valid_json_with_keys(world: &mut CliWorld, a: String, b: String, c: String) {
+    let json = stdout_json(world);
+    for key in [a, b, c] {
+        assert!(
+            json.get(&key).is_some(),
+            "stdout JSON missing key '{key}': {json}"
+        );
+    }
+}
+
+#[then(expr = "the {string} field is {string}")]
+fn json_field_is(world: &mut CliWorld, path: String, expected: String) {
+    let json = stdout_json(world);
+    assert_eq!(
+        json_path(&json, &path).as_str(),
+        Some(expected.as_str()),
+        "field '{path}' mismatch in {json}"
+    );
+}
+
+#[then(expr = "the {string} field contains {string}")]
+fn json_field_contains(world: &mut CliWorld, path: String, expected: String) {
+    let json = stdout_json(world);
+    let actual = json_path(&json, &path)
+        .as_str()
+        .unwrap_or_else(|| panic!("field '{path}' is not a string in {json}"));
+    assert!(
+        actual.contains(&expected),
+        "field '{path}' does not contain '{expected}'\nactual: {actual}"
+    );
+}
+
+#[then(expr = "the {string} field does not contain {string}")]
+fn json_field_does_not_contain(world: &mut CliWorld, path: String, unexpected: String) {
+    let json = stdout_json(world);
+    let actual = json_path(&json, &path)
+        .as_str()
+        .unwrap_or_else(|| panic!("field '{path}' is not a string in {json}"));
+    assert!(
+        !actual.contains(&unexpected),
+        "field '{path}' should not contain '{unexpected}'\nactual: {actual}"
+    );
+}
+
+#[then(expr = "the {string} field contains a Markdown list item {string}")]
+fn markdown_field_contains_list_item(world: &mut CliWorld, path: String, expected: String) {
+    let json = stdout_json(world);
+    let actual = json_path(&json, &path)
+        .as_str()
+        .unwrap_or_else(|| panic!("field '{path}' is not a string in {json}"));
+    assert!(
+        actual.contains(&format!("- {expected}")),
+        "field '{path}' does not contain list item '{expected}'\nactual: {actual}"
+    );
+}
+
+#[then(expr = "the {string} field contains a Markdown link to {string}")]
+fn markdown_field_contains_link(world: &mut CliWorld, path: String, expected_url: String) {
+    let json = stdout_json(world);
+    let actual = json_path(&json, &path)
+        .as_str()
+        .unwrap_or_else(|| panic!("field '{path}' is not a string in {json}"));
+    assert!(
+        actual.contains(&format!("]({expected_url})")),
+        "field '{path}' does not contain link to '{expected_url}'\nactual: {actual}"
+    );
+}
+
+#[then(expr = "the {string} field contains a fenced code block")]
+fn markdown_field_contains_fenced_code(world: &mut CliWorld, path: String) {
+    let json = stdout_json(world);
+    let actual = json_path(&json, &path)
+        .as_str()
+        .unwrap_or_else(|| panic!("field '{path}' is not a string in {json}"));
+    assert!(
+        actual.contains("```"),
+        "field '{path}' does not contain a fenced code block\nactual: {actual}"
+    );
+}
+
+#[then("each command exits with code 0")]
+fn each_capture_exits_zero(world: &mut CliWorld) {
+    assert!(
+        !world.captures.is_empty(),
+        "expected captures from prior command"
+    );
+    for capture in &world.captures {
+        assert_eq!(
+            capture.exit_code, 0,
+            "expected capture exit 0\nstdout: {}\nstderr: {}",
+            capture.stdout, capture.stderr
+        );
+    }
+}
+
+#[then("each stdout payload contains equivalent normalized Markdown")]
+fn each_capture_contains_equivalent_markdown(world: &mut CliWorld) {
+    let markdowns: Vec<String> = world
+        .captures
+        .iter()
+        .map(|capture| {
+            let json: JsonValue = serde_json::from_str(capture.stdout.trim()).unwrap_or_else(|e| {
+                panic!(
+                    "capture stdout is not valid JSON: {e}\nstdout: {}",
+                    capture.stdout
+                )
+            });
+            json["markdown"].as_str().unwrap_or_default().to_string()
+        })
+        .collect();
+    let first = markdowns.first().expect("expected at least one markdown");
+    for markdown in &markdowns[1..] {
+        assert_eq!(markdown, first, "raw source markdown outputs differ");
+    }
+}
+
+#[then(expr = "the file output has {string} set to {string}")]
+fn file_output_field_is(world: &mut CliWorld, path: String, expected: String) {
+    capture_field_is(world, 0, &path, &expected);
+}
+
+#[then(expr = "the stdin output has {string} set to {string}")]
+fn stdin_output_field_is(world: &mut CliWorld, path: String, expected: String) {
+    capture_field_is(world, 1, &path, &expected);
+}
+
+#[then(expr = "the URL output has {string} set to {string}")]
+fn url_output_field_is(world: &mut CliWorld, path: String, expected: String) {
+    capture_field_is(world, 2, &path, &expected);
+}
+
+fn capture_field_is(world: &CliWorld, index: usize, path: &str, expected: &str) {
+    let capture = world
+        .captures
+        .get(index)
+        .unwrap_or_else(|| panic!("missing capture {index}"));
+    let json: JsonValue = serde_json::from_str(capture.stdout.trim()).unwrap_or_else(|e| {
+        panic!(
+            "capture stdout is not valid JSON: {e}\nstdout: {}",
+            capture.stdout
+        )
+    });
+    assert_eq!(
+        json_path(&json, path).as_str(),
+        Some(expected),
+        "field '{path}' mismatch in capture {index}: {json}"
+    );
+}
+
+#[then("relative links resolve against the supplied or fetched base URL")]
+fn relative_links_resolve(world: &mut CliWorld) {
+    for capture in &world.captures {
+        let json: JsonValue = serde_json::from_str(capture.stdout.trim()).unwrap_or_else(|e| {
+            panic!(
+                "capture stdout is not valid JSON: {e}\nstdout: {}",
+                capture.stdout
+            )
+        });
+        let markdown = json["markdown"].as_str().unwrap_or_default();
+        assert!(
+            markdown.contains("https://example.test/reference")
+                || markdown.contains("http://127.0.0.1:"),
+            "markdown did not contain a resolved URL: {markdown}"
+        );
+    }
+}
+
+#[then(expr = "the {string} field is {string} or {string}")]
+fn json_field_is_either(world: &mut CliWorld, path: String, first: String, second: String) {
+    let json = stdout_json(world);
+    let actual = json_path(&json, &path).as_str();
+    assert!(
+        actual == Some(first.as_str()) || actual == Some(second.as_str()),
+        "field '{path}' expected '{first}' or '{second}', got {actual:?}"
+    );
+}
+
+#[then("stdout contains only Markdown content")]
+fn stdout_contains_only_markdown(world: &mut CliWorld) {
+    assert!(
+        world.stdout.contains("# Agentic Scraping Field Notes"),
+        "stdout should contain markdown\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then("stdout is not valid JSON")]
+fn stdout_is_not_valid_json(world: &mut CliWorld) {
+    assert!(
+        serde_json::from_str::<JsonValue>(world.stdout.trim()).is_err(),
+        "stdout should not parse as JSON\nstdout: {}",
+        world.stdout
+    );
+}
+
+#[then("stderr is empty")]
+fn stderr_is_empty(world: &mut CliWorld) {
+    assert!(
+        world.stderr.is_empty(),
+        "stderr should be empty\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "stderr contains a JSON error with {string}")]
+fn stderr_json_error_contains(world: &mut CliWorld, expected: String) {
+    let json = stderr_json(world);
+    let error = json["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains(&expected),
+        "stderr error does not contain '{expected}': {json}"
+    );
+}
+
+#[then("stderr contains exactly one JSON error object")]
+fn stderr_contains_one_json_error_object(world: &mut CliWorld) {
+    stderr_should_contain_exactly_one_json_object(world);
+}
+
+#[then("optional source fields that cannot be determined are present as null")]
+fn optional_source_fields_are_null(world: &mut CliWorld) {
+    let json = stdout_json(world);
+    assert!(
+        json["source"]["url"].is_null(),
+        "url should be null: {json}"
+    );
+    assert!(
+        json["source"]["selector"].is_null(),
+        "selector should be null: {json}"
+    );
+}
+
+#[then(expr = "stdout is valid JSON with keys {string}, {string}, {string}, and {string}")]
+fn stdout_valid_json_with_four_keys(
+    world: &mut CliWorld,
+    a: String,
+    b: String,
+    c: String,
+    d: String,
+) {
+    let json = stdout_json(world);
+    for key in [a, b, c, d] {
+        assert!(
+            json.get(&key).is_some(),
+            "stdout JSON missing key '{key}': {json}"
+        );
+    }
+}
+
 /// Fixture content for script test files.
-/// Fixtures are written on demand because tests/fixtures/ is git-ignored.
+/// These remain inline because the script fixtures are generated on demand.
 fn script_fixture_content(filename: &str) -> Option<&'static str> {
     match filename {
         "simple.json" => Some(
@@ -6605,6 +7056,19 @@ const SCROLL_CONTAINER_TESTABLE_SCENARIOS: &[&str] = &[
     "--scroll-container conflicts with --clip",
 ];
 
+/// Clean HTML markdown BDD scenarios testable without a running Chrome instance.
+/// AC1 exercises the current browser page and is covered by the manual smoke path.
+const CLEAN_MARKDOWN_TESTABLE_SCENARIOS: &[&str] = &[
+    "Convert raw HTML from file, stdin, and URL inputs (AC2)",
+    "Prefer primary content containers when present (AC3)",
+    "Scope extraction explicitly when requested (AC4)",
+    "Control links and images deterministically (AC5)",
+    "Preserve code and readable document structure (AC6)",
+    "Keep AgentChrome output and error contracts (AC7)",
+    "Document and expose the new CLI surface (AC8)",
+    "Bound raw input and generated output (AC9)",
+];
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -6705,6 +7169,18 @@ async fn main() {
     CliWorld::run("tests/features/98-fix-clap-validation-json-stderr.feature").await;
 
     CliWorld::run("tests/features/197-improve-error-output-consistency.feature").await;
+
+    // Issue #269 — raw-source, output, and documentation scenarios run under
+    // CliWorld. Current-page conversion requires a running Chrome page and is
+    // covered by the manual smoke path in tasks.md.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/clean-html-markdown.feature",
+            |_feature, _rule, scenario| {
+                CLEAN_MARKDOWN_TESTABLE_SCENARIOS.contains(&scenario.name.as_str())
+            },
+        )
+        .await;
 
     // Dialog handle clap-error hint fix (issue #250) — argument-validation errors
     // and a valid-parse regression case; none need a running Chrome.

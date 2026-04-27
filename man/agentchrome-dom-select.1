@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH select 1  "select " 
+.TH select 1  "select "
 .SH NAME
 select \- Select elements by CSS selector or XPath
 .SH SYNOPSIS
-\fBselect\fR [\fB\-\-xpath\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISELECTOR\fR> 
+\fBselect\fR [\fB\-\-xpath\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fISELECTOR\fR>
 .SH DESCRIPTION
 Query elements in the DOM by CSS selector (default) or XPath expression (with \-\-xpath). Returns a JSON array of matching elements with their node IDs, tag names, attributes, and text content. Node IDs can be used with other dom subcommands.
 .SH OPTIONS

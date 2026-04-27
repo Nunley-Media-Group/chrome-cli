@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH set 1  "set " 
+.TH set 1  "set "
 .SH NAME
 set \- Apply one or more emulation overrides
 .SH SYNOPSIS
-\fBset\fR [\fB\-\-network\fR] [\fB\-\-cpu\fR] [\fB\-\-geolocation\fR] [\fB\-\-no\-geolocation\fR] [\fB\-\-user\-agent\fR] [\fB\-\-no\-user\-agent\fR] [\fB\-\-color\-scheme\fR] [\fB\-\-viewport\fR] [\fB\-\-device\-scale\fR] [\fB\-\-mobile\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBset\fR [\fB\-\-network\fR] [\fB\-\-cpu\fR] [\fB\-\-geolocation\fR] [\fB\-\-no\-geolocation\fR] [\fB\-\-user\-agent\fR] [\fB\-\-no\-user\-agent\fR] [\fB\-\-color\-scheme\fR] [\fB\-\-viewport\fR] [\fB\-\-device\-scale\fR] [\fB\-\-mobile\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Apply one or more device or network emulation overrides. Multiple overrides can be combined in a single command (e.g., viewport + network + user agent). Overrides persist until \*(Aqemulate reset\*(Aq is called or the browser is closed. Note: \-\-geolocation and \-\-no\-geolocation are mutually exclusive, as are \-\-user\-agent and \-\-no\-user\-agent.
 .SH OPTIONS

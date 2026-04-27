@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH capabilities 1  "capabilities " 
+.TH capabilities 1  "capabilities "
 .SH NAME
 capabilities \- Output a machine\-readable manifest of all CLI capabilities
 .SH SYNOPSIS
-\fBcapabilities\fR [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fICOMMAND\fR] 
+\fBcapabilities\fR [\fB\-\-compact\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fICOMMAND\fR]
 .SH DESCRIPTION
 Output a machine\-readable manifest of agentchrome CLI capabilities. Without arguments, returns a lightweight listing (name + description per command) for cheap discovery. With a command name, returns the full detail descriptor for that command — subcommands, args, flags, types. The manifest is generated at runtime from the clap command tree, so it is always in sync with the binary.
 .SH OPTIONS

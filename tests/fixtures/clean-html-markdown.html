@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+  <title>Agentic Scraping Field Notes</title>
+  <base href="https://example.test/">
+  <style>.hidden { display: none; }</style>
+  <script>function trackingPixel(){ return true; }</script>
+</head>
+<body>
+  <!-- AC1/AC3: surrounding chrome should be removed. -->
+  <header>Global navigation</header>
+  <nav>Global navigation links</nav>
+  <aside class="sidebar">Newsletter signup</aside>
+  <div class="cookie-banner">Cookie preferences</div>
+  <svg><text>Icon sprite</text></svg>
+  <div hidden>Hidden offer</div>
+  <main>
+    <article>
+      <h1>Agentic Scraping Field Notes</h1>
+      <p>Primary article paragraph for clean markdown conversion.</p>
+      <ul>
+        <li>Preserve semantic structure</li>
+        <li>Reduce boilerplate context</li>
+      </ul>
+      <!-- AC5: relative links, anchors, and images exercise deterministic link/image handling. -->
+      <p><a href="/reference">Reference</a> and <a href="#appendix">Appendix anchor</a></p>
+      <img src="images/architecture.png" alt="Architecture diagram">
+      <!-- AC6: blockquote, code, separator, content table, and layout table exercise structure preservation. -->
+      <blockquote>Keep source context small.</blockquote>
+      <pre><code class="language-rust">fn scrape() {
+    println!("clean");
+}</code></pre>
+      <hr>
+      <table>
+        <tr><th>Field</th><th>Meaning</th></tr>
+        <tr><td>url</td><td>source address</td></tr>
+      </table>
+      <table class="layout">
+        <tr><td>Layout table text</td></tr>
+      </table>
+    </article>
+    <!-- AC4: selector scoping targets this region without including the primary article. -->
+    <section id="appendix">
+      <h2>Appendix</h2>
+      <p>Selector-only appendix content.</p>
+    </section>
+  </main>
+  <footer>Footer links</footer>
+</body>
+</html>

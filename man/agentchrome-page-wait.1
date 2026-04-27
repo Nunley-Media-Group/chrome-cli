@@ -1,10 +1,10 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH wait 1  "wait " 
+.TH wait 1  "wait "
 .SH NAME
 wait \- Wait until a condition is met on the current page
 .SH SYNOPSIS
-\fBwait\fR [\fB\-\-url\fR] [\fB\-\-text\fR] [\fB\-\-selector\fR] [\fB\-\-network\-idle\fR] [\fB\-\-js\-expression\fR] [\fB\-\-count\fR] [\fB\-\-interval\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBwait\fR [\fB\-\-url\fR] [\fB\-\-text\fR] [\fB\-\-selector\fR] [\fB\-\-network\-idle\fR] [\fB\-\-js\-expression\fR] [\fB\-\-count\fR] [\fB\-\-interval\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Wait until a specified condition is met on the current page. Supports waiting for a URL to match a glob pattern, text to appear, a CSS selector to match, network activity to settle, or a JavaScript expression to evaluate to truthy. Exactly one condition must be specified. The command blocks until the condition is satisfied or the timeout is reached.
 .SH OPTIONS
