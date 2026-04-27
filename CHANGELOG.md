@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.55.0] - 2026-04-26
+
+### Added
+
+- Scope stale-skill notices to the active runtime tool when one is detected, while preserving the all-tools fallback when AgentChrome is run outside a detected tool session. (#255)
+
 ## [1.54.0] - 2026-04-26
 
 ### Fixed

@@ -1,7 +1,7 @@
 # Requirements: Add agentchrome skill Command Group
 
-**Issues**: #172, #214, #263, #268
-**Date**: 2026-04-25
+**Issues**: #172, #214, #263, #268, #255
+**Date**: 2026-04-26
 **Status**: Draft
 **Author**: Claude (AI-assisted)
 
@@ -271,6 +271,41 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 **Then** the command updates all stale tools named in the notice where the target paths are writable
 **And** the user does not need to rerun `agentchrome skill update --tool <name>` for each stale tool
 
+### AC31: Active tool suppresses unrelated stale-skill notices
+
+**Given** the active agentic tool is detected as Claude Code from an environment variable or parent-process signal
+**And** the Claude Code AgentChrome skill is current
+**And** the Cursor AgentChrome skill is stale
+**When** any `agentchrome` command runs from within Claude Code
+**Then** no stale-skill notice is emitted
+**And** the user is not warned about the inactive Cursor skill during the Claude Code session
+
+### AC32: Active stale skill emits a single-tool notice
+
+**Given** the active agentic tool is detected as Claude Code from an environment variable or parent-process signal
+**And** the Claude Code AgentChrome skill is stale
+**And** another installed AgentChrome skill is also stale
+**When** any `agentchrome` command runs from within Claude Code
+**Then** exactly one stale-skill notice is emitted
+**And** the notice names `claude-code`
+**And** the notice does not name the inactive stale tool
+
+### AC33: No active tool preserves all-tools fallback
+
+**Given** no active agentic tool can be detected from environment variables or parent-process identity
+**And** one or more installed AgentChrome skills are stale
+**When** any `agentchrome` command runs from a plain terminal
+**Then** the stale-skill notice uses the existing registry-wide scan
+**And** every stale installed tool discovered by that scan is named or aggregated exactly as before
+
+### AC34: Scoped stale notice keeps version details and update guidance
+
+**Given** an active-tool-scoped stale-skill notice is emitted
+**When** a developer reads the notice
+**Then** it names the active stale tool
+**And** it includes the installed skill version and binary version
+**And** it continues to recommend `agentchrome skill update`
+
 ---
 
 ## Functional Requirements
@@ -314,6 +349,10 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | FR34 | Multi-target success output is structured JSON with per-target tool, path, action, and version details. | Must | Issue #268; preserve machine readability for AI agents |
 | FR35 | Multi-target partial failure output identifies which targets succeeded and failed. | Must | Issue #268; preserve typed exit-code behavior and actionable errors |
 | FR36 | Tests cover Codex plus at least one other installed or detected tool in the same command run. | Must | Issue #268; prevents regression to first-detected behavior |
+| FR37 | Stale-skill notices detect an active tool using only runtime identity signals: explicit tool environment variables and parent-process identity. | Must | Issue #255; passive config directories and installed files are not active-session signals |
+| FR38 | When an active tool is detected, `emit_stale_notice_if_any` checks only that tool's canonical AgentChrome skill path before deciding whether to emit a notice. | Must | Issue #255; a current active skill suppresses unrelated stale inactive installs |
+| FR39 | When no active tool is detected, stale-skill notices preserve the existing registry-wide all-tools scan and aggregation behavior. | Must | Issue #255; plain terminal users still see every stale installed skill |
+| FR40 | Tests cover active current/inactive stale, active stale with other stale installs, no-active fallback, and notice version-detail formatting. | Must | Issue #255; guards the scoped-notice behavior and no-regression fallback |
 
 ---
 
@@ -364,6 +403,15 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | `results[].version` | String | AgentChrome version written for successful install/update targets |
 | `results[].status` | String | `ok` or `error` |
 | `results[].error` | String or null | Failure reason for targets that could not be resolved or written |
+
+### Notice Scope Amendment (#255)
+
+| State | Stale-skill notice behavior |
+|-------|-----------------------------|
+| Active tool detected from env or parent process, active tool is current or missing | Emit no stale-skill notice, even if other installed tools are stale |
+| Active tool detected from env or parent process, active tool is stale | Emit the existing single-tool notice for the active tool only |
+| No active env or parent-process signal | Use the existing registry-wide fallback and aggregate every stale installed tool |
+| Only config directories or installed skill files are present | Treat as no active tool for notice scoping; config directories are passive install/discovery signals |
 
 ### Output Data (list)
 
@@ -429,6 +477,8 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 - Changing Codex itself or its skill loader behavior
 - Rewriting the existing AgentChrome skill template beyond what Codex support requires
 - Changing the JSON output contract for existing `agentchrome skill` commands
+- Changing `agentchrome skill update` target selection or automatically updating inactive stale tools from the notice path
+- Treating passive config-directory existence as proof of the currently active agentic tool for stale-notice scoping
 
 ---
 
@@ -456,6 +506,14 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | Bare install coverage | Multiple detected tools installed by one `agentchrome skill install` invocation | BDD scenario with multiple temp-home detection signals |
 | Explicit-target compatibility | Explicit install/update/uninstall still return the existing single-target JSON shape | Unit or BDD assertion for `--tool codex` plus another explicit target |
 
+### Success Metrics Amendment (#255)
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Active-session relevance | A current active tool session emits no stale warning for inactive stale installs | BDD scenario with active Claude Code current and Cursor stale |
+| Active stale precision | A stale active tool notice names only the active stale tool and preserves version guidance | Unit or BDD assertion on notice content |
+| Plain-terminal fallback | No active tool signal still reports all stale installed skills | BDD scenario with multiple stale installs and no active signal |
+
 ---
 
 ## Open Questions
@@ -472,6 +530,7 @@ agentchrome is an AI-native CLI tool with rich built-in help (`--help`, `capabil
 | #214 | 2026-04-16 | Add Gemini CLI as 7th supported tool (AC13–AC18, FR16–FR22) |
 | #263 | 2026-04-24 | Add Codex as a supported skill installer target |
 | #268 | 2026-04-25 | Make bare skill install/update cover all detected or stale agent targets |
+| #255 | 2026-04-26 | Scope stale-skill notices to the active tool when one is detected |
 
 ---
 

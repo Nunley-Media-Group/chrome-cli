@@ -156,10 +156,26 @@ pub(crate) fn installed_skill_inventory() -> Vec<InstalledSkill> {
         .collect()
 }
 
-/// Collect all tools whose installed skill file reports an older version than
-/// the running binary.
-pub(crate) fn stale_tools() -> Vec<StaleTool> {
-    installed_skill_inventory()
+fn stale_tools_for_notice(
+    active_tool: Option<&'static crate::skill::ToolInfo>,
+    inventory: Vec<InstalledSkill>,
+) -> Vec<StaleTool> {
+    if let Some(active_tool) = active_tool {
+        return inventory
+            .into_iter()
+            .find(|entry| entry.tool.name == active_tool.name)
+            .and_then(|entry| match entry.status {
+                InstalledSkillStatus::Stale { installed_version } => Some(StaleTool {
+                    tool: entry.tool,
+                    installed_version,
+                }),
+                InstalledSkillStatus::Missing | InstalledSkillStatus::Current => None,
+            })
+            .into_iter()
+            .collect();
+    }
+
+    inventory
         .into_iter()
         .filter_map(|entry| match entry.status {
             InstalledSkillStatus::Stale { installed_version } => Some(StaleTool {
@@ -249,7 +265,10 @@ pub fn emit_stale_notice_if_any(config: &ConfigFile) {
         return;
     }
 
-    let stale = stale_tools();
+    let stale = stale_tools_for_notice(
+        crate::skill::detect_active_tool(),
+        installed_skill_inventory(),
+    );
     if let Some(notice) = format_notice(&stale) {
         eprintln!("{notice}");
     }
@@ -407,6 +426,80 @@ mod tests {
             notice.contains("v1.38.0"),
             "must report oldest installed version"
         );
+    }
+
+    // =========================================================================
+    // stale_tools_for_notice — active-tool scoping
+    // =========================================================================
+
+    fn inventory_entry(tool: &'static str, status: InstalledSkillStatus) -> InstalledSkill {
+        InstalledSkill {
+            tool: crate::skill::find_tool(tool).unwrap(),
+            status,
+        }
+    }
+
+    #[test]
+    fn active_current_tool_ignores_inactive_stale_tool() {
+        let inventory = vec![
+            inventory_entry("claude-code", InstalledSkillStatus::Current),
+            inventory_entry(
+                "cursor",
+                InstalledSkillStatus::Stale {
+                    installed_version: (0, 1, 0),
+                },
+            ),
+        ];
+        let stale = stale_tools_for_notice(
+            Some(crate::skill::find_tool("claude-code").unwrap()),
+            inventory,
+        );
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn active_stale_tool_emits_single_active_notice_candidate() {
+        let inventory = vec![
+            inventory_entry(
+                "claude-code",
+                InstalledSkillStatus::Stale {
+                    installed_version: (0, 1, 0),
+                },
+            ),
+            inventory_entry(
+                "cursor",
+                InstalledSkillStatus::Stale {
+                    installed_version: (0, 1, 0),
+                },
+            ),
+        ];
+        let stale = stale_tools_for_notice(
+            Some(crate::skill::find_tool("claude-code").unwrap()),
+            inventory,
+        );
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].tool.name, "claude-code");
+    }
+
+    #[test]
+    fn no_active_tool_preserves_registry_wide_fallback() {
+        let inventory = vec![
+            inventory_entry(
+                "claude-code",
+                InstalledSkillStatus::Stale {
+                    installed_version: (0, 1, 0),
+                },
+            ),
+            inventory_entry(
+                "cursor",
+                InstalledSkillStatus::Stale {
+                    installed_version: (0, 1, 0),
+                },
+            ),
+        ];
+        let stale = stale_tools_for_notice(None, inventory);
+        let names: Vec<&str> = stale.iter().map(|entry| entry.tool.name).collect();
+        assert_eq!(names, vec!["claude-code", "cursor"]);
     }
 
     // =========================================================================

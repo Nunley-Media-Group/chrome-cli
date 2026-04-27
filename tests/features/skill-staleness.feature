@@ -98,3 +98,38 @@ Feature: Skill staleness check notifies when installed skill is behind binary
     Then stderr does not contain "note: installed agentchrome skill"
     When I invoke agentchrome with the planted home without the suppression env var
     Then stderr contains a line starting with "note: installed agentchrome skill for claude-code"
+
+  # --- Issue #255: Active-tool-scoped notices ---
+
+  Scenario: Active tool current suppresses unrelated stale-skill notices (AC31)
+    Given the active agentic tool signal is "claude-code"
+    And the installed AgentChrome skill for "claude-code" is current in a temp home
+    And the installed AgentChrome skill for "cursor" has stale version "0.1.0" in the same temp home
+    When any AgentChrome command is invoked with the temp home
+    Then stderr does not contain a stale-skill notice
+
+  Scenario: Active stale skill emits notice only for the active tool (AC32)
+    Given the active agentic tool signal is "claude-code"
+    And the installed AgentChrome skill for "claude-code" has stale version "0.1.0" in a temp home
+    And the installed AgentChrome skill for "cursor" has stale version "0.1.0" in the same temp home
+    When any AgentChrome command is invoked with the temp home
+    Then stderr contains exactly one staleness notice line
+    And the staleness notice names "claude-code"
+    And the staleness notice does not name "cursor"
+
+  Scenario: No active tool preserves all-tools stale notice fallback (AC33)
+    Given no active agentic tool signal is present
+    And installed AgentChrome skills for "claude-code" and "cursor" have stale versions in a temp home
+    When any AgentChrome command is invoked with the temp home
+    Then stderr contains exactly one staleness notice line
+    And the staleness notice names "claude-code"
+    And the staleness notice names "cursor"
+
+  Scenario: Scoped stale notice includes version details and update guidance (AC34)
+    Given the active agentic tool signal is "claude-code"
+    And the installed AgentChrome skill for "claude-code" has stale version "0.1.0" in a temp home
+    When any AgentChrome command is invoked with the temp home
+    Then stderr contains exactly one staleness notice line
+    And the staleness notice contains the installed skill version "0.1.0"
+    And the staleness notice contains the current AgentChrome binary version
+    And the staleness notice says "run 'agentchrome skill update' to refresh"

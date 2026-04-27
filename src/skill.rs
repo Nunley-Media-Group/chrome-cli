@@ -272,6 +272,45 @@ fn detect_tool() -> Option<&'static ToolInfo> {
     None
 }
 
+pub(crate) fn detect_active_tool() -> Option<&'static ToolInfo> {
+    let env: Vec<(String, String)> = std::env::vars().collect();
+    let parent = std::env::var("_").ok();
+    detect_active_tool_with(&env, parent.as_deref())
+}
+
+fn detect_active_tool_with(
+    env: &[(String, String)],
+    parent: Option<&str>,
+) -> Option<&'static ToolInfo> {
+    if env_has_key(env, "CLAUDE_CODE") {
+        return find_tool("claude-code");
+    }
+    if env_has_prefix(env, "WINDSURF_") {
+        return find_tool("windsurf");
+    }
+    if env_has_prefix(env, "AIDER_") {
+        return find_tool("aider");
+    }
+    if env_has_prefix(env, "CURSOR_") {
+        return find_tool("cursor");
+    }
+    if env_has_prefix(env, "GEMINI_") {
+        return find_tool("gemini");
+    }
+    if env_has_non_empty_key(env, "CODEX_HOME") {
+        return find_tool("codex");
+    }
+
+    if parent_contains(parent, "claude") {
+        return find_tool("claude-code");
+    }
+    if parent_contains(parent, "aider") {
+        return find_tool("aider");
+    }
+
+    None
+}
+
 fn detected_tools() -> Vec<&'static ToolInfo> {
     let env: Vec<(String, String)> = std::env::vars().collect();
     let parent = std::env::var("_").ok();
@@ -1369,6 +1408,61 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|tool| tool.name).collect();
 
         assert_eq!(names, vec!["continue", "codex"]);
+    }
+
+    #[test]
+    fn detect_active_tool_uses_env_signals() {
+        let env = vec![("CLAUDE_CODE".to_string(), "1".to_string())];
+        let tool = detect_active_tool_with(&env, None).expect("active tool should be detected");
+        assert_eq!(tool.name, "claude-code");
+    }
+
+    #[test]
+    fn detect_active_tool_uses_parent_process_identity() {
+        let tool = detect_active_tool_with(&[], Some("/usr/local/bin/aider"))
+            .expect("active tool should be detected");
+        assert_eq!(tool.name, "aider");
+    }
+
+    #[test]
+    fn detect_active_tool_respects_env_priority_over_parent() {
+        let env = vec![("CLAUDE_CODE".to_string(), "1".to_string())];
+        let tool = detect_active_tool_with(&env, Some("/usr/local/bin/aider"))
+            .expect("active tool should be detected");
+        assert_eq!(tool.name, "claude-code");
+    }
+
+    #[test]
+    fn detect_active_tool_uses_codex_home_signal() {
+        let env = vec![("CODEX_HOME".to_string(), "/tmp/codex".to_string())];
+        let tool = detect_active_tool_with(&env, None).expect("active tool should be detected");
+        assert_eq!(tool.name, "codex");
+    }
+
+    #[test]
+    fn detect_active_tool_ignores_config_directory_only_signals() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+
+        let install_targets = detected_tools_with(&[], None, Some(dir.path()));
+        assert_eq!(
+            install_targets
+                .iter()
+                .map(|tool| tool.name)
+                .collect::<Vec<_>>(),
+            vec!["codex"]
+        );
+
+        assert!(
+            detect_active_tool_with(&[], None).is_none(),
+            "active-tool detection must ignore passive config directories"
+        );
+    }
+
+    #[test]
+    fn detect_active_tool_ignores_empty_codex_home() {
+        let env = vec![("CODEX_HOME".to_string(), String::new())];
+        assert!(detect_active_tool_with(&env, None).is_none());
     }
 
     #[test]
