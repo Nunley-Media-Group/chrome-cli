@@ -138,7 +138,7 @@ pub(crate) static TOOLS: &[ToolInfo] = &[
     },
     ToolInfo {
         name: "codex",
-        detection: "CODEX_HOME env var or ~/.codex/ directory exists",
+        detection: "CODEX_HOME, CODEX_CI, CODEX_MANAGED_BY_NPM, or CODEX_THREAD_ID env var, or ~/.codex/ directory exists",
         install_mode: InstallMode::Standalone {
             path_template: "$CODEX_HOME/skills/agentchrome/SKILL.md",
         },
@@ -216,6 +216,13 @@ fn skill_content() -> String {
 // Detection heuristic
 // =============================================================================
 
+const CODEX_RUNTIME_ENV_KEYS: &[&str] = &[
+    "CODEX_HOME",
+    "CODEX_CI",
+    "CODEX_MANAGED_BY_NPM",
+    "CODEX_THREAD_ID",
+];
+
 fn detect_tool() -> Option<&'static ToolInfo> {
     // Tier 1: Environment variables (highest priority)
     if std::env::var("CLAUDE_CODE").is_ok() {
@@ -233,7 +240,7 @@ fn detect_tool() -> Option<&'static ToolInfo> {
     if has_env_prefix("GEMINI_") {
         return find_tool("gemini");
     }
-    if std::env::var("CODEX_HOME").is_ok_and(|value| !value.is_empty()) {
+    if std_env_has_codex_runtime_signal() {
         return find_tool("codex");
     }
 
@@ -297,7 +304,7 @@ fn detect_active_tool_with(
     if env_has_prefix(env, "GEMINI_") {
         return find_tool("gemini");
     }
-    if env_has_non_empty_key(env, "CODEX_HOME") {
+    if env_has_codex_runtime_signal(env) {
         return find_tool("codex");
     }
 
@@ -343,7 +350,7 @@ fn tool_detected_with(
         "copilot-jb" => home_has_dir(home, ".config/github-copilot"),
         "cursor" => env_has_prefix(env, "CURSOR_") || home_has_dir(home, ".cursor"),
         "gemini" => env_has_prefix(env, "GEMINI_") || home_has_dir(home, ".gemini"),
-        "codex" => env_has_non_empty_key(env, "CODEX_HOME") || home_has_dir(home, ".codex"),
+        "codex" => env_has_codex_runtime_signal(env) || home_has_dir(home, ".codex"),
         _ => false,
     }
 }
@@ -359,6 +366,18 @@ fn env_has_non_empty_key(env: &[(String, String)], key: &str) -> bool {
 
 fn env_has_prefix(env: &[(String, String)], prefix: &str) -> bool {
     env.iter().any(|(key, _)| key.starts_with(prefix))
+}
+
+fn env_has_codex_runtime_signal(env: &[(String, String)]) -> bool {
+    CODEX_RUNTIME_ENV_KEYS
+        .iter()
+        .any(|key| env_has_non_empty_key(env, key))
+}
+
+fn std_env_has_codex_runtime_signal() -> bool {
+    CODEX_RUNTIME_ENV_KEYS
+        .iter()
+        .any(|key| std::env::var(key).is_ok_and(|value| !value.is_empty()))
 }
 
 fn parent_contains(parent: Option<&str>, needle: &str) -> bool {
@@ -1440,6 +1459,37 @@ mod tests {
     }
 
     #[test]
+    fn detect_active_tool_uses_codex_ci_signal() {
+        let env = vec![("CODEX_CI".to_string(), "1".to_string())];
+        let tool = detect_active_tool_with(&env, None).expect("active tool should be detected");
+        assert_eq!(tool.name, "codex");
+    }
+
+    #[test]
+    fn detect_active_tool_uses_codex_managed_by_npm_signal() {
+        let env = vec![("CODEX_MANAGED_BY_NPM".to_string(), "1".to_string())];
+        let tool = detect_active_tool_with(&env, None).expect("active tool should be detected");
+        assert_eq!(tool.name, "codex");
+    }
+
+    #[test]
+    fn detect_active_tool_uses_codex_thread_id_signal() {
+        let env = vec![("CODEX_THREAD_ID".to_string(), "thread-123".to_string())];
+        let tool = detect_active_tool_with(&env, None).expect("active tool should be detected");
+        assert_eq!(tool.name, "codex");
+    }
+
+    #[test]
+    fn detect_active_tool_preserves_claude_priority_over_codex_runtime_signal() {
+        let env = vec![
+            ("CODEX_CI".to_string(), "1".to_string()),
+            ("CLAUDE_CODE".to_string(), "1".to_string()),
+        ];
+        let tool = detect_active_tool_with(&env, None).expect("active tool should be detected");
+        assert_eq!(tool.name, "claude-code");
+    }
+
+    #[test]
     fn detect_active_tool_ignores_config_directory_only_signals() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
@@ -1462,6 +1512,16 @@ mod tests {
     #[test]
     fn detect_active_tool_ignores_empty_codex_home() {
         let env = vec![("CODEX_HOME".to_string(), String::new())];
+        assert!(detect_active_tool_with(&env, None).is_none());
+    }
+
+    #[test]
+    fn detect_active_tool_ignores_empty_codex_runtime_signals() {
+        let env = vec![
+            ("CODEX_CI".to_string(), String::new()),
+            ("CODEX_MANAGED_BY_NPM".to_string(), String::new()),
+            ("CODEX_THREAD_ID".to_string(), String::new()),
+        ];
         assert!(detect_active_tool_with(&env, None).is_none());
     }
 

@@ -5462,6 +5462,16 @@ fn skill_codex_home_unset(world: &mut SkillWorld) {
     world.extra_env.retain(|(key, _)| key != "CODEX_HOME");
 }
 
+#[given(expr = "a Codex runtime environment variable {string} is present")]
+fn skill_codex_runtime_env_set(world: &mut SkillWorld, key: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.extra_env.retain(|(existing, _)| existing != &key);
+    world.extra_env.push((key, "1".into()));
+    world.ensure_temp_home();
+}
+
 #[given("the \"~/.codex/\" directory exists")]
 fn skill_codex_dir_exists(world: &mut SkillWorld) {
     let path = binary_path();
@@ -5488,6 +5498,13 @@ fn skill_current_install(world: &mut SkillWorld, tool: String) {
     assert!(path.exists(), "Binary not found at {}", path.display());
     world.binary_path = Some(path);
     plant_skill_in_skill_world(world, &tool, env!("CARGO_PKG_VERSION"));
+}
+
+#[given(
+    expr = "an installed AgentChrome skill for {string} has a stale version in the same temp home"
+)]
+fn skill_stale_install_same_home(world: &mut SkillWorld, tool: String) {
+    plant_skill_in_skill_world(world, &tool, "0.1.0");
 }
 
 #[given("no AgentChrome skill is installed in a temp home")]
@@ -5589,6 +5606,16 @@ fn skill_any_command_invoked(world: &mut SkillWorld) {
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
     world.run_skill_command_with_env("agentchrome skill list", refs);
+}
+
+#[when("active-tool detection runs")]
+fn skill_active_tool_detection_runs(world: &mut SkillWorld) {
+    let env_vars: Vec<(String, String)> = world.extra_env.clone();
+    let refs: Vec<(&str, &str)> = env_vars
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    world.run_skill_command_with_env("agentchrome skill install", refs);
 }
 
 #[when("I read the Claude Code Integration section")]
@@ -6180,6 +6207,48 @@ fn skill_stderr_line_starts_with(world: &mut SkillWorld, prefix: String) {
     assert!(
         found,
         "No stderr line starts with '{prefix}'\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "the active tool is classified as {string}")]
+fn skill_active_tool_classified(world: &mut SkillWorld, expected: String) {
+    assert_eq!(
+        world.exit_code,
+        Some(0),
+        "Expected active-tool command to succeed\nstdout: {}\nstderr: {}",
+        world.stdout,
+        world.stderr
+    );
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    let detected_tool = json["tool"].as_str().or_else(|| {
+        json["results"]
+            .as_array()
+            .and_then(|results| results.first())
+            .and_then(|result| result["tool"].as_str())
+    });
+    assert_eq!(
+        detected_tool,
+        Some(expected.as_str()),
+        "Expected active tool {expected}, got {json:?}"
+    );
+}
+
+#[then("no staleness notice is emitted")]
+fn skill_no_staleness_notice(world: &mut SkillWorld) {
+    assert!(
+        !world.stderr.contains("note: installed agentchrome skill"),
+        "Unexpected staleness notice in stderr\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "stderr does not contain {string}")]
+fn skill_stderr_does_not_contain(world: &mut SkillWorld, unexpected: String) {
+    assert!(
+        !world.stderr.contains(&unexpected),
+        "stderr unexpectedly contains '{unexpected}'\nstderr: {}",
         world.stderr
     );
 }
@@ -7431,6 +7500,12 @@ async fn main() {
 
     // Issue #254 — bare skill update no-op and explicit-target regression coverage.
     SkillWorld::run("tests/features/254-fix-skill-update-auto-detect.feature").await;
+
+    // Issue #278 — Codex runtime env vars scope active stale-skill notices.
+    SkillWorld::run(
+        "tests/features/278-detect-codex-runtime-env-vars-for-active-skill-notice-scoping.feature",
+    )
+    .await;
 
     // Skill staleness check — all scenarios plant versioned skill files in a temp
     // home and verify the stderr notice (no Chrome needed).
