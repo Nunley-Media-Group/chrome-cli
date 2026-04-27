@@ -675,9 +675,21 @@ fn is_layout_table(table: &NodeRef) -> bool {
     if count_matches(table, "th") > 0 {
         return false;
     }
-    let row_count = count_matches(table, "tr");
-    let cell_count = count_matches(table, "td");
-    row_count <= 2 || cell_count <= 2
+    let (row_count, max_cells_per_row) = table_shape(table);
+    row_count <= 1 || max_cells_per_row <= 1
+}
+
+fn table_shape(table: &NodeRef) -> (usize, usize) {
+    let Ok(rows) = table.select("tr") else {
+        return (0, count_matches(table, "td, th"));
+    };
+    let mut row_count = 0;
+    let mut max_cells_per_row = 0;
+    for row in rows {
+        row_count += 1;
+        max_cells_per_row = max_cells_per_row.max(count_matches(row.as_node(), "td, th"));
+    }
+    (row_count, max_cells_per_row)
 }
 
 fn normalize_code_language_hints(root: &NodeRef) {
@@ -704,14 +716,46 @@ fn normalize_code_language_hints(root: &NodeRef) {
         if let Some(language) = language
             && !language.is_empty()
         {
-            let new_class = if class.is_empty() {
-                format!("language-{language}")
-            } else {
-                format!("{class} language-{language}")
-            };
+            let new_class = add_language_class(&class, &language);
             attrs.insert("class", new_class);
+            if tag_name(&node).as_deref() == Some("pre") {
+                propagate_pre_language_to_code(&node, &language);
+            }
         }
     }
+}
+
+fn propagate_pre_language_to_code(pre: &NodeRef, language: &str) {
+    let Ok(code_nodes) = pre.select("code") else {
+        return;
+    };
+    for code_node in code_nodes {
+        let Some(element) = code_node.as_node().as_element() else {
+            continue;
+        };
+        let mut attrs = element.attributes.borrow_mut();
+        let class = attrs.get("class").unwrap_or_default().to_string();
+        if class
+            .split_whitespace()
+            .any(|cls| cls.starts_with("language-") || cls.starts_with("lang-"))
+        {
+            continue;
+        }
+        attrs.insert("class", add_language_class(&class, language));
+    }
+}
+
+fn add_language_class(class: &str, language: &str) -> String {
+    if class.is_empty() {
+        format!("language-{language}")
+    } else {
+        format!("{class} language-{language}")
+    }
+}
+
+fn tag_name(node: &NodeRef) -> Option<String> {
+    node.as_element()
+        .map(|element| element.name.local.to_string().to_ascii_lowercase())
 }
 
 fn language_from_highlight_source(class: &str) -> Option<String> {
@@ -921,6 +965,24 @@ mod tests {
         assert!(result.markdown.contains("Layout table text"));
         assert!(result.markdown.contains("| Field | Meaning |"));
         assert!(!result.markdown.contains("<table"));
+    }
+
+    #[test]
+    fn preserves_pre_language_hint_and_content_table_without_headers() {
+        let html = r#"
+            <main>
+              <pre class="highlight-source-rust"><code>fn main() {}</code></pre>
+              <table>
+                <tr><td>Field</td><td>Meaning</td></tr>
+                <tr><td>url</td><td>source</td></tr>
+              </table>
+            </main>
+        "#;
+        let result = convert(html, &default_options(), None);
+        assert!(result.markdown.contains("```rust"));
+        assert!(result.markdown.contains("fn main()"));
+        assert!(result.markdown.contains("| Field | Meaning |"));
+        assert!(result.markdown.contains("| url   | source"));
     }
 
     #[test]

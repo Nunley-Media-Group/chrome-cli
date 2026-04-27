@@ -20,9 +20,7 @@ pub fn render_enriched(
 ) -> std::io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     clap_mangen::Man::new(cmd).date("").render(&mut buf)?;
-    if short_name == "agentchrome" {
-        strip_line_trailing_ascii_whitespace(&mut buf);
-    }
+    strip_line_trailing_ascii_whitespace(&mut buf);
     let enrichment = enrich_for(short_name, manifest, examples);
     if !enrichment.is_empty() {
         buf.extend_from_slice(enrichment.as_bytes());

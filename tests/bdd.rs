@@ -564,8 +564,10 @@ fn clean_html_markdown_fixture() -> &'static str {
         <li>Preserve semantic structure</li>
         <li>Reduce boilerplate context</li>
       </ul>
+      <!-- AC5: relative links, anchors, and images exercise deterministic link/image handling. -->
       <p><a href="/reference">Reference</a> and <a href="#appendix">Appendix anchor</a></p>
       <img src="images/architecture.png" alt="Architecture diagram">
+      <!-- AC6: blockquote, code, separator, content table, and layout table exercise structure preservation. -->
       <blockquote>Keep source context small.</blockquote>
       <pre><code class="language-rust">fn scrape() {
     println!("clean");
@@ -579,6 +581,7 @@ fn clean_html_markdown_fixture() -> &'static str {
         <tr><td>Layout table text</td></tr>
       </table>
     </article>
+    <!-- AC4: selector scoping targets this region without including the primary article. -->
     <section id="appendix">
       <h2>Appendix</h2>
       <p>Selector-only appendix content.</p>
