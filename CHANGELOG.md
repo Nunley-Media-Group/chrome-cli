@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.58.0] - 2026-04-27
+
+### Fixed
+
+- Detect active Codex sessions from `CODEX_CI`, `CODEX_MANAGED_BY_NPM`, and `CODEX_THREAD_ID` so stale AgentChrome skill notices stay scoped to Codex instead of naming inactive tools. (#278)
+
 ## [1.57.0] - 2026-04-27
 
 ### Fixed
