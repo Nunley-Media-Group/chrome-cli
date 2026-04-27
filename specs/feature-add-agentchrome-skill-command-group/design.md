@@ -1,7 +1,7 @@
 # Design: Add agentchrome skill Command Group
 
-**Issues**: #172, #214, #263, #268
-**Date**: 2026-04-25
+**Issues**: #172, #214, #263, #268, #255
+**Date**: 2026-04-26
 **Status**: Draft
 **Author**: Claude (AI-assisted)
 
@@ -513,6 +513,73 @@ Extend existing tests rather than creating a parallel harness:
 | One failing target hides successful updates | Low | Medium | Always return per-target outcomes and attempt every target before returning non-zero |
 | Bare install accidentally writes to an unintended target from weak detection | Low | Medium | Limit detected-target collection to the same explicit env/config/parent signals already documented by the registry; keep explicit `--tool` for precise control |
 
+## Design Amendment: Active-Tool-Scoped Staleness Notices (#255)
+
+Issue #255 changes only the notice decision inside `src/skill_check.rs::emit_stale_notice_if_any`. The installer, updater, stale-scan inventory, and batch update behavior stay unchanged. The stale-skill notice should be relevant to the agentic tool that is currently running AgentChrome; passive installs for other tools should not distract that active session.
+
+### Current Root Cause
+
+`emit_stale_notice_if_any()` currently calls `stale_tools()`, which scans every supported `TOOLS` path and formats either a single-tool or multi-tool notice. That registry-wide behavior is useful when AgentChrome runs from a plain terminal, but it is too noisy when a runtime identity signal shows that the current session is Claude Code, Codex, Cursor, or another specific tool. A current Claude Code skill should suppress a stale Cursor warning because the Cursor skill is not the active tool for this invocation.
+
+### Active Tool Identity
+
+Add a narrow active-session helper in `src/skill.rs`:
+
+```rust
+pub(crate) fn detect_active_tool() -> Option<&'static ToolInfo> {
+    // env vars and parent-process identity only
+}
+```
+
+The helper reuses the registry and existing name mappings but intentionally excludes config-directory checks. Config directories and installed files are passive evidence that a tool exists on the machine; they do not prove the current command is running inside that tool.
+
+Accepted active signals:
+
+| Tool | Active signal |
+|------|---------------|
+| Claude Code | `CLAUDE_CODE` env var or `claude` parent-process match |
+| Windsurf | `WINDSURF_*` env var |
+| Aider | `AIDER_*` env var or `aider` parent-process match |
+| Cursor | `CURSOR_*` env var |
+| Gemini | `GEMINI_*` env var |
+| Codex | non-empty `CODEX_HOME` env var |
+| Continue.dev, Copilot JB | no active runtime signal today; fall back to registry-wide notice behavior |
+
+Keep the existing `detect_tool()` and `detected_tools()` semantics for `agentchrome skill install`; those paths still use config directories where appropriate because their job is installation target discovery, not active-session relevance.
+
+### Notice Decision Flow
+
+Update `emit_stale_notice_if_any(config)` as follows:
+
+1. Preserve the existing fast suppression gates: `AGENTCHROME_NO_SKILL_CHECK=1` and `config.skill.check_enabled == Some(false)` return before any filesystem scan.
+2. Call `crate::skill::detect_active_tool()`.
+3. If an active tool is returned, classify only that tool's installed skill state using the same path resolver and version marker parser as `installed_skill_inventory()`.
+4. If the active tool is stale, format and emit the existing single-tool notice for that tool.
+5. If the active tool is current, missing, unreadable, or unversioned, emit no notice.
+6. If no active tool is returned, call the existing `stale_tools()` registry-wide fallback and preserve current single-tool/multi-tool formatting.
+
+This keeps `skill update` aligned with notices without changing update selection. A plain-terminal multi-tool notice still recommends bare `agentchrome skill update`, and a scoped active-tool notice still recommends the same command because that command can refresh every stale install.
+
+### Test Amendment (#255)
+
+Extend existing test surfaces instead of adding a parallel harness:
+
+| File | Coverage |
+|------|----------|
+| `tests/features/skill-staleness.feature` | Active Claude Code current + Cursor stale emits no notice; active Claude Code stale + Cursor stale emits only Claude Code; no active signal aggregates stale tools |
+| `tests/bdd.rs` | Add temp-home steps for active env signals, no-active-signal runs, and negative assertions that inactive stale tools are absent from stderr |
+| `src/skill.rs` unit tests | `detect_active_tool()` ignores config directories and respects env/parent priority |
+| `src/skill_check.rs` unit tests | Scoped stale decision uses existing single-tool formatting and preserves suppression gates |
+
+### Risk Amendment (#255)
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Treating config directories as active would preserve the noisy warning | Medium | High | Keep config-directory checks out of `detect_active_tool()` and add a regression test for config-dir-only fallback |
+| Scoped notices could hide stale inactive installs forever | Medium | Low | Plain terminal fallback and bare `agentchrome skill update` still scan all installed skills; active sessions avoid only irrelevant warnings |
+| Active detection diverges from install detection unexpectedly | Medium | Medium | Name the helper `detect_active_tool()` and document that it is runtime-identity-only; leave `detect_tool()` unchanged for install paths |
+| Suppression gates become slower if active detection scans filesystem first | Low | Medium | Preserve suppression before active detection and avoid filesystem reads in `detect_active_tool()` |
+
 ---
 
 ## Alternatives Considered
@@ -578,6 +645,7 @@ Extend existing tests rather than creating a parallel harness:
 | #214 | 2026-04-16 | Add Gemini CLI: `Gemini` variant in `ToolName`, `ToolInfo` entry with `Standalone` mode, Tier 1 + Tier 3 detection, README update |
 | #263 | 2026-04-24 | Add Codex target with CODEX_HOME-aware path resolution, registry support, staleness coverage, docs, and tests |
 | #268 | 2026-04-25 | Add multi-target bare install/update design while preserving explicit-target compatibility |
+| #255 | 2026-04-26 | Scope stale-skill notices to the active runtime tool while preserving all-tools fallback |
 
 ---
 

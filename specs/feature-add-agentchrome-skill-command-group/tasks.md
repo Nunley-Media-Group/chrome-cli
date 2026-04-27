@@ -1,7 +1,7 @@
 # Tasks: Add agentchrome skill Command Group
 
-**Issues**: #172, #214, #263, #268
-**Date**: 2026-04-25
+**Issues**: #172, #214, #263, #268, #255
+**Date**: 2026-04-26
 **Status**: Planning
 **Author**: Claude (AI-assisted)
 
@@ -19,7 +19,8 @@
 | Gemini CLI (#214) | 5 | [ ] |
 | Codex Support (#263) | 8 | [ ] |
 | Multi-Target Install/Update (#268) | 8 | [x] |
-| **Total** | **34** | |
+| Active-Tool Staleness Scope (#255) | 5 | [ ] |
+| **Total** | **39** | |
 
 ---
 
@@ -521,6 +522,72 @@ Map `{layer}/` placeholders to actual project paths using `structure.md`.
 
 ---
 
+## Phase 9: Active-Tool Staleness Scope (Issue #255)
+
+### T035: Add active runtime tool detection helper
+
+**File(s)**: `src/skill.rs`
+**Type**: Modify
+**Depends**: T029
+**Acceptance**:
+- [ ] Add a `pub(crate) fn detect_active_tool() -> Option<&'static ToolInfo>` helper
+- [ ] The helper detects active tools from env-var signals and parent-process identity only
+- [ ] The helper intentionally ignores passive config-directory existence and installed skill files
+- [ ] Existing `detect_tool()` and `detected_tools()` behavior remains unchanged for install/update target discovery
+- [ ] Unit tests cover active env signals, parent-process matches, priority order, and config-dir-only non-detection
+
+**Notes**: Reuse existing `ToolInfo` registry entries and helper predicates where possible. Do not introduce a second registry.
+
+### T036: Scope stale-skill notice to the active tool
+
+**File(s)**: `src/skill_check.rs`
+**Type**: Modify
+**Depends**: T035
+**Acceptance**:
+- [ ] `emit_stale_notice_if_any()` preserves `AGENTCHROME_NO_SKILL_CHECK=1` and config suppression before active-tool detection
+- [ ] When `detect_active_tool()` returns a tool, only that tool's installed skill status is checked
+- [ ] A current, missing, unreadable, or unversioned active-tool skill emits no stale-skill notice
+- [ ] A stale active-tool skill emits the existing single-tool notice for that tool only
+- [ ] When no active tool is detected, the existing registry-wide `stale_tools()` fallback and aggregation behavior is preserved
+
+### T037: Add focused unit coverage for scoped stale notices
+
+**File(s)**: `src/skill.rs`, `src/skill_check.rs`
+**Type**: Modify
+**Depends**: T035, T036
+**Acceptance**:
+- [ ] Unit tests prove config-directory-only signals do not scope the active tool
+- [ ] Unit tests prove a stale inactive tool is ignored when the active tool is current
+- [ ] Unit tests prove a stale active tool emits the single-tool notice even when other tools are stale
+- [ ] Unit tests prove no-active fallback still aggregates multiple stale tools
+- [ ] Unit tests prove suppression gates bypass the active-tool scoped scan
+
+### T038: Add BDD coverage for active-tool stale-notice behavior
+
+**File(s)**: `tests/features/skill-staleness.feature`, `tests/bdd.rs`
+**Type**: Modify
+**Depends**: T036
+**Acceptance**:
+- [ ] Scenario covers active Claude Code current while Cursor is stale and expects no notice
+- [ ] Scenario covers active Claude Code stale while Cursor is stale and expects only `claude-code` in the notice
+- [ ] Scenario covers no active env/process signal with multiple stale installs and expects the all-tools aggregate notice
+- [ ] Scenario covers notice version details and `agentchrome skill update` guidance on the scoped active-tool notice
+- [ ] BDD helpers use temp homes and temp active-signal env vars without touching real user skill paths
+
+### T039: Verify active-tool stale-notice workflow
+
+**File(s)**: (focused verification)
+**Type**: Verify
+**Depends**: T037, T038
+**Acceptance**:
+- [ ] `cargo fmt --check` passes
+- [ ] `cargo check` passes
+- [ ] Focused unit tests for `skill` and `skill_check` pass
+- [ ] Focused BDD coverage for `tests/features/skill-staleness.feature` passes or is run as part of `cargo test --test bdd`
+- [ ] Manual temp-home smoke proves active Claude Code current suppresses a stale Cursor notice and no-active fallback still aggregates stale installs
+
+---
+
 ## Dependency Graph
 
 ```
@@ -558,6 +625,13 @@ T027 ──┬──▶ T028 ──┐
                                 └──▶ T033 ───────────┤
                                                       ▼
                                                      T034
+
+Phase 9 (Issue #255 — builds on shared stale-scan inventory and skill registry):
+
+T035 ──▶ T036 ──┬──▶ T037 ──┐
+                └──▶ T038 ──┤
+                             ▼
+                            T039
 ```
 
 ---
@@ -570,6 +644,7 @@ T027 ──┬──▶ T028 ──┐
 | #214 | 2026-04-16 | Add Phase 6: Gemini CLI support (T014–T018) |
 | #263 | 2026-04-24 | Add Phase 7: Codex skill installer support (T019–T026) |
 | #268 | 2026-04-25 | Add Phase 8: multi-target bare skill install/update support (T027–T034) |
+| #255 | 2026-04-26 | Add Phase 9: active-tool-scoped stale-skill notices (T035–T039) |
 
 ---
 
