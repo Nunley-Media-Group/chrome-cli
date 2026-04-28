@@ -5376,6 +5376,9 @@ fn skill_world_path_for_tool(world: &mut SkillWorld, tool: &str) -> PathBuf {
     match tool {
         "claude-code" => temp_home.join(".claude/skills/agentchrome/SKILL.md"),
         "windsurf" => temp_home.join(".codeium/windsurf/memories/global_rules.md"),
+        "copilot-jb" => {
+            temp_home.join(".config/github-copilot/intellij/global-copilot-instructions.md")
+        }
         "codex" => temp_home.join(".codex/skills/agentchrome/SKILL.md"),
         "gemini" => temp_home.join(".gemini/instructions/agentchrome.md"),
         "cursor" => temp_home.join(".cursor/rules/agentchrome.mdc"),
@@ -5386,7 +5389,7 @@ fn skill_world_path_for_tool(world: &mut SkillWorld, tool: &str) -> PathBuf {
 fn plant_skill_in_skill_world(world: &mut SkillWorld, tool: &str, version: &str) {
     let skill_path = skill_world_path_for_tool(world, tool);
     std::fs::create_dir_all(skill_path.parent().unwrap()).unwrap();
-    let content = if tool == "windsurf" {
+    let content = if matches!(tool, "windsurf" | "copilot-jb") {
         let preamble = (0..25)
             .map(|i| format!("existing shared instruction line {i}"))
             .collect::<Vec<_>>()
@@ -5595,6 +5598,17 @@ fn skill_current_install(world: &mut SkillWorld, tool: String) {
 )]
 fn skill_stale_install_same_home(world: &mut SkillWorld, tool: String) {
     plant_skill_in_skill_world(world, &tool, "0.1.0");
+}
+
+#[given(
+    expr = "the installed AgentChrome skill for {string} has stale version {string} in a temp home"
+)]
+fn skill_stale_install(world: &mut SkillWorld, tool: String, version: String) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+    world.ensure_temp_cwd();
+    plant_skill_in_skill_world(world, &tool, &version);
 }
 
 #[given("no AgentChrome skill is installed in a temp home")]
@@ -6288,6 +6302,13 @@ fn skill_stderr_one_staleness_notice(world: &mut SkillWorld) {
     );
 }
 
+fn skill_staleness_notice_line(world: &SkillWorld) -> Option<&str> {
+    world
+        .stderr
+        .lines()
+        .find(|line| line.starts_with("note: installed agentchrome skill"))
+}
+
 #[then(expr = "stderr contains a line starting with {string}")]
 fn skill_stderr_line_starts_with(world: &mut SkillWorld, prefix: String) {
     let found = world
@@ -6331,6 +6352,39 @@ fn skill_no_staleness_notice(world: &mut SkillWorld) {
         !world.stderr.contains("note: installed agentchrome skill"),
         "Unexpected staleness notice in stderr\nstderr: {}",
         world.stderr
+    );
+}
+
+#[then(expr = "stderr does not contain a stale-skill notice naming {string}")]
+fn skill_stderr_no_stale_notice_naming(world: &mut SkillWorld, tool: String) {
+    let contains_named_notice = world
+        .stderr
+        .lines()
+        .any(|line| line.starts_with("note: installed agentchrome skill") && line.contains(&tool));
+    assert!(
+        !contains_named_notice,
+        "stderr unexpectedly contains a stale-skill notice naming {tool}\nstderr: {}",
+        world.stderr
+    );
+}
+
+#[then(expr = "the staleness notice names {string}")]
+fn skill_staleness_notice_names(world: &mut SkillWorld, expected: String) {
+    let notice = skill_staleness_notice_line(world)
+        .unwrap_or_else(|| panic!("missing staleness notice\nstderr: {}", world.stderr));
+    assert!(
+        notice.contains(&expected),
+        "notice does not name {expected}: {notice}"
+    );
+}
+
+#[then(expr = "the staleness notice says {string}")]
+fn skill_staleness_notice_says(world: &mut SkillWorld, expected: String) {
+    let notice = skill_staleness_notice_line(world)
+        .unwrap_or_else(|| panic!("missing staleness notice\nstderr: {}", world.stderr));
+    assert!(
+        notice.contains(&expected),
+        "notice does not contain {expected}: {notice}"
     );
 }
 
@@ -6488,6 +6542,31 @@ fn skill_stdout_no_batch_results(world: &mut SkillWorld) {
         json.get("results").is_none(),
         "explicit command unexpectedly returned batch results: {json}"
     );
+}
+
+#[then(expr = "stdout contains selected skill result fields {string}, {string}, and {string}")]
+fn skill_stdout_selected_result_fields(
+    world: &mut SkillWorld,
+    first: String,
+    second: String,
+    third: String,
+) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout));
+    assert!(
+        !json.is_array(),
+        "selected skill result should be a single object: {json}"
+    );
+    assert!(
+        json.get("results").is_none(),
+        "selected skill result should not contain batch results: {json}"
+    );
+    for field in [first, second, third] {
+        assert!(
+            json.get(&field).is_some_and(serde_json::Value::is_string),
+            "selected skill result missing string field {field}: {json}"
+        );
+    }
 }
 
 #[then(expr = "stdout contains an informational skill update message {string}")]
@@ -7598,6 +7677,12 @@ async fn main() {
     // Issue #278 — Codex runtime env vars scope active stale-skill notices.
     SkillWorld::run(
         "tests/features/278-detect-codex-runtime-env-vars-for-active-skill-notice-scoping.feature",
+    )
+    .await;
+
+    // Issue #281 — explicit skill update suppresses only the selected self-stale notice.
+    SkillWorld::run(
+        "tests/features/281-fix-stale-skill-notice-during-explicit-skill-update.feature",
     )
     .await;
 
