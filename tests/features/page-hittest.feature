@@ -25,7 +25,7 @@ Feature: Page Hit Test Command
 
   # Scenario: Frame-scoped hit test
   #   Given a page is loaded with an iframe containing a form input
-  #   When "page hittest 50 50 --frame 1" is run
+  #   When "page --frame 1 hittest 50 50" is run
   #   Then the "frame" field reflects the targeted frame
   #   And the "hitTarget" describes the element within that frame's context
 

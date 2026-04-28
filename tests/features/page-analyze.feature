@@ -25,7 +25,7 @@ Feature: Page Analyze Command
 
   Scenario: AC2 - Frame-scoped analysis
     Given a loaded page with an iframe at index 1 containing interactive elements
-    When I run "agentchrome page analyze --frame 1"
+    When I run "agentchrome page --frame 1 analyze"
     Then the JSON output "scope" field is "frame:1"
     And all element counts and detection results are scoped to frame 1 only
     And the command exits with code 0
@@ -62,7 +62,7 @@ Feature: Page Analyze Command
 
   Scenario: AC6 - Invalid frame index error
     Given a loaded page with no iframes
-    When I run "agentchrome page analyze --frame 99"
+    When I run "agentchrome page --frame 99 analyze"
     Then a JSON error is written to stderr with a message about invalid frame index
     And the command exits with a non-zero exit code
 
@@ -72,4 +72,4 @@ Feature: Page Analyze Command
     Given agentchrome is built
     When I run "agentchrome examples page"
     Then stdout should contain "page analyze"
-    And stdout should contain "page analyze --frame 1"
+    And stdout should contain "page --frame 1 analyze"

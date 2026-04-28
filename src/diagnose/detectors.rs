@@ -249,13 +249,13 @@ pub(crate) async fn detect_framework_quirks(session: &ManagedSession) -> Framewo
 // All strings must reference at least one agentchrome command token (T010).
 // =============================================================================
 
-pub(crate) const SUGGESTION_IFRAMES: &str = "Use --frame <index> on page and interact commands to target content inside iframes. \
-     For cross-origin frames, use 'interact click-at --frame N' with coordinate targeting \
-     (selector targeting is unavailable across origins).";
+pub(crate) const SUGGESTION_IFRAMES: &str = "Use group-scoped --frame <index> on page and interact commands to target content inside iframes, \
+     for example 'agentchrome page --frame N snapshot' or 'agentchrome interact --frame N click-at X Y'. \
+     For cross-origin frames, coordinate targeting is available while selector targeting is unavailable across origins.";
 
-pub(crate) const SUGGESTION_OVERLAYS: &str = "Large overlays intercept clicks. Try 'interact click-at' with explicit coordinates inside \
-     the real content area, or target the obscured element via its iframe using --frame. \
-     Use 'page snapshot' to inspect the overlay's accessibility role.";
+pub(crate) const SUGGESTION_OVERLAYS: &str = "Large overlays intercept clicks. Try 'agentchrome interact click-at X Y' with explicit coordinates inside \
+     the real content area, or target the obscured element via its iframe using 'agentchrome page --frame N snapshot'. \
+     Use 'agentchrome page snapshot' to inspect the overlay's accessibility role.";
 
 pub(crate) const SUGGESTION_SHADOW_DOM: &str = "Shadow DOM hosts encapsulate their subtrees. Use 'page snapshot' to discover elements inside \
      shadow roots, then target them with 'interact click' or 'form fill' by UID. \

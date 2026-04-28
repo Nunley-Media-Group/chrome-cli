@@ -31,18 +31,18 @@ Feature: Iframe/Frame Targeting Support
 
   Scenario: AC3 - Target a specific frame with page snapshot
     Given an iframe at index 1 contains a button labeled "IFrame Submit"
-    When "page snapshot --frame 1" is run
+    When "page --frame 1 snapshot" is run
     Then the accessibility tree contains "IFrame Submit"
     And the accessibility tree does not contain "Main Page Heading"
 
   Scenario: AC3 - Target a specific frame with page screenshot
-    When "page screenshot --frame 1 --file /tmp/frame-screenshot.png" is run
+    When "page --frame 1 screenshot --file /tmp/frame-screenshot.png" is run
     Then the exit code is 0
     And the screenshot file is created
 
   Scenario: AC3 - Target a specific frame with page text
     Given an iframe at index 1 contains the text "iframe-only-content"
-    When "page text --frame 1" is run
+    When "page --frame 1 text" is run
     Then the output contains "iframe-only-content"
     And the output does not contain "main-page-only-content"
 
@@ -51,71 +51,71 @@ Feature: Iframe/Frame Targeting Support
   Scenario: AC4 - Target a specific frame with js exec
     Given an iframe at index 1 has document title "Child Frame"
     And the main page has document title "Parent Page"
-    When "js exec --frame 1 document.title" is run
+    When "js --frame 1 exec document.title" is run
     Then the result value is "Child Frame"
 
   # --- Frame-Scoped DOM Commands ---
 
   Scenario: AC5 - Target a specific frame with dom select
     Given an iframe at index 1 contains an element with id "iframe-element"
-    When "dom select --frame 1 css:#iframe-element" is run
+    When "dom --frame 1 select css:#iframe-element" is run
     Then the output contains the element
     And the exit code is 0
 
   Scenario: AC5 - Target a specific frame with dom get-text
     Given an iframe at index 1 contains a paragraph with text "iframe paragraph text"
-    When "dom get-text --frame 1 css:#iframe-paragraph" is run
+    When "dom --frame 1 get-text css:#iframe-paragraph" is run
     Then the result contains "iframe paragraph text"
 
   # --- Frame-Scoped Interact Commands ---
 
   Scenario: AC6 - Target a specific frame with interact click
     Given a page snapshot of frame 1 assigned UID "s1" to a button
-    When "interact click --frame 1 s1" is run
+    When "interact --frame 1 click s1" is run
     Then the exit code is 0
 
   Scenario: AC6 - Target a specific frame with interact click-at
-    When "interact click-at --frame 1 50 50" is run
+    When "interact --frame 1 click-at 50 50" is run
     Then the exit code is 0
     And coordinates are translated relative to the iframe viewport
 
   Scenario: AC6 - Target a specific frame with interact type
     Given a page snapshot of frame 1 assigned UID "s2" to a text input
-    When "interact type --frame 1 s2 hello" is run
+    When "interact --frame 1 type s2 hello" is run
     Then the exit code is 0
 
   # --- Frame-Scoped Form Commands ---
 
   Scenario: AC7 - Target a specific frame with form fill
     Given a page snapshot of frame 1 assigned UID "s2" to a text input
-    When "form fill --frame 1 s2 test-value" is run
+    When "form --frame 1 fill s2 test-value" is run
     Then the exit code is 0
     And the text input in frame 1 contains "test-value"
 
   Scenario: AC7 - Target a specific frame with form submit
     Given a page snapshot of frame 1 assigned UID "s3" to a form
-    When "form submit --frame 1 s3" is run
+    When "form --frame 1 submit s3" is run
     Then the exit code is 0
 
   # --- Cross-Origin Iframe Access ---
 
   Scenario: AC8 - Cross-origin iframe access
     Given a cross-origin iframe exists at index 2
-    When "page snapshot --frame 2" is run
+    When "page --frame 2 snapshot" is run
     Then the accessibility tree contains content from the cross-origin iframe
     And the exit code is 0
 
   Scenario: AC8 - Cross-origin iframe js exec
     Given a cross-origin iframe exists at index 2
-    When "js exec --frame 2 document.title" is run
+    When "js --frame 2 exec document.title" is run
     Then the result is the cross-origin iframe's document title
     And the exit code is 0
 
   # --- UID Consistency ---
 
   Scenario: AC9 - Frame-scoped UIDs are consistent across commands
-    Given "page snapshot --frame 1" assigned UID "s3" to a button
-    When "interact click --frame 1 s3" is run
+    Given "page --frame 1 snapshot" assigned UID "s3" to a button
+    When "interact --frame 1 click s3" is run
     Then the click targets the same button that was assigned UID "s3"
     And the exit code is 0
 
@@ -127,14 +127,14 @@ Feature: Iframe/Frame Targeting Support
     And the behavior is identical to current implementation
 
   Scenario: AC11 - --frame 0 targets the main frame
-    When "page snapshot --frame 0" is run
+    When "page --frame 0 snapshot" is run
     Then the accessibility tree contains "Main Page Heading"
     And the result is identical to running without --frame
 
   # --- Error Handling ---
 
   Scenario: AC12 - Invalid frame index error
-    When "page snapshot --frame 99" is run
+    When "page --frame 99 snapshot" is run
     Then the exit code is 3
     And stderr contains a JSON error with "Frame index 99 not found"
     And stderr JSON contains "code" equal to 3
@@ -158,12 +158,12 @@ Feature: Iframe/Frame Targeting Support
 
   Scenario: AC15 - Automatic frame detection with --frame auto
     Given UID "s5" exists only inside an iframe at index 2
-    When "interact click --frame auto s5" is run
+    When "interact --frame auto click s5" is run
     Then the exit code is 0
     And the JSON output contains "frame" equal to 2
 
   Scenario: AC16 - Automatic frame detection with no match
-    When "interact click --frame auto s999" is run
+    When "interact --frame auto click s999" is run
     Then the exit code is 3
     And stderr contains "Element not found in any frame"
 
@@ -171,12 +171,12 @@ Feature: Iframe/Frame Targeting Support
 
   Scenario: AC17 - Nested iframe path syntax
     Given the iframe at index 1 contains a child iframe
-    When "page snapshot --frame 1/0" is run
+    When "page --frame 1/0 snapshot" is run
     Then the snapshot targets the first child of the iframe at index 1
     And the exit code is 0
 
   Scenario: AC18 - Invalid nested frame path error
-    When "page snapshot --frame 1/5" is run
+    When "page --frame 1/5 snapshot" is run
     Then the exit code is 3
     And stderr contains a JSON error about the path segment failing
 
@@ -244,7 +244,7 @@ Feature: Iframe/Frame Targeting Support
 
   Scenario: AC28 - Combined frame and shadow DOM targeting
     Given an iframe at index 1 contains a web component with shadow DOM
-    When "page snapshot --frame 1 --pierce-shadow" is run
+    When "page --frame 1 snapshot --pierce-shadow" is run
     Then the accessibility tree includes shadow DOM content from within the iframe
     And UIDs assigned to shadow elements work with subsequent "--frame 1" commands
 

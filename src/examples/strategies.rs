@@ -59,7 +59,7 @@ fn build_strategies() -> Vec<Strategy> {
             capabilities: vec![
                 "agentchrome page frames — enumerate all frames by index with URL and dimensions"
                     .into(),
-                "agentchrome page snapshot --frame N — accessibility tree of a specific frame"
+                "agentchrome page --frame N snapshot — accessibility tree of a specific frame"
                     .into(),
                 "agentchrome interact --frame N click <uid> — click inside a frame".into(),
                 "agentchrome dom --frame N select <selector> — query DOM inside a frame".into(),
@@ -84,13 +84,13 @@ fn build_strategies() -> Vec<Strategy> {
                     description: "Locate the correct frame index before targeting it".into(),
                     commands: vec![
                         "agentchrome page frames".into(),
-                        "agentchrome page snapshot --frame 1".into(),
+                        "agentchrome page --frame 1 snapshot".into(),
                     ],
                 },
             ],
             recommended_sequence: vec![
                 "agentchrome page frames".into(),
-                "agentchrome page snapshot --frame 1".into(),
+                "agentchrome page --frame 1 snapshot".into(),
                 "agentchrome interact --frame 1 click s3".into(),
             ],
         },
@@ -162,7 +162,7 @@ fn build_strategies() -> Vec<Strategy> {
             ],
             capabilities: vec![
                 "agentchrome page frames — identify the LMS iframe and its SCORM content frame".into(),
-                "agentchrome page snapshot --frame N — find navigation buttons inside the SCORM frame".into(),
+                "agentchrome page --frame N snapshot — find navigation buttons inside the SCORM frame".into(),
                 "agentchrome media --frame N list — list audio/video elements in a frame".into(),
                 "agentchrome media seek-end --all — seek all media elements to end (bypasses narration gates)".into(),
                 "agentchrome interact --frame N click <uid> — click Next/Continue inside the SCORM frame".into(),
@@ -186,14 +186,14 @@ fn build_strategies() -> Vec<Strategy> {
                     description: "Find the correct frame index when the LMS uses nested frames".into(),
                     commands: vec![
                         "agentchrome page frames".into(),
-                        "agentchrome page snapshot --frame 1".into(),
-                        "agentchrome page snapshot --frame 2".into(),
+                        "agentchrome page --frame 1 snapshot".into(),
+                        "agentchrome page --frame 2 snapshot".into(),
                     ],
                 },
             ],
             recommended_sequence: vec![
                 "agentchrome page frames".into(),
-                "agentchrome page snapshot --frame 1".into(),
+                "agentchrome page --frame 1 snapshot".into(),
                 "agentchrome media --frame 1 list".into(),
                 "agentchrome media seek-end --all".into(),
                 "agentchrome interact --frame 1 click <next-button-uid>".into(),

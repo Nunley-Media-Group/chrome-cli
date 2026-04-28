@@ -264,7 +264,7 @@ mod tests {
             matched: true,
             confidence: "high".to_string(),
             evidence: "div.acc-blocker covers 100%".to_string(),
-            suggestion: "Use interact click-at --frame N".to_string(),
+            suggestion: "Use agentchrome interact --frame N click-at X Y".to_string(),
         };
         let json = serde_json::to_value(&pm).unwrap();
         assert_eq!(json["name"], "storyline-acc-blocker");

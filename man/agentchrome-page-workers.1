@@ -175,7 +175,7 @@ Resize the viewport to specific dimensions
 .B \`agentchrome page frames\`
 List all iframes and frames in the page hierarchy
 .TP
-.B \`agentchrome page snapshot --frame 1\`
+.B \`agentchrome page --frame 1 snapshot\`
 Capture accessibility tree of a specific iframe
 .TP
 .B \`agentchrome page snapshot --pierce-shadow\`
@@ -187,7 +187,7 @@ List service workers, shared workers, and web workers
 .B \`agentchrome page hittest 100 200\`
 Hit test at viewport coordinates to identify click targets
 .TP
-.B \`agentchrome page hittest 50 50 --frame 1\`
+.B \`agentchrome page --frame 1 hittest 50 50\`
 Hit test within a specific iframe
 .TP
 .B \`agentchrome page coords --selector css:#submit\`
@@ -202,5 +202,5 @@ Get bounding box for an element inside an iframe, reporting both frame-local and
 .B \`agentchrome page analyze\`
 Analyze page structure: iframes, frameworks, overlays, media
 .TP
-.B \`agentchrome page analyze --frame 1\`
+.B \`agentchrome page --frame 1 analyze\`
 Analyze structure within a specific iframe

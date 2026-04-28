@@ -28,7 +28,7 @@ Feature: Coordinate Space Helpers for Frame-Aware Coordinate Resolution
   #   Given the test fixture is loaded
   #   And the iframe at index 1 is offset (50, 100) in the page
   #   And the element "#inner" inside frame 1 has bounding client rect {x: 10, y: 20, width: 80, height: 32}
-  #   When I run "page coords --frame 1 --selector css:#inner"
+  #   When I run "page --frame 1 coords --selector css:#inner"
   #   Then the exit code is 0
   #   And stdout JSON field "frame.index" equals 1
   #   And stdout JSON field "frameLocal.boundingBox.x" equals 10
@@ -77,7 +77,7 @@ Feature: Coordinate Space Helpers for Frame-Aware Coordinate Resolution
 
   # Scenario: AC8 — --relative-to combined with --frame resolves in frame then applies offset
   #   Given the test fixture is loaded
-  #   When I run "interact click-at 50% 50% --frame 1 --relative-to css:button"
+  #   When I run "interact --frame 1 click-at 50% 50% --relative-to css:button"
   #   Then the exit code is 0
   #   And stdout JSON field "clicked_at.x" equals 100
   #   And stdout JSON field "clicked_at.y" equals 136

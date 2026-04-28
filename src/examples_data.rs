@@ -172,7 +172,7 @@ pub fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: None,
                 },
                 ExampleEntry {
-                    cmd: "agentchrome page snapshot --frame 1".into(),
+                    cmd: "agentchrome page --frame 1 snapshot".into(),
                     description: "Capture accessibility tree of a specific iframe".into(),
                     flags: Some(vec!["--frame".into()]),
                 },
@@ -193,7 +193,7 @@ pub fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: None,
                 },
                 ExampleEntry {
-                    cmd: "agentchrome page hittest 50 50 --frame 1".into(),
+                    cmd: "agentchrome page --frame 1 hittest 50 50".into(),
                     description: "Hit test within a specific iframe".into(),
                     flags: Some(vec!["--frame".into()]),
                 },
@@ -220,7 +220,7 @@ pub fn all_examples() -> Vec<CommandGroupSummary> {
                     flags: None,
                 },
                 ExampleEntry {
-                    cmd: "agentchrome page analyze --frame 1".into(),
+                    cmd: "agentchrome page --frame 1 analyze".into(),
                     description: "Analyze structure within a specific iframe".into(),
                     flags: Some(vec!["--frame".into()]),
                 },

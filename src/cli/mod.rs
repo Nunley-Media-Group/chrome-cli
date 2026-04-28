@@ -1362,7 +1362,7 @@ EXAMPLES:
   agentchrome page hittest 100 200
 
   # Hit test within a specific iframe
-  agentchrome page hittest 50 50 --frame 1"
+  agentchrome page --frame 1 hittest 50 50"
     )]
     HitTest(PageHitTestArgs),
 
@@ -1378,7 +1378,7 @@ EXAMPLES:
   agentchrome page analyze
 
   # Analyze within a specific iframe
-  agentchrome page analyze --frame 1"
+  agentchrome page --frame 1 analyze"
     )]
     Analyze,
 
@@ -1399,7 +1399,7 @@ EXAMPLES:
   agentchrome page coords --selector \"css:#submit\"
 
   # Resolve coordinates for an element inside frame 1
-  agentchrome page coords --frame 1 --selector \"css:#inner\"
+  agentchrome page --frame 1 coords --selector \"css:#inner\"
 
   # Resolve by snapshot UID
   agentchrome page coords --selector s7"

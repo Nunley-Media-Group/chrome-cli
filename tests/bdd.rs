@@ -298,6 +298,7 @@ struct CliWorld {
     captures: Vec<CommandCapture>,
     fixture_path: Option<PathBuf>,
     large_fixture_path: Option<PathBuf>,
+    frame_guidance_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -412,6 +413,151 @@ fn stdout_should_contain(world: &mut CliWorld, expected: String) {
         "stdout does not contain '{expected}'\nstdout: {}",
         world.stdout
     );
+}
+
+#[then("every iframe strategy command using --frame parses successfully")]
+fn iframe_strategy_frame_commands_parse(world: &mut CliWorld) {
+    let commands = frame_commands_from_stdout(world);
+    assert_frame_commands_parse(&commands, "iframe strategy guide");
+}
+
+#[then("no iframe strategy command uses rejected page subcommand frame placement")]
+fn iframe_strategy_rejects_stale_page_frame_shape(world: &mut CliWorld) {
+    let commands = frame_commands_from_stdout(world);
+    assert_no_rejected_page_frame_placement(&commands, "iframe strategy guide");
+}
+
+#[when("I inspect diagnose iframe guidance")]
+fn inspect_diagnose_iframe_guidance(world: &mut CliWorld) {
+    let mut commands = Vec::new();
+    for path in ["src/diagnose/detectors.rs", "src/diagnose/patterns.rs"] {
+        let content = std::fs::read_to_string(project_root().join(path))
+            .unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+        collect_frame_commands_from_text(&content, &mut commands);
+    }
+    world.frame_guidance_commands = dedupe_commands(commands);
+}
+
+#[then("every iframe-related diagnose suggestion command using --frame parses successfully")]
+fn diagnose_frame_commands_parse(world: &mut CliWorld) {
+    assert_frame_commands_parse(&world.frame_guidance_commands, "diagnose iframe guidance");
+}
+
+#[then("no diagnose suggestion uses rejected page subcommand frame placement")]
+fn diagnose_rejects_stale_page_frame_shape(world: &mut CliWorld) {
+    assert_no_rejected_page_frame_placement(&world.frame_guidance_commands, "diagnose guidance");
+}
+
+#[when("I inspect frame-targeting guidance in help, examples, and man pages")]
+fn inspect_frame_targeting_guidance(world: &mut CliWorld) {
+    let help_commands = [
+        "agentchrome page hittest --help",
+        "agentchrome page analyze --help",
+        "agentchrome page coords --help",
+        "agentchrome dom --help",
+        "agentchrome js --help",
+        "agentchrome interact --help",
+        "agentchrome form --help",
+        "agentchrome media list --help",
+        "agentchrome network list --help",
+    ];
+    let example_groups = ["page", "dom", "js", "interact", "form", "media", "network"];
+
+    let mut commands = Vec::new();
+    for command in help_commands {
+        let capture = run_agentchrome(world, command, None);
+        assert_eq!(
+            capture.exit_code, 0,
+            "Help command failed: {command}\nstdout: {}\nstderr: {}",
+            capture.stdout, capture.stderr
+        );
+        collect_frame_commands_from_text(&capture.stdout, &mut commands);
+    }
+
+    for group in example_groups {
+        let command = format!("agentchrome examples {group} --json");
+        let capture = run_agentchrome(world, &command, None);
+        assert_eq!(
+            capture.exit_code, 0,
+            "Examples command failed: {command}\nstdout: {}\nstderr: {}",
+            capture.stdout, capture.stderr
+        );
+        let json: JsonValue = serde_json::from_str(capture.stdout.trim()).unwrap_or_else(|e| {
+            panic!(
+                "examples {group} stdout is not JSON: {e}\nstdout: {}",
+                capture.stdout
+            )
+        });
+        collect_frame_commands_from_json(&json, &mut commands);
+    }
+
+    let man_dir = project_root().join("man");
+    for entry in std::fs::read_dir(&man_dir)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", man_dir.display()))
+    {
+        let entry = entry.unwrap_or_else(|e| panic!("Failed to read man entry: {e}"));
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("1") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()));
+        collect_frame_commands_from_text(&content, &mut commands);
+    }
+
+    world.frame_guidance_commands = dedupe_commands(commands);
+}
+
+#[then("each advertised frame command parses successfully")]
+fn advertised_frame_commands_parse(world: &mut CliWorld) {
+    assert_frame_commands_parse(&world.frame_guidance_commands, "frame-targeting guidance");
+}
+
+#[then("page command guidance uses group-scoped frame placement")]
+fn page_guidance_uses_group_scoped_frame(world: &mut CliWorld) {
+    assert!(
+        world
+            .frame_guidance_commands
+            .iter()
+            .any(|command| command.starts_with("agentchrome page --frame ")),
+        "No group-scoped page --frame guidance found: {:?}",
+        world.frame_guidance_commands
+    );
+    assert_no_rejected_page_frame_placement(&world.frame_guidance_commands, "page guidance");
+}
+
+#[then("network list guidance keeps subcommand-scoped frame placement")]
+fn network_list_guidance_keeps_subcommand_frame(world: &mut CliWorld) {
+    assert!(
+        world
+            .frame_guidance_commands
+            .iter()
+            .any(|command| command == "agentchrome network list --frame 1"),
+        "Expected network list --frame guidance was not found: {:?}",
+        world.frame_guidance_commands
+    );
+}
+
+#[when("I validate accepted frame-targeting commands with the parser")]
+fn validate_accepted_frame_commands(world: &mut CliWorld) {
+    world.frame_guidance_commands = vec![
+        "agentchrome page --frame 1 snapshot".to_string(),
+        "agentchrome page --frame 1 hittest 50 50".to_string(),
+        "agentchrome page --frame 1 analyze".to_string(),
+        "agentchrome page --frame 1 coords --selector css:#inner".to_string(),
+        "agentchrome dom --frame 1 select body".to_string(),
+        "agentchrome js --frame 1 exec document.title".to_string(),
+        "agentchrome interact --frame 1 click s3".to_string(),
+        "agentchrome interact --frame 1 click-at 100 200".to_string(),
+        "agentchrome form --frame 1 fill s2 value".to_string(),
+        "agentchrome media --frame 1 list".to_string(),
+        "agentchrome network list --frame 1".to_string(),
+    ];
+}
+
+#[then("every accepted frame-targeting command parses successfully")]
+fn accepted_frame_targeting_commands_parse(world: &mut CliWorld) {
+    assert_frame_commands_parse(&world.frame_guidance_commands, "accepted frame commands");
 }
 
 #[then(expr = "stdout should not contain {string}")]
@@ -592,6 +738,157 @@ fn json_path<'a>(value: &'a JsonValue, path: &str) -> &'a JsonValue {
             .unwrap_or_else(|| panic!("JSON path '{path}' missing at '{part}' in {value}"));
     }
     current
+}
+
+fn collect_frame_commands_from_json(value: &JsonValue, commands: &mut Vec<String>) {
+    match value {
+        JsonValue::String(text) => collect_frame_commands_from_text(text, commands),
+        JsonValue::Array(items) => {
+            for item in items {
+                collect_frame_commands_from_json(item, commands);
+            }
+        }
+        JsonValue::Object(map) => {
+            for item in map.values() {
+                collect_frame_commands_from_json(item, commands);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn frame_commands_from_stdout(world: &CliWorld) -> Vec<String> {
+    let json = stdout_json(world);
+    let mut commands = Vec::new();
+    collect_frame_commands_from_json(&json, &mut commands);
+    dedupe_commands(commands)
+}
+
+fn collect_frame_commands_from_text(text: &str, commands: &mut Vec<String>) {
+    for line in text.lines() {
+        let mut remaining = line;
+        while let Some(start) = remaining.find("agentchrome ") {
+            let candidate = &remaining[start..];
+            let mut end = candidate.len();
+            for marker in [" — ", " – ", "'", "`", "\\`"] {
+                if let Some(pos) = candidate.find(marker) {
+                    end = end.min(pos);
+                }
+            }
+            let command = candidate[..end]
+                .trim()
+                .trim_end_matches(['.', ',', ';', ')', ']'])
+                .to_string();
+            if command.contains("--frame") {
+                commands.push(command);
+            }
+            remaining = &candidate[end..];
+            if end == candidate.len() {
+                break;
+            }
+        }
+    }
+}
+
+fn dedupe_commands(commands: Vec<String>) -> Vec<String> {
+    commands
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for ch in command.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        match quote {
+            Some(q) if ch == q => quote = None,
+            None if ch == '\'' || ch == '"' => quote = Some(ch),
+            None if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            Some(_) | None => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        words.push(current);
+    }
+
+    words
+}
+
+fn normalize_placeholder_token(token: &str) -> String {
+    match token {
+        "N" | "<index>" => "1".to_string(),
+        "X" | "Y" => "100".to_string(),
+        "<uid>" | "<next-button-uid>" | "<overlay-dismiss-uid>" => "s3".to_string(),
+        "<selector>" | "<sel>" => "css:button".to_string(),
+        "<script>" => "document.title".to_string(),
+        "<value>" => "value".to_string(),
+        other if other.starts_with('<') && other.ends_with('>') => "sample".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn parser_args_for_command(command: &str) -> Vec<String> {
+    shell_words(command)
+        .into_iter()
+        .map(|token| normalize_placeholder_token(&token))
+        .collect()
+}
+
+fn assert_frame_commands_parse(commands: &[String], context: &str) {
+    assert!(
+        !commands.is_empty(),
+        "No frame guidance commands found for {context}"
+    );
+
+    for command in commands {
+        let args = parser_args_for_command(command);
+        let result = agentchrome::command().try_get_matches_from(args.clone());
+        assert!(
+            result.is_ok(),
+            "Advertised frame command did not parse in {context}: '{command}'\nnormalized args: {args:?}\nerror: {}",
+            result.err().map_or_else(String::new, |err| err.to_string())
+        );
+    }
+}
+
+fn has_rejected_page_subcommand_frame_placement(command: &str) -> bool {
+    let args = parser_args_for_command(command);
+    args.first().is_some_and(|arg| arg == "agentchrome")
+        && args.get(1).is_some_and(|arg| arg == "page")
+        && args.get(2).is_some_and(|arg| !arg.starts_with('-'))
+        && args.iter().skip(3).any(|arg| arg == "--frame")
+}
+
+fn assert_no_rejected_page_frame_placement(commands: &[String], context: &str) {
+    let rejected: Vec<&String> = commands
+        .iter()
+        .filter(|command| has_rejected_page_subcommand_frame_placement(command))
+        .collect();
+    assert!(
+        rejected.is_empty(),
+        "Rejected page subcommand --frame placement found in {context}: {rejected:?}"
+    );
 }
 
 fn start_one_shot_http_server(body: &'static str) -> String {
@@ -7307,9 +7604,34 @@ const CLEAN_MARKDOWN_TESTABLE_SCENARIOS: &[&str] = &[
     "Bound raw input and generated output (AC9)",
 ];
 
+const ISSUE_286_FEATURE: &str =
+    "tests/features/286-iframe-guidance-advertises-frame-command-shapes-the-parser-rejects.feature";
+const EXAMPLES_STRATEGIES_FEATURE: &str = "tests/features/examples-strategies.feature";
+const DIAGNOSE_FEATURE: &str = "tests/features/diagnose.feature";
+
+fn cucumber_args_target_feature(path: &str) -> bool {
+    let dotted = format!("./{path}");
+    let input = format!("--input={path}");
+    let dotted_input = format!("--input=./{path}");
+    std::env::args().any(|arg| arg == path || arg == dotted || arg == input || arg == dotted_input)
+}
+
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() {
+    if cucumber_args_target_feature(ISSUE_286_FEATURE) {
+        CliWorld::run(ISSUE_286_FEATURE).await;
+        return;
+    }
+    if cucumber_args_target_feature(EXAMPLES_STRATEGIES_FEATURE) {
+        ExamplesWorld::run(EXAMPLES_STRATEGIES_FEATURE).await;
+        return;
+    }
+    if cucumber_args_target_feature(DIAGNOSE_FEATURE) {
+        DiagnoseWorld::run(DIAGNOSE_FEATURE).await;
+        return;
+    }
+
     WorkflowWorld::run("tests/features/release-pipeline.feature").await;
     CliWorld::run("tests/features/cli-skeleton.feature").await;
     CliWorld::run("tests/features/shell-completions.feature").await;
@@ -7443,6 +7765,11 @@ async fn main() {
             |_feature, _rule, _scenario| false,
         )
         .await;
+
+    CliWorld::run(
+        "tests/features/286-iframe-guidance-advertises-frame-command-shapes-the-parser-rejects.feature",
+    )
+    .await;
 
     run_dialog_features().await;
 

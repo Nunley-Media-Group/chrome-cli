@@ -106,7 +106,7 @@ fn detect_storyline_acc_blocker(b: &DetectorBundle<'_>) -> Option<PatternMatch> 
         evidence,
         suggestion: "Articulate Storyline renders course content inside an iframe and shields the \
             main frame with an acc-blocker overlay. Target the content iframe directly with \
-            'interact click-at --frame N' where N is the Storyline iframe index (see \
+            'agentchrome interact --frame N click-at X Y' where N is the Storyline iframe index (see \
             challenges.iframes.details.items)."
             .to_string(),
     })
@@ -141,8 +141,8 @@ fn detect_scorm_player(b: &DetectorBundle<'_>) -> Option<PatternMatch> {
         confidence: confidence.to_string(),
         evidence,
         suggestion: "SCORM players expose window.API or window.API_1484_11. \
-            Course content is usually inside an iframe — use 'interact click-at --frame N' \
-            or 'page snapshot --frame N' to inspect and interact with the frame content. \
+            Course content is usually inside an iframe — use 'agentchrome interact --frame N click-at X Y' \
+            or 'agentchrome page --frame N snapshot' to inspect and interact with the frame content. \
             Run 'agentchrome diagnose --current' to identify the iframe index."
             .to_string(),
     })
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(m.name, "storyline-acc-blocker");
         assert_eq!(m.confidence, "high");
         assert!(m.evidence.contains("9999"));
-        assert!(m.suggestion.contains("interact click-at --frame"));
+        assert!(m.suggestion.contains("interact --frame N click-at"));
     }
 
     #[test]
@@ -306,7 +306,7 @@ mod tests {
         let bundle = empty_bundle(&iframes, &frameworks, &[], &shadow, &[], None, &quirks);
         let m = detect_scorm_player(&bundle).unwrap();
         assert_eq!(m.confidence, "high");
-        assert!(m.suggestion.contains("interact click-at --frame"));
+        assert!(m.suggestion.contains("interact --frame N click-at"));
     }
 
     #[test]
