@@ -36,3 +36,15 @@ Technical work should follow the Rust 2024 workspace conventions, strict formatt
 Keep changes scoped to the issue and its spec. Preserve existing JSON output contracts, clap help metadata, generated man page behavior, BDD coverage, and versioning rules unless the issue explicitly changes them.
 
 Run focused verification for touched behavior before opening a PR. For shared CLI behavior, use broader BDD coverage. At minimum, respect the project verification gates in `steering/tech.md`, including `cargo fmt --check`, clippy, focused Rust tests, BDD scenarios, and man page generation when CLI help changes.
+
+## PR Readiness and Contribution Gate
+
+Before requesting review, make the PR body useful to both reviewers and the managed nmg-sdlc contribution gate:
+
+- Link the GitHub issue with `Closes #N` or equivalent issue evidence.
+- Link or summarize the relevant `specs/feature-*` or `specs/bug-*` artifacts.
+- State how the change aligns with `steering/product.md`, `steering/tech.md`, and `steering/structure.md`.
+- Include verification evidence: commands run, focused BDD scenarios, `$nmg-sdlc:verify-code` results, or a committed `verification-report.md`.
+- Call out known gaps, skipped checks, or reviewer context before marking the PR ready.
+
+If the nmg-sdlc contribution gate fails, fix the missing evidence category named in the workflow output: issue linkage, spec linkage, steering evidence, verification evidence, or guide discoverability. Do not bypass the gate; update the PR body or the relevant artifacts so the review record stays complete.

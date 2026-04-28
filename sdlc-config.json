@@ -1,7 +1,7 @@
 {
   "projectPath": "/Volumes/Fast Brick/source/repos/AgentChrome",
   "pluginsPath": "/Users/rnunley/.codex/plugins/cache/nmg-plugins/nmg-sdlc/1.67.3",
-  "pluginRoot": "/Users/rnunley/.codex/plugins/cache/nmg-plugins/nmg-sdlc/1.67.3",
+  "pluginRoot": "/Users/rnunley/.codex/plugins/cache/nmg-plugins/nmg-sdlc/1.68.0",
   "_plugin_root_note": "Set pluginRoot for Codex plugin installs (points directly at the plugin root with skills/ as a direct child). Set pluginsPath for the legacy nmg-plugins monorepo layout (runner appends plugins/nmg-sdlc). At least one is required; if both are set, pluginRoot wins.",
   "model": "gpt-5.4",
   "discordChannelId": "",

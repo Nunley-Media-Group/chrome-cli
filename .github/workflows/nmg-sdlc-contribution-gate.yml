@@ -1,0 +1,105 @@
+# nmg-sdlc-managed: contribution-gate
+# nmg-sdlc-managed-version: 1
+name: nmg-sdlc contribution gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  contribution-gate:
+    name: Validate nmg-sdlc contribution evidence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check issue, spec, steering, and verification evidence
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const ref = pr.head.sha;
+            const prText = `${pr.title || ''}\n${pr.body || ''}`;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const changedPaths = files.map((file) => file.filename);
+            const failures = [];
+
+            async function pathExists(path) {
+              try {
+                await github.rest.repos.getContent({ owner, repo, path, ref });
+                return true;
+              } catch (error) {
+                if (error.status === 404) return false;
+                throw error;
+              }
+            }
+
+            async function readText(path) {
+              try {
+                const response = await github.rest.repos.getContent({ owner, repo, path, ref });
+                if (Array.isArray(response.data) || response.data.type !== 'file') return '';
+                return Buffer.from(response.data.content || '', response.data.encoding || 'base64').toString('utf8');
+              } catch (error) {
+                if (error.status === 404) return '';
+                throw error;
+              }
+            }
+
+            const specArtifactPattern = /^specs\/(?:feature|bug)-[^/]+\/(?:requirements|design|tasks)\.md$|^specs\/(?:feature|bug)-[^/]+\/feature\.gherkin$/;
+            const verificationArtifactPattern = /(^|\/)verification-report\.md$|^docs\/decisions\/.+\.md$/;
+            const specPaths = changedPaths.filter((path) => specArtifactPattern.test(path));
+            const specText = (await Promise.all(specPaths.slice(0, 20).map(readText))).join('\n');
+            const combinedText = `${prText}\n${specText}`;
+
+            const issueLinked = /(^|[\s(])#\d+\b/.test(combinedText)
+              || /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+\b/i.test(combinedText)
+              || /\*\*Issues?\*\*:\s*#?\d+/i.test(combinedText);
+            if (!issueLinked) {
+              failures.push('Missing issue evidence: reference the GitHub issue in the PR body or spec frontmatter, for example `Closes #123` or `**Issues**: #123`.');
+            }
+
+            const specLinked = specPaths.length > 0
+              || /specs\/(?:feature|bug)-[a-z0-9-]+/i.test(combinedText)
+              || /\b(requirements\.md|design\.md|tasks\.md|feature\.gherkin)\b/i.test(combinedText);
+            if (!specLinked) {
+              failures.push('Missing spec evidence: update or link the relevant `specs/feature-*` or `specs/bug-*` artifacts.');
+            }
+
+            const steeringFiles = ['steering/product.md', 'steering/tech.md', 'steering/structure.md'];
+            const steeringPresence = await Promise.all(steeringFiles.map(pathExists));
+            const missingSteering = steeringFiles.filter((_, index) => !steeringPresence[index]);
+            const steeringReferenced = /\bsteering\b|steering\/(?:product|tech|structure)\.md|product\.md|tech\.md|structure\.md/i.test(combinedText)
+              || changedPaths.some((path) => /^steering\/(?:product|tech|structure)\.md$/.test(path));
+            if (missingSteering.length > 0) {
+              failures.push(`Missing steering artifacts: expected ${missingSteering.join(', ')} before nmg-sdlc contribution gating can pass.`);
+            } else if (!steeringReferenced) {
+              failures.push('Missing steering evidence: explain how the change aligns with `steering/product.md`, `steering/tech.md`, and `steering/structure.md`.');
+            }
+
+            const verificationLinked = /\b(test plan|verification|verified|verify-code|tests? run|validation)\b/i.test(combinedText)
+              || changedPaths.some((path) => verificationArtifactPattern.test(path));
+            if (!verificationLinked) {
+              failures.push('Missing verification evidence: include test or verification results in the PR body or commit a `verification-report.md` artifact.');
+            }
+
+            if (!(await pathExists('CONTRIBUTING.md'))) {
+              failures.push('Missing `CONTRIBUTING.md`: run `$nmg-sdlc:onboard-project` or `$nmg-sdlc:upgrade-project` so contributors can remediate this gate.');
+            }
+
+            if (failures.length > 0) {
+              for (const failure of failures) {
+                core.error(`${failure} See CONTRIBUTING.md for the nmg-sdlc contribution checklist.`);
+              }
+              core.setFailed(`nmg-sdlc contribution gate failed with ${failures.length} missing expectation(s).`);
+            } else {
+              core.info('nmg-sdlc contribution evidence found: issue, spec, steering, verification, and guide checks passed.');
+            }

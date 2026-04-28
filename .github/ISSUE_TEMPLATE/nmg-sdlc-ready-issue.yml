@@ -1,0 +1,114 @@
+name: SDLC-ready issue
+description: Create a structured issue that is ready for nmg-sdlc specification work.
+body:
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue Type
+      description: Choose the SDLC issue category that best matches this request.
+      options:
+        - Feature / Enhancement
+        - Bug
+        - Epic
+        - Spike
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: User Story or Bug/Spike Context
+      description: Provide the user story for a feature, reproduction context for a bug, or research context for a spike.
+      placeholder: |
+        As a ...
+        I want ...
+        So that ...
+
+        For bugs: describe observed behavior, expected behavior, and reproduction notes.
+        For spikes: describe the decision or gap to research.
+    validations:
+      required: true
+  - type: textarea
+    id: current-state
+    attributes:
+      label: Current State / Background
+      description: Explain what exists today, why the change is needed, and any relevant constraints.
+      placeholder: |
+        Current state:
+        Motivation:
+        Relevant constraints:
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: List each criterion in Given/When/Then form so each one can become a Gherkin scenario.
+      placeholder: |
+        AC1: Short name
+        Given ...
+        When ...
+        Then ...
+
+        AC2: Short name
+        Given ...
+        When ...
+        Then ...
+    validations:
+      required: true
+  - type: textarea
+    id: functional-requirements
+    attributes:
+      label: Functional Requirements
+      description: Capture requirement ids, priority, and any notes needed for specification work.
+      placeholder: |
+        | ID | Requirement | Priority | Notes |
+        |----|-------------|----------|-------|
+        | FR1 | ... | Must | ... |
+    validations:
+      required: true
+  - type: textarea
+    id: scope-boundaries
+    attributes:
+      label: Scope Boundaries
+      description: Make the implementation boundary explicit.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Choose the MoSCoW priority for this work.
+      options:
+        - Must
+        - Should
+        - Could
+        - "Won't"
+    validations:
+      required: true
+  - type: dropdown
+    id: automation-suitability
+    attributes:
+      label: Automation Suitability
+      description: Should downstream SDLC stages be allowed to run hands-off after specifications exist?
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: additional-notes
+    attributes:
+      label: Additional Notes
+      description: Add relevant links, constraints, risks, or known gaps.
+      placeholder: |
+        Links:
+        Constraints:
+        Known gaps:
+    validations:
+      required: false
