@@ -7726,6 +7726,16 @@ async fn main() {
         )
         .await;
 
+    // Issue #285 — all scenarios require a running Chrome instance and cross-invocation
+    // network snapshot state. Focused Rust tests in src/network.rs validate the
+    // order-insensitive correlation, document filtering, and list-to-get snapshot lookup.
+    CliWorld::cucumber()
+        .filter_run_and_exit(
+            "tests/features/285-network-list-filters-and-detail-lookup-lose-captured-request-data.feature",
+            |_feature, _rule, _scenario| false,
+        )
+        .await;
+
     // Perf record duration fix (issue #118) — all scenarios require a running Chrome instance
     // for trace recording. The feature file documents regression scenarios; the fix is
     // validated by the timer placement in perf.rs (start_time moved to execute_record).

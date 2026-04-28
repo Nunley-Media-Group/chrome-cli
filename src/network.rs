@@ -3,15 +3,16 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+use agentchrome::cdp::CdpClient;
 use agentchrome::connection::ManagedSession;
 use agentchrome::error::{AppError, ExitCode};
 
 use crate::cli::{
     GlobalOpts, NetworkArgs, NetworkCommand, NetworkFollowArgs, NetworkGetArgs, NetworkListArgs,
 };
-use crate::output::setup_session;
+use crate::output::connect_from_global;
 
 // =============================================================================
 // Output types
@@ -81,7 +82,7 @@ struct TimingInfo {
 }
 
 /// A redirect hop entry.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct RedirectEntry {
     url: String,
     status: u16,
@@ -112,6 +113,7 @@ struct RawNetworkEvent {
 }
 
 /// Types of network events we track.
+#[derive(Clone, Copy)]
 enum NetworkEventType {
     RequestWillBeSent,
     ResponseReceived,
@@ -120,6 +122,7 @@ enum NetworkEventType {
 }
 
 /// Builder for accumulating network request data from multiple CDP events.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct NetworkRequestBuilder {
     cdp_request_id: String,
     assigned_id: usize,
@@ -459,6 +462,192 @@ const DEFAULT_RELOAD_TIMEOUT_MS: u64 = 5000;
 /// Idle window after page load event to catch trailing async requests (ms).
 const POST_LOAD_IDLE_MS: u64 = 200;
 
+/// Grace window for comparing CDP request wall times to local capture start.
+const CURRENT_CAPTURE_WALL_TIME_GRACE_SECS: f64 = 2.0;
+
+/// Maximum age for a list snapshot to be reused by `network get`.
+const NETWORK_SNAPSHOT_TTL_SECS: u64 = 300;
+const NETWORK_SNAPSHOT_VERSION: u8 = 1;
+
+/// Context that identifies the Chrome target a network capture belongs to.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct NetworkTargetContext {
+    host: String,
+    port: u16,
+    target_id: String,
+}
+
+/// Persisted short-lived list capture for list-to-get workflows.
+#[derive(Debug, Serialize, Deserialize)]
+struct NetworkSnapshot {
+    version: u8,
+    context: NetworkTargetContext,
+    captured_at_epoch_secs: u64,
+    requests: Vec<NetworkRequestBuilder>,
+}
+
+enum SnapshotLookup {
+    Hit(Box<NetworkRequestBuilder>),
+    FreshMiss,
+    MissingOrStale,
+}
+
+async fn setup_network_session(
+    global: &GlobalOpts,
+) -> Result<(CdpClient, ManagedSession, NetworkTargetContext), AppError> {
+    let conn = connect_from_global(global).await?;
+    let target = agentchrome::connection::resolve_target(
+        &conn.resolved.host,
+        conn.resolved.port,
+        global.tab.as_deref(),
+        global.page_id.as_deref(),
+    )
+    .await?;
+    let target_id = target.id.clone();
+    let session = conn.client.create_session(&target_id).await?;
+    let mut managed = ManagedSession::new(session);
+    crate::emulate::apply_emulate_state(&mut managed).await?;
+
+    Ok((
+        conn.client,
+        managed,
+        NetworkTargetContext {
+            host: conn.resolved.host,
+            port: conn.resolved.port,
+            target_id,
+        },
+    ))
+}
+
+fn unix_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn unix_now_secs_f64() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64()
+}
+
+fn snapshot_file_path() -> Result<std::path::PathBuf, AppError> {
+    let session_path = agentchrome::session::session_file_path()?;
+    Ok(session_path.with_file_name("network-snapshot.json"))
+}
+
+fn app_io_error(message: String) -> AppError {
+    AppError {
+        message,
+        code: ExitCode::GeneralError,
+        custom_json: None,
+    }
+}
+
+fn network_request_not_found(target_id: usize) -> AppError {
+    AppError {
+        message: format!("Network request {target_id} not found"),
+        code: ExitCode::GeneralError,
+        custom_json: None,
+    }
+}
+
+#[cfg(unix)]
+fn set_owner_only_perms(path: &std::path::Path, mode: u32) -> Result<(), AppError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).map_err(|e| {
+        app_io_error(format!(
+            "Failed to set permissions on {}: {e}",
+            path.display()
+        ))
+    })
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_perms(_path: &std::path::Path, _mode: u32) -> Result<(), AppError> {
+    Ok(())
+}
+
+fn write_network_snapshot(
+    context: &NetworkTargetContext,
+    requests: &[NetworkRequestBuilder],
+) -> Result<(), AppError> {
+    let path = snapshot_file_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            app_io_error(format!(
+                "Failed to create network snapshot directory {}: {e}",
+                parent.display()
+            ))
+        })?;
+        set_owner_only_perms(parent, 0o700)?;
+    }
+
+    let snapshot = NetworkSnapshot {
+        version: NETWORK_SNAPSHOT_VERSION,
+        context: context.clone(),
+        captured_at_epoch_secs: unix_now_secs(),
+        requests: requests.to_vec(),
+    };
+    let json = serde_json::to_vec_pretty(&snapshot)
+        .map_err(|e| app_io_error(format!("Failed to serialize network snapshot: {e}")))?;
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, json).map_err(|e| {
+        app_io_error(format!(
+            "Failed to write network snapshot {}: {e}",
+            tmp_path.display()
+        ))
+    })?;
+    set_owner_only_perms(&tmp_path, 0o600)?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        app_io_error(format!(
+            "Failed to finalize network snapshot {}: {e}",
+            path.display()
+        ))
+    })
+}
+
+fn read_network_snapshot() -> Result<Option<NetworkSnapshot>, AppError> {
+    let path = snapshot_file_path()?;
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => Ok(serde_json::from_str(&contents).ok()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(app_io_error(format!(
+            "Failed to read network snapshot {}: {e}",
+            path.display()
+        ))),
+    }
+}
+
+fn lookup_snapshot_request(
+    snapshot: Option<NetworkSnapshot>,
+    context: &NetworkTargetContext,
+    target_id: usize,
+    now_epoch_secs: u64,
+) -> SnapshotLookup {
+    let Some(snapshot) = snapshot else {
+        return SnapshotLookup::MissingOrStale;
+    };
+    if snapshot.version != NETWORK_SNAPSHOT_VERSION || snapshot.context != *context {
+        return SnapshotLookup::MissingOrStale;
+    }
+    if now_epoch_secs.saturating_sub(snapshot.captured_at_epoch_secs) > NETWORK_SNAPSHOT_TTL_SECS {
+        return SnapshotLookup::MissingOrStale;
+    }
+
+    snapshot
+        .requests
+        .into_iter()
+        .find(|request| request.assigned_id == target_id)
+        .map_or(SnapshotLookup::FreshMiss, |request| {
+            SnapshotLookup::Hit(Box::new(request))
+        })
+}
+
 /// Collect network events by reloading the page and capturing the resulting traffic.
 ///
 /// After enabling the Network and Page domains and subscribing to events, this
@@ -533,6 +722,7 @@ async fn collect_and_correlate(
         })?;
 
     // Trigger a page reload to replay network requests
+    let capture_started_epoch_secs = unix_now_secs_f64();
     managed
         .send_command("Page.reload", Some(serde_json::json!({})))
         .await
@@ -545,7 +735,6 @@ async fn collect_and_correlate(
     // Collect events until page load completes + idle window, with total timeout
     let mut raw_events: Vec<RawNetworkEvent> = Vec::new();
     let mut current_nav_id: u32 = 0;
-    let mut page_loaded = false;
     let absolute_deadline = tokio::time::Instant::now() + total_timeout;
     let mut idle_deadline: Option<tokio::time::Instant> = None;
 
@@ -610,8 +799,7 @@ async fn collect_and_correlate(
             event = load_event_rx.recv() => {
                 match event {
                     Some(_) => {
-                        if !page_loaded {
-                            page_loaded = true;
+                        if idle_deadline.is_none() {
                             // Start idle window to catch trailing async requests
                             idle_deadline = Some(
                                 tokio::time::Instant::now()
@@ -626,125 +814,196 @@ async fn collect_and_correlate(
         }
     }
 
-    // Correlate events into builders
-    let mut builders: HashMap<String, NetworkRequestBuilder> = HashMap::new();
-    let mut next_id: usize = 0;
+    let builders_vec = correlate_raw_events(
+        &raw_events,
+        include_preserved,
+        current_nav_id,
+        Some(capture_started_epoch_secs),
+    );
 
-    for event in &raw_events {
-        let request_id = event.params["requestId"].as_str().unwrap_or("").to_string();
+    Ok((builders_vec, current_nav_id))
+}
+
+#[derive(Default)]
+struct NetworkRequestFragments {
+    request_events: Vec<(serde_json::Value, u32)>,
+    response: Option<serde_json::Value>,
+    finished: Option<serde_json::Value>,
+    failed: Option<serde_json::Value>,
+}
+
+fn correlate_raw_events(
+    raw_events: &[RawNetworkEvent],
+    include_preserved: bool,
+    current_nav_id: u32,
+    capture_started_epoch_secs: Option<f64>,
+) -> Vec<NetworkRequestBuilder> {
+    let mut fragments_by_request: HashMap<String, NetworkRequestFragments> = HashMap::new();
+
+    for event in raw_events {
+        let request_id = event.params["requestId"].as_str().unwrap_or("");
         if request_id.is_empty() {
             continue;
         }
-
+        let fragments = fragments_by_request
+            .entry(request_id.to_string())
+            .or_default();
         match event.event_type {
-            NetworkEventType::RequestWillBeSent => {
-                // Check if this is a redirect (existing entry for same requestId)
-                if let Some(existing) = builders.get_mut(&request_id) {
-                    // Record redirect hop
-                    let redirect_status = event.params["redirectResponse"]["status"]
-                        .as_u64()
-                        .unwrap_or(0);
-                    let redirect_url = existing.url.clone();
-                    #[allow(clippy::cast_possible_truncation)]
-                    existing.redirect_chain.push(RedirectEntry {
-                        url: redirect_url,
-                        status: redirect_status as u16,
-                    });
-                    // Update the builder with new URL/method
-                    existing.url = event.params["request"]["url"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
-                    existing.method = event.params["request"]["method"]
-                        .as_str()
-                        .unwrap_or("GET")
-                        .to_string();
-                    existing.request_headers = event.params["request"]["headers"].clone();
-                } else {
-                    let monotonic_ts = event.params["timestamp"].as_f64().unwrap_or(0.0);
-                    let wall_time = event.params["wallTime"].as_f64().unwrap_or(0.0);
-                    let frame_id = event.params["frameId"].as_str().map(String::from);
-                    let builder = NetworkRequestBuilder {
-                        cdp_request_id: request_id.clone(),
-                        assigned_id: next_id,
-                        method: event.params["request"]["method"]
-                            .as_str()
-                            .unwrap_or("GET")
-                            .to_string(),
-                        url: event.params["request"]["url"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                        resource_type: event.params["type"]
-                            .as_str()
-                            .unwrap_or("Other")
-                            .to_lowercase(),
-                        timestamp: monotonic_ts,
-                        wall_time,
-                        request_headers: event.params["request"]["headers"].clone(),
-                        status: None,
-                        status_text: String::new(),
-                        response_headers: serde_json::Value::Null,
-                        mime_type: None,
-                        encoded_data_length: None,
-                        timing: None,
-                        redirect_chain: Vec::new(),
-                        completed: false,
-                        failed: false,
-                        error_text: None,
-                        navigation_id: event.navigation_id,
-                        loading_finished_timestamp: None,
-                        frame_id,
-                    };
-                    builders.insert(request_id, builder);
-                    next_id += 1;
-                }
-            }
-            NetworkEventType::ResponseReceived => {
-                if let Some(builder) = builders.get_mut(&request_id) {
-                    #[allow(clippy::cast_possible_truncation)]
-                    let status = event.params["response"]["status"]
-                        .as_u64()
-                        .map(|s| s as u16);
-                    builder.status = status;
-                    builder.status_text = event.params["response"]["statusText"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
-                    builder.response_headers = event.params["response"]["headers"].clone();
-                    builder.mime_type = event.params["response"]["mimeType"]
-                        .as_str()
-                        .map(String::from);
-                    builder.timing = Some(event.params["response"]["timing"].clone());
-                }
-            }
-            NetworkEventType::LoadingFinished => {
-                if let Some(builder) = builders.get_mut(&request_id) {
-                    builder.completed = true;
-                    builder.encoded_data_length = event.params["encodedDataLength"].as_u64();
-                    builder.loading_finished_timestamp = event.params["timestamp"].as_f64();
-                }
-            }
-            NetworkEventType::LoadingFailed => {
-                if let Some(builder) = builders.get_mut(&request_id) {
-                    builder.failed = true;
-                    builder.error_text = event.params["errorText"].as_str().map(String::from);
-                }
-            }
+            NetworkEventType::RequestWillBeSent => fragments
+                .request_events
+                .push((event.params.clone(), event.navigation_id)),
+            NetworkEventType::ResponseReceived => fragments.response = Some(event.params.clone()),
+            NetworkEventType::LoadingFinished => fragments.finished = Some(event.params.clone()),
+            NetworkEventType::LoadingFailed => fragments.failed = Some(event.params.clone()),
         }
     }
 
-    // Filter by navigation if needed
-    let builders_vec: Vec<NetworkRequestBuilder> = if include_preserved {
-        builders.into_values().collect()
-    } else {
-        builders
-            .into_values()
-            .filter(|b| b.navigation_id == current_nav_id)
-            .collect()
-    };
+    let mut builders: Vec<NetworkRequestBuilder> = fragments_by_request
+        .into_iter()
+        .filter_map(|(request_id, fragments)| builder_from_fragments(&request_id, fragments))
+        .filter(|builder| {
+            include_preserved
+                || is_current_capture_request(builder, current_nav_id, capture_started_epoch_secs)
+        })
+        .collect();
 
-    Ok((builders_vec, current_nav_id))
+    assign_deterministic_ids(&mut builders);
+    builders
+}
+
+fn builder_from_fragments(
+    request_id: &str,
+    fragments: NetworkRequestFragments,
+) -> Option<NetworkRequestBuilder> {
+    let mut request_events = fragments.request_events.into_iter();
+    let (first_request, first_navigation_id) = request_events.next()?;
+    let mut builder = builder_from_request_event(request_id, &first_request, first_navigation_id);
+
+    for (request, navigation_id) in request_events {
+        update_builder_from_redirect_or_request(&mut builder, &request, navigation_id);
+    }
+    if let Some(response) = fragments.response {
+        apply_response_event(&mut builder, &response);
+    }
+    if let Some(finished) = fragments.finished {
+        apply_finished_event(&mut builder, &finished);
+    }
+    if let Some(failed) = fragments.failed {
+        apply_failed_event(&mut builder, &failed);
+    }
+
+    Some(builder)
+}
+
+fn builder_from_request_event(
+    request_id: &str,
+    params: &serde_json::Value,
+    navigation_id: u32,
+) -> NetworkRequestBuilder {
+    NetworkRequestBuilder {
+        cdp_request_id: request_id.to_string(),
+        assigned_id: 0,
+        method: params["request"]["method"]
+            .as_str()
+            .unwrap_or("GET")
+            .to_string(),
+        url: params["request"]["url"].as_str().unwrap_or("").to_string(),
+        resource_type: params["type"].as_str().unwrap_or("Other").to_lowercase(),
+        timestamp: params["timestamp"].as_f64().unwrap_or(0.0),
+        wall_time: params["wallTime"].as_f64().unwrap_or(0.0),
+        request_headers: params["request"]["headers"].clone(),
+        status: None,
+        status_text: String::new(),
+        response_headers: serde_json::Value::Null,
+        mime_type: None,
+        encoded_data_length: None,
+        timing: None,
+        redirect_chain: Vec::new(),
+        completed: false,
+        failed: false,
+        error_text: None,
+        navigation_id,
+        loading_finished_timestamp: None,
+        frame_id: params["frameId"].as_str().map(String::from),
+    }
+}
+
+fn update_builder_from_redirect_or_request(
+    builder: &mut NetworkRequestBuilder,
+    params: &serde_json::Value,
+    navigation_id: u32,
+) {
+    if let Some(status) = params["redirectResponse"]["status"].as_u64() {
+        #[allow(clippy::cast_possible_truncation)]
+        builder.redirect_chain.push(RedirectEntry {
+            url: builder.url.clone(),
+            status: status as u16,
+        });
+    }
+
+    builder.method = params["request"]["method"]
+        .as_str()
+        .unwrap_or("GET")
+        .to_string();
+    builder.url = params["request"]["url"].as_str().unwrap_or("").to_string();
+    builder.resource_type = params["type"].as_str().unwrap_or("Other").to_lowercase();
+    builder.timestamp = params["timestamp"].as_f64().unwrap_or(0.0);
+    builder.wall_time = params["wallTime"].as_f64().unwrap_or(0.0);
+    builder.request_headers = params["request"]["headers"].clone();
+    builder.navigation_id = navigation_id;
+    builder.frame_id = params["frameId"].as_str().map(String::from);
+}
+
+fn apply_response_event(builder: &mut NetworkRequestBuilder, params: &serde_json::Value) {
+    #[allow(clippy::cast_possible_truncation)]
+    let status = params["response"]["status"].as_u64().map(|s| s as u16);
+    builder.status = status;
+    builder.status_text = params["response"]["statusText"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    builder.response_headers = params["response"]["headers"].clone();
+    builder.mime_type = params["response"]["mimeType"].as_str().map(String::from);
+    builder.timing = Some(params["response"]["timing"].clone());
+}
+
+fn apply_finished_event(builder: &mut NetworkRequestBuilder, params: &serde_json::Value) {
+    builder.completed = true;
+    builder.encoded_data_length = params["encodedDataLength"].as_u64();
+    builder.loading_finished_timestamp = params["timestamp"].as_f64();
+}
+
+fn apply_failed_event(builder: &mut NetworkRequestBuilder, params: &serde_json::Value) {
+    builder.failed = true;
+    builder.error_text = params["errorText"].as_str().map(String::from);
+}
+
+fn is_current_capture_request(
+    builder: &NetworkRequestBuilder,
+    current_nav_id: u32,
+    capture_started_epoch_secs: Option<f64>,
+) -> bool {
+    if let Some(started) = capture_started_epoch_secs
+        && builder.wall_time > 0.0
+        && builder.wall_time + CURRENT_CAPTURE_WALL_TIME_GRACE_SECS >= started
+    {
+        return true;
+    }
+
+    builder.navigation_id == current_nav_id
+        || (current_nav_id > 0 && builder.navigation_id.saturating_add(1) == current_nav_id)
+}
+
+fn assign_deterministic_ids(builders: &mut [NetworkRequestBuilder]) {
+    builders.sort_by(|left, right| {
+        left.timestamp
+            .total_cmp(&right.timestamp)
+            .then_with(|| left.url.cmp(&right.url))
+            .then_with(|| left.cdp_request_id.cmp(&right.cdp_request_id))
+    });
+    for (index, builder) in builders.iter_mut().enumerate() {
+        builder.assigned_id = index;
+    }
 }
 
 /// Resolve the effective size for a network request.
@@ -854,7 +1113,7 @@ pub async fn execute_network(global: &GlobalOpts, args: &NetworkArgs) -> Result<
 // =============================================================================
 
 async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(), AppError> {
-    let (client, mut managed) = setup_session(global).await?;
+    let (client, mut managed, context) = setup_network_session(global).await?;
 
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
@@ -882,6 +1141,12 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
 
     let (builders, _nav_id) =
         collect_and_correlate(&mut managed, args.include_preserved, global.timeout).await?;
+    if let Err(e) = write_network_snapshot(&context, &builders) {
+        eprintln!(
+            "warning: could not persist network list snapshot: {}",
+            e.message
+        );
+    }
 
     // Apply frame filter on builders before converting to summaries
     let builders: Vec<_> = if let Some(ref fid) = filter_frame_id {
@@ -962,25 +1227,54 @@ async fn execute_list(global: &GlobalOpts, args: &NetworkListArgs) -> Result<(),
 
 #[allow(clippy::too_many_lines)]
 async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+    let (_client, mut managed, context) = setup_network_session(global).await?;
 
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
     }
 
-    let (builders, _nav_id) = collect_and_correlate(&mut managed, true, global.timeout).await?;
-
-    // Find builder by assigned numeric ID
     #[allow(clippy::cast_possible_truncation)]
     let target_id = args.req_id as usize;
-    let builder = builders
-        .iter()
-        .find(|b| b.assigned_id == target_id)
-        .ok_or_else(|| AppError {
-            message: format!("Network request {target_id} not found"),
+
+    let snapshot = read_network_snapshot()?;
+    let builder = match lookup_snapshot_request(snapshot, &context, target_id, unix_now_secs()) {
+        SnapshotLookup::Hit(builder) => *builder,
+        SnapshotLookup::FreshMiss => {
+            return Err(network_request_not_found(target_id));
+        }
+        SnapshotLookup::MissingOrStale => {
+            let (builders, _nav_id) =
+                collect_and_correlate(&mut managed, true, global.timeout).await?;
+            let builder = builders
+                .iter()
+                .find(|b| b.assigned_id == target_id)
+                .cloned()
+                .ok_or_else(|| network_request_not_found(target_id))?;
+            if let Err(e) = write_network_snapshot(&context, &builders) {
+                eprintln!(
+                    "warning: could not persist network get snapshot: {}",
+                    e.message
+                );
+            }
+            builder
+        }
+    };
+
+    managed
+        .ensure_domain("Network")
+        .await
+        .map_err(|e| AppError {
+            message: format!("Failed to enable Network domain: {e}"),
             code: ExitCode::GeneralError,
             custom_json: None,
         })?;
+
+    let builder = &builder;
+
+    // Find builder by assigned numeric ID
+    if builder.assigned_id != target_id {
+        return Err(network_request_not_found(target_id));
+    }
 
     // Fetch request body for POST/PUT
     let request_body =
@@ -988,7 +1282,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
             match managed
                 .send_command(
                     "Network.getRequestPostData",
-                    Some(serde_json::json!({ "requestId": builder.cdp_request_id })),
+                    Some(serde_json::json!({ "requestId": &builder.cdp_request_id })),
                 )
                 .await
             {
@@ -1003,7 +1297,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
     let (response_body, is_binary, is_truncated) = match managed
         .send_command(
             "Network.getResponseBody",
-            Some(serde_json::json!({ "requestId": builder.cdp_request_id })),
+            Some(serde_json::json!({ "requestId": &builder.cdp_request_id })),
         )
         .await
     {
@@ -1122,7 +1416,7 @@ async fn execute_get(global: &GlobalOpts, args: &NetworkGetArgs) -> Result<(), A
 
 #[allow(clippy::too_many_lines)]
 async fn execute_follow(global: &GlobalOpts, args: &NetworkFollowArgs) -> Result<(), AppError> {
-    let (_client, mut managed) = setup_session(global).await?;
+    let (_client, mut managed, _context) = setup_network_session(global).await?;
 
     if global.auto_dismiss_dialogs {
         let _dismiss = managed.spawn_auto_dismiss().await?;
@@ -1826,6 +2120,206 @@ mod tests {
             (summary.duration_ms.unwrap() - 500.0).abs() < 1.0,
             "Duration should be ~500ms from monotonic diff"
         );
+    }
+
+    fn raw_event(
+        event_type: NetworkEventType,
+        navigation_id: u32,
+        params: serde_json::Value,
+    ) -> RawNetworkEvent {
+        RawNetworkEvent {
+            params,
+            event_type,
+            navigation_id,
+        }
+    }
+
+    fn request_event(request_id: &str, url: &str, resource_type: &str) -> serde_json::Value {
+        serde_json::json!({
+            "requestId": request_id,
+            "request": {
+                "method": "GET",
+                "url": url,
+                "headers": {"accept": "*/*"}
+            },
+            "type": resource_type,
+            "timestamp": 100.0,
+            "wallTime": 1_707_912_000.123,
+            "frameId": "frame-1"
+        })
+    }
+
+    fn response_event(request_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "requestId": request_id,
+            "response": {
+                "status": 200,
+                "statusText": "OK",
+                "headers": {"content-length": "456"},
+                "mimeType": "text/html",
+                "timing": {
+                    "requestTime": 100.0,
+                    "dnsStart": 0.0,
+                    "dnsEnd": 1.0,
+                    "connectStart": 1.0,
+                    "connectEnd": 2.0,
+                    "sslStart": -1.0,
+                    "sslEnd": -1.0,
+                    "sendEnd": 3.0,
+                    "receiveHeadersEnd": 20.0
+                }
+            }
+        })
+    }
+
+    fn finished_event(request_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "requestId": request_id,
+            "encodedDataLength": 456,
+            "timestamp": 100.5
+        })
+    }
+
+    #[test]
+    fn correlate_raw_events_merges_out_of_order_response_and_finish() {
+        let raw_events = vec![
+            raw_event(
+                NetworkEventType::ResponseReceived,
+                1,
+                response_event("req-1"),
+            ),
+            raw_event(
+                NetworkEventType::LoadingFinished,
+                1,
+                finished_event("req-1"),
+            ),
+            raw_event(
+                NetworkEventType::RequestWillBeSent,
+                0,
+                request_event("req-1", "https://example.com/", "Document"),
+            ),
+        ];
+
+        let builders = correlate_raw_events(&raw_events, false, 3, Some(1_707_911_999.0));
+
+        assert_eq!(builders.len(), 1);
+        let summary = builder_to_summary(&builders[0]);
+        assert_eq!(summary.id, 0);
+        assert_eq!(summary.status, Some(200));
+        assert_eq!(summary.resource_type, "document");
+        assert_eq!(summary.size, Some(456));
+        assert!(
+            (summary.duration_ms.unwrap() - 500.0).abs() < 1.0,
+            "duration should be derived from request and finish timestamps"
+        );
+        assert_eq!(summary.timestamp, "2024-02-14T12:00:00.123Z");
+    }
+
+    #[test]
+    fn correlate_raw_events_assigns_ids_after_deterministic_sorting() {
+        let raw_events = vec![
+            raw_event(
+                NetworkEventType::RequestWillBeSent,
+                1,
+                serde_json::json!({
+                    "requestId": "later",
+                    "request": {"method": "GET", "url": "https://example.com/b", "headers": {}},
+                    "type": "XHR",
+                    "timestamp": 200.0,
+                    "wallTime": 1_707_912_100.0
+                }),
+            ),
+            raw_event(
+                NetworkEventType::RequestWillBeSent,
+                1,
+                serde_json::json!({
+                    "requestId": "earlier",
+                    "request": {"method": "GET", "url": "https://example.com/a", "headers": {}},
+                    "type": "Document",
+                    "timestamp": 100.0,
+                    "wallTime": 1_707_912_000.0
+                }),
+            ),
+        ];
+
+        let builders = correlate_raw_events(&raw_events, false, 1, Some(1_707_911_999.0));
+
+        assert_eq!(builders[0].cdp_request_id, "earlier");
+        assert_eq!(builders[0].assigned_id, 0);
+        assert_eq!(builders[1].cdp_request_id, "later");
+        assert_eq!(builders[1].assigned_id, 1);
+    }
+
+    #[test]
+    fn fresh_snapshot_hit_and_miss_are_context_scoped() {
+        let context = NetworkTargetContext {
+            host: "127.0.0.1".to_string(),
+            port: 9222,
+            target_id: "target-1".to_string(),
+        };
+        let snapshot = NetworkSnapshot {
+            version: NETWORK_SNAPSHOT_VERSION,
+            context: context.clone(),
+            captured_at_epoch_secs: 1_000,
+            requests: vec![NetworkRequestBuilder {
+                cdp_request_id: "req-1".to_string(),
+                assigned_id: 7,
+                method: "GET".to_string(),
+                url: "https://example.com".to_string(),
+                resource_type: "document".to_string(),
+                timestamp: 100.0,
+                wall_time: 1_707_912_000.0,
+                request_headers: serde_json::Value::Null,
+                status: Some(200),
+                status_text: "OK".to_string(),
+                response_headers: serde_json::Value::Null,
+                mime_type: None,
+                encoded_data_length: Some(1),
+                timing: None,
+                redirect_chain: Vec::new(),
+                completed: true,
+                failed: false,
+                error_text: None,
+                navigation_id: 1,
+                loading_finished_timestamp: Some(100.1),
+                frame_id: None,
+            }],
+        };
+
+        assert!(matches!(
+            lookup_snapshot_request(Some(snapshot), &context, 7, 1_010),
+            SnapshotLookup::Hit(_)
+        ));
+
+        let miss_snapshot = NetworkSnapshot {
+            version: NETWORK_SNAPSHOT_VERSION,
+            context: context.clone(),
+            captured_at_epoch_secs: 1_000,
+            requests: Vec::new(),
+        };
+        assert!(matches!(
+            lookup_snapshot_request(Some(miss_snapshot), &context, 7, 1_010),
+            SnapshotLookup::FreshMiss
+        ));
+
+        let stale_snapshot = NetworkSnapshot {
+            version: NETWORK_SNAPSHOT_VERSION,
+            context,
+            captured_at_epoch_secs: 1_000,
+            requests: Vec::new(),
+        };
+        assert!(matches!(
+            lookup_snapshot_request(Some(stale_snapshot), &stale_snapshot_context(), 7, 2_000),
+            SnapshotLookup::MissingOrStale
+        ));
+    }
+
+    fn stale_snapshot_context() -> NetworkTargetContext {
+        NetworkTargetContext {
+            host: "127.0.0.1".to_string(),
+            port: 9222,
+            target_id: "target-1".to_string(),
+        }
     }
 
     // =========================================================================
