@@ -2442,9 +2442,51 @@ fn resilience_readme_includes_example(world: &mut ResilienceReadmeWorld, flag: S
 #[derive(Debug, Default, World)]
 struct JsWorld {
     binary_path: Option<PathBuf>,
+    temp_home: Option<tempfile::TempDir>,
     stdout: String,
     stderr: String,
     exit_code: Option<i32>,
+}
+
+fn set_js_binary_path(world: &mut JsWorld) {
+    let path = binary_path();
+    assert!(path.exists(), "Binary not found at {}", path.display());
+    world.binary_path = Some(path);
+}
+
+fn js_home(world: &mut JsWorld) -> &std::path::Path {
+    world
+        .temp_home
+        .get_or_insert_with(|| {
+            tempfile::Builder::new()
+                .prefix("agentchrome-bdd-js-")
+                .tempdir()
+                .expect("failed to create isolated JS BDD home")
+        })
+        .path()
+}
+
+fn js_command(world: &mut JsWorld) -> std::process::Command {
+    let binary = world
+        .binary_path
+        .as_ref()
+        .expect("Binary path not set — did you forget 'Given agentchrome is built'?")
+        .clone();
+    let home = js_home(world).to_path_buf();
+    let mut command = std::process::Command::new(binary);
+    command
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("AGENTCHROME_NO_SKILL_CHECK", "1");
+    command
+}
+
+impl Drop for JsWorld {
+    fn drop(&mut self) {
+        if self.binary_path.is_some() && self.temp_home.is_some() {
+            let _ = js_command(self).args(["connect", "--disconnect"]).output();
+        }
+    }
 }
 
 // Background step — for CLI-testable scenarios, we don't need a running Chrome.
@@ -2452,9 +2494,7 @@ struct JsWorld {
 // but error-path scenarios fail before connection is attempted.
 #[given("Chrome is running with CDP enabled")]
 fn js_chrome_running(world: &mut JsWorld) {
-    let path = binary_path();
-    assert!(path.exists(), "Binary not found at {}", path.display());
-    world.binary_path = Some(path);
+    set_js_binary_path(world);
 }
 
 #[given(expr = "a page is loaded at {string}")]
@@ -2464,13 +2504,36 @@ fn js_page_loaded(_world: &mut JsWorld, url: String) {
     let _ = url;
 }
 
+#[given("Chrome is connected and a page is loaded")]
+fn js_chrome_connected_and_page_loaded(world: &mut JsWorld) {
+    set_js_binary_path(world);
+    let output = js_command(world)
+        .args(["connect", "--launch", "--headless"])
+        .output()
+        .expect("failed to launch headless Chrome for JS BDD scenario");
+    assert!(
+        output.status.success(),
+        "failed to launch headless Chrome\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let fixture = project_root().join("tests/fixtures/js-execution-scope-isolation.html");
+    let url = format!("file://{}", fixture.display());
+    let output = js_command(world)
+        .args(["navigate", &url, "--wait-until", "load"])
+        .output()
+        .expect("failed to navigate JS BDD scenario page");
+    assert!(
+        output.status.success(),
+        "failed to navigate JS BDD scenario page\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[when(expr = "I run {string}")]
 fn js_run_command(world: &mut JsWorld, command_line: String) {
-    let binary = world
-        .binary_path
-        .as_ref()
-        .expect("Binary path not set — did you forget 'Given agentchrome is built'?");
-
     let parts: Vec<&str> = command_line.split_whitespace().collect();
     let args = if parts.first().is_some_and(|&p| p == "agentchrome") {
         &parts[1..]
@@ -2478,10 +2541,10 @@ fn js_run_command(world: &mut JsWorld, command_line: String) {
         &parts[..]
     };
 
-    let output = std::process::Command::new(binary)
+    let output = js_command(world)
         .args(args)
         .output()
-        .unwrap_or_else(|e| panic!("Failed to run {}: {e}", binary.display()));
+        .unwrap_or_else(|e| panic!("Failed to run agentchrome: {e}"));
 
     world.stdout = String::from_utf8_lossy(&output.stdout).to_string();
     world.stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -2495,6 +2558,33 @@ fn js_exit_code_nonzero(world: &mut JsWorld) {
         actual, 0,
         "Expected non-zero exit code, got 0\nstdout: {}\nstderr: {}",
         world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "the command exits with code {int}")]
+fn js_command_exits_with_code(world: &mut JsWorld, expected: i32) {
+    let actual = world.exit_code.expect("No exit code captured");
+    assert_eq!(
+        actual, expected,
+        "Expected exit code {expected}, got {actual}\nstdout: {}\nstderr: {}",
+        world.stdout, world.stderr
+    );
+}
+
+#[then(expr = "stdout is valid JSON containing {string}")]
+fn js_stdout_valid_json_containing(world: &mut JsWorld, expected: String) {
+    let json: serde_json::Value = serde_json::from_str(world.stdout.trim()).unwrap_or_else(|e| {
+        panic!("stdout is not valid JSON: {e}\nstdout: {}", world.stdout);
+    });
+    let compact = serde_json::to_string(&json).expect("stdout JSON should serialize");
+    let expected_unescaped = expected.replace("\\\"", "\"");
+    let expected_compact = expected_unescaped
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
+    assert!(
+        compact.contains(&expected_compact),
+        "stdout JSON does not contain '{expected}'\nstdout JSON: {compact}"
     );
 }
 
@@ -7232,6 +7322,10 @@ async fn main() {
             |_feature, _rule, _scenario| false, // All scenarios require running Chrome
         )
         .await;
+
+    // JS exec top-level await fix (issue #279). JsWorld launches an isolated
+    // headless Chrome session for each scenario and disconnects during cleanup.
+    JsWorld::run("tests/features/279-support-top-level-await-in-js-exec-expressions.feature").await;
 
     // Clap validation JSON stderr fix (issue #98) — all scenarios are testable without Chrome
     // (argument validation errors, help/version, not-implemented stub).

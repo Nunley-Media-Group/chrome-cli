@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.59.0] - 2026-04-27
+
+### Fixed
+
+- Support top-level `await` in `agentchrome js exec` expressions while preserving returned-Promise awaiting, scope isolation, and existing structured error behavior. (#279)
+
 ## [1.58.0] - 2026-04-27
 
 ### Fixed

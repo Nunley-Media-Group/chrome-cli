@@ -338,11 +338,7 @@ async fn execute_exec(
     // Check for exception
     if let Some(exception_details) = result.get("exceptionDetails") {
         let exception = &exception_details["exception"];
-        let error_desc = exception["description"]
-            .as_str()
-            .or_else(|| exception_details["text"].as_str())
-            .unwrap_or("unknown error")
-            .to_string();
+        let error_desc = exception_description(exception_details).to_string();
 
         // Build stack trace string
         let stack = exception["description"]
@@ -451,18 +447,27 @@ async fn execute_expression_with_context(
     await_promise: bool,
     context_id: Option<i64>,
 ) -> Result<serde_json::Value, AppError> {
-    // Wrap in block scope to isolate let/const declarations per invocation
-    let wrapped = format!("{{ {code} }}");
-    let mut params = serde_json::json!({
-        "expression": wrapped,
-        "returnByValue": true,
-        "awaitPromise": await_promise,
-        "generatePreview": true,
-    });
-    if let Some(ctx_id) = context_id {
-        params["contextId"] = serde_json::Value::from(ctx_id);
+    let result = send_runtime_evaluate(
+        managed,
+        runtime_evaluate_params(code, await_promise, context_id, false),
+    )
+    .await?;
+
+    if is_top_level_await_syntax_error(&result) {
+        return send_runtime_evaluate(
+            managed,
+            runtime_evaluate_params(code, await_promise, context_id, true),
+        )
+        .await;
     }
 
+    Ok(result)
+}
+
+async fn send_runtime_evaluate(
+    managed: &ManagedSession,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
     managed
         .send_command("Runtime.evaluate", Some(params))
         .await
@@ -483,6 +488,48 @@ async fn execute_expression_with_context(
                 }
             }
         })
+}
+
+fn exception_description(exception_details: &serde_json::Value) -> &str {
+    exception_details["exception"]["description"]
+        .as_str()
+        .or_else(|| exception_details["text"].as_str())
+        .unwrap_or("unknown error")
+}
+
+fn is_top_level_await_syntax_error(result: &serde_json::Value) -> bool {
+    let Some(exception_details) = result.get("exceptionDetails") else {
+        return false;
+    };
+    let message = exception_description(exception_details);
+
+    message.contains("await is only valid") && message.contains("top level")
+}
+
+/// Build `Runtime.evaluate` params for expression execution.
+///
+/// The expression is block-wrapped to isolate declarations per invocation, and
+/// `replMode` enables direct top-level `await` syntax on the retry path.
+fn runtime_evaluate_params(
+    code: &str,
+    await_promise: bool,
+    context_id: Option<i64>,
+    repl_mode: bool,
+) -> serde_json::Value {
+    let wrapped = format!("{{ {code} }}");
+    let mut params = serde_json::json!({
+        "expression": wrapped,
+        "returnByValue": true,
+        "awaitPromise": await_promise,
+        "generatePreview": true,
+    });
+    if repl_mode {
+        params["replMode"] = serde_json::Value::Bool(true);
+    }
+    if let Some(ctx_id) = context_id {
+        params["contextId"] = serde_json::Value::from(ctx_id);
+    }
+    params
 }
 
 /// Execute JS in a worker context via Target.attachToTarget + Runtime.evaluate.
@@ -541,12 +588,7 @@ async fn execute_in_worker(
 
     // Check for exception
     if let Some(exception_details) = result.get("exceptionDetails") {
-        let exception = &exception_details["exception"];
-        let error_desc = exception["description"]
-            .as_str()
-            .or_else(|| exception_details["text"].as_str())
-            .unwrap_or("unknown error")
-            .to_string();
+        let error_desc = exception_description(exception_details).to_string();
         let js_error = JsExecError {
             error: error_desc.clone(),
             stack: None,
@@ -615,12 +657,7 @@ pub async fn run_from_session(
 
     // Check for exception
     if let Some(exception_details) = result.get("exceptionDetails") {
-        let exception = &exception_details["exception"];
-        let error_desc = exception["description"]
-            .as_str()
-            .or_else(|| exception_details["text"].as_str())
-            .unwrap_or("unknown error")
-            .to_string();
+        let error_desc = exception_description(exception_details).to_string();
         return Err(AppError {
             message: format!("js exec failed: {error_desc}"),
             code: agentchrome::error::ExitCode::GeneralError,
@@ -1292,16 +1329,58 @@ mod tests {
 
     #[test]
     fn block_scope_wrapping_format() {
-        // Verify the wrapping format matches what execute_expression_with_context uses
-        let code = "let x = 1; x";
-        let wrapped = format!("{{ {code} }}");
-        assert_eq!(wrapped, "{ let x = 1; x }");
+        let params = runtime_evaluate_params("let x = 1; x", true, None, false);
+        assert_eq!(params["expression"], "{ let x = 1; x }");
     }
 
     #[test]
     fn block_scope_wrapping_simple_expression() {
-        let code = "document.title";
-        let wrapped = format!("{{ {code} }}");
-        assert_eq!(wrapped, "{ document.title }");
+        let params = runtime_evaluate_params("document.title", true, None, false);
+        assert_eq!(params["expression"], "{ document.title }");
+    }
+
+    #[test]
+    fn runtime_evaluate_params_enable_repl_mode_and_preserve_defaults() {
+        let params = runtime_evaluate_params("await Promise.resolve('done')", true, None, true);
+
+        assert_eq!(params["expression"], "{ await Promise.resolve('done') }");
+        assert_eq!(params["replMode"], true);
+        assert_eq!(params["awaitPromise"], true);
+        assert_eq!(params["returnByValue"], true);
+        assert_eq!(params["generatePreview"], true);
+        assert!(params.get("contextId").is_none());
+    }
+
+    #[test]
+    fn runtime_evaluate_params_omit_repl_mode_by_default() {
+        let params = runtime_evaluate_params("new Promise(r => r('done'))", true, None, false);
+
+        assert!(params.get("replMode").is_none());
+        assert_eq!(params["awaitPromise"], true);
+        assert_eq!(params["returnByValue"], true);
+    }
+
+    #[test]
+    fn runtime_evaluate_params_preserve_context_id() {
+        let params = runtime_evaluate_params("document.title", false, Some(42), true);
+
+        assert_eq!(params["expression"], "{ document.title }");
+        assert_eq!(params["replMode"], true);
+        assert_eq!(params["awaitPromise"], false);
+        assert_eq!(params["returnByValue"], true);
+        assert_eq!(params["contextId"], 42);
+    }
+
+    #[test]
+    fn top_level_await_syntax_error_is_detected() {
+        let result = serde_json::json!({
+            "exceptionDetails": {
+                "exception": {
+                    "description": "SyntaxError: await is only valid in async functions and the top level bodies of modules"
+                }
+            }
+        });
+
+        assert!(is_top_level_await_syntax_error(&result));
     }
 }
