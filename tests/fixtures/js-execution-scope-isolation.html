@@ -1,0 +1,21 @@
+<!-- Test fixture for JS execution scope isolation (issue #183)
+     AC17: Clean scope per invocation (let/const re-declarations)
+     AC18: Explicit --stdin flag
+     AC19: Cross-platform --code named argument
+     Also covers existing ACs: expression eval, types, console, truncation, errors
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JS Exec Scope Isolation Test</title>
+</head>
+<body>
+  <h1>Scope Isolation Test Page</h1>
+  <div id="target" class="test-class">Hello from target div</div>
+  <button id="btn" type="button">Click Me</button>
+  <form id="form">
+    <input id="name-input" type="text" value="test-value" placeholder="Name">
+  </form>
+</body>
+</html>
