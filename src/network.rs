@@ -467,6 +467,7 @@ const CURRENT_CAPTURE_WALL_TIME_GRACE_SECS: f64 = 2.0;
 
 /// Maximum age for a list snapshot to be reused by `network get`.
 const NETWORK_SNAPSHOT_TTL_SECS: u64 = 300;
+const NETWORK_SNAPSHOT_VERSION: u8 = 1;
 
 /// Context that identifies the Chrome target a network capture belongs to.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -586,7 +587,7 @@ fn write_network_snapshot(
     }
 
     let snapshot = NetworkSnapshot {
-        version: 1,
+        version: NETWORK_SNAPSHOT_VERSION,
         context: context.clone(),
         captured_at_epoch_secs: unix_now_secs(),
         requests: requests.to_vec(),
@@ -631,7 +632,7 @@ fn lookup_snapshot_request(
     let Some(snapshot) = snapshot else {
         return SnapshotLookup::MissingOrStale;
     };
-    if snapshot.version != 1 || snapshot.context != *context {
+    if snapshot.version != NETWORK_SNAPSHOT_VERSION || snapshot.context != *context {
         return SnapshotLookup::MissingOrStale;
     }
     if now_epoch_secs.saturating_sub(snapshot.captured_at_epoch_secs) > NETWORK_SNAPSHOT_TTL_SECS {
@@ -734,7 +735,6 @@ async fn collect_and_correlate(
     // Collect events until page load completes + idle window, with total timeout
     let mut raw_events: Vec<RawNetworkEvent> = Vec::new();
     let mut current_nav_id: u32 = 0;
-    let mut page_loaded = false;
     let absolute_deadline = tokio::time::Instant::now() + total_timeout;
     let mut idle_deadline: Option<tokio::time::Instant> = None;
 
@@ -799,8 +799,7 @@ async fn collect_and_correlate(
             event = load_event_rx.recv() => {
                 match event {
                     Some(_) => {
-                        if !page_loaded {
-                            page_loaded = true;
+                        if idle_deadline.is_none() {
                             // Start idle window to catch trailing async requests
                             idle_deadline = Some(
                                 tokio::time::Instant::now()
@@ -2259,7 +2258,7 @@ mod tests {
             target_id: "target-1".to_string(),
         };
         let snapshot = NetworkSnapshot {
-            version: 1,
+            version: NETWORK_SNAPSHOT_VERSION,
             context: context.clone(),
             captured_at_epoch_secs: 1_000,
             requests: vec![NetworkRequestBuilder {
@@ -2293,7 +2292,7 @@ mod tests {
         ));
 
         let miss_snapshot = NetworkSnapshot {
-            version: 1,
+            version: NETWORK_SNAPSHOT_VERSION,
             context: context.clone(),
             captured_at_epoch_secs: 1_000,
             requests: Vec::new(),
@@ -2304,7 +2303,7 @@ mod tests {
         ));
 
         let stale_snapshot = NetworkSnapshot {
-            version: 1,
+            version: NETWORK_SNAPSHOT_VERSION,
             context,
             captured_at_epoch_secs: 1_000,
             requests: Vec::new(),

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.61.0] - 2026-04-28
+
+### Fixed
+
+- Fix `network list` and `network get` so request correlation preserves response and timing metadata, `--type document` matches normalized request types, and IDs returned by `network list` remain resolvable by the documented detail lookup workflow. (#285)
+
 ## [1.60.0] - 2026-04-27
 
 ### Fixed
