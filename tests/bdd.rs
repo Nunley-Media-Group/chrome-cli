@@ -2518,9 +2518,7 @@ fn js_chrome_connected_and_page_loaded(world: &mut JsWorld) {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let fixture = std::env::current_dir()
-        .expect("failed to read current dir")
-        .join("tests/fixtures/js-execution-scope-isolation.html");
+    let fixture = project_root().join("tests/fixtures/js-execution-scope-isolation.html");
     let url = format!("file://{}", fixture.display());
     let output = js_command(world)
         .args(["navigate", &url, "--wait-until", "load"])
