@@ -173,7 +173,9 @@ fn resolve_subcommand_path(argv: &[String]) -> Option<String> {
 async fn run(cli: &Cli) -> Result<(), AppError> {
     // Load config file (if any) and apply defaults to global opts
     let (config_path, config_file) = config::load_config(cli.global.config.as_deref());
-    skill_check::emit_stale_notice_if_any(&config_file);
+    if should_emit_stale_notice_for_command(&cli.command) {
+        skill_check::emit_stale_notice_if_any(&config_file);
+    }
     let global = apply_config_defaults(&cli.global, &config_file);
 
     match &cli.command {
@@ -206,6 +208,17 @@ async fn run(cli: &Cli) -> Result<(), AppError> {
         Command::Man(args) => execute_man(args),
         Command::Script(args) => execute_script(&global, args).await,
     }
+}
+
+fn should_emit_stale_notice_for_command(command: &Command) -> bool {
+    !matches!(
+        command,
+        Command::Skill(args)
+            if matches!(
+                &args.command,
+                cli::SkillCommand::Update(update_args) if update_args.tool.is_some()
+            )
+    )
 }
 
 /// Build a fully resolved config from merged `GlobalOpts` and config file sections.
@@ -1019,5 +1032,34 @@ mod tests {
         assert_ne!(err.kind(), ErrorKind::UnknownArgument);
         let a = argv(&["agentchrome", "interact", "click"]);
         assert!(syntax_hint(&err, &a).is_none());
+    }
+
+    #[test]
+    fn stale_notice_skips_explicit_skill_update() {
+        let command = Command::Skill(cli::SkillArgs {
+            command: cli::SkillCommand::Update(cli::SkillToolArgs {
+                tool: Some(cli::ToolName::CopilotJb),
+            }),
+        });
+
+        assert!(!should_emit_stale_notice_for_command(&command));
+    }
+
+    #[test]
+    fn stale_notice_runs_for_bare_skill_update() {
+        let command = Command::Skill(cli::SkillArgs {
+            command: cli::SkillCommand::Update(cli::SkillToolArgs { tool: None }),
+        });
+
+        assert!(should_emit_stale_notice_for_command(&command));
+    }
+
+    #[test]
+    fn stale_notice_runs_for_non_update_skill_commands() {
+        let command = Command::Skill(cli::SkillArgs {
+            command: cli::SkillCommand::List,
+        });
+
+        assert!(should_emit_stale_notice_for_command(&command));
     }
 }

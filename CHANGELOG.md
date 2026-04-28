@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.60.0] - 2026-04-27
+
+### Fixed
+
+- Fix `agentchrome skill update --tool <tool>` so explicit single-target skill refreshes no longer emit a contradictory pre-dispatch stale-skill notice for the same selected tool, while preserving bare `skill update` batch behavior and non-update stale-notice checks. (#281)
+
 ## [1.59.0] - 2026-04-27
 
 ### Fixed
