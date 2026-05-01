@@ -149,6 +149,36 @@ CLI Input (args)
 
 ---
 
+## File Templates
+
+### CLI Command Module
+
+```rust
+use crate::error::Result;
+use crate::output::OutputMode;
+
+pub async fn run(/* parsed args */) -> Result<()> {
+    // Validate CLI-level arguments, call domain helpers, and write structured output.
+    Ok(())
+}
+```
+
+### BDD Feature
+
+```gherkin
+Feature: Capability name
+  As an AI agent
+  I want a precise browser automation command
+  So that I can continue from machine-readable evidence
+
+  Scenario: Acceptance criterion title
+    Given a launched browser session
+    When I run the documented command
+    Then the JSON output contains the expected field
+```
+
+---
+
 ## Import Order
 
 ```rust

@@ -117,6 +117,26 @@ All feature development should align with these guidelines.
 
 ---
 
+## Brand Voice
+
+| Attribute | Do | Don't |
+|-----------|----|-------|
+| Precise | Use concrete command names, output fields, and failure modes. | Describe browser automation behavior in vague or marketing language. |
+| Agent-oriented | Write docs and examples for an AI agent or script that must decide its next command from structured output. | Assume a human will inspect an interactive browser to recover missing context. |
+| Operational | Surface setup, verification, and cleanup expectations directly. | Hide required preconditions behind prose or implicit examples. |
+
+---
+
+## Privacy Commitment
+
+| Data | Usage | Shared |
+|------|-------|--------|
+| Browser page content | Returned only when the user explicitly requests snapshots, text, DOM, screenshots, console, or network details. | Not shared by AgentChrome itself. Callers decide where command output goes. |
+| Local session metadata | Used to reconnect to the selected Chrome instance and clean up launched processes. | Stored locally in the configured session path. |
+| Screenshots and artifacts | Written only to user-selected output paths. | Not uploaded by AgentChrome. |
+
+---
+
 ## References
 
 - Technical spec: `steering/tech.md`

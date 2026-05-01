@@ -391,6 +391,26 @@ For a compact snapshot feature, the fixture might include:
 
 ---
 
+## Environment Variables
+
+### Runtime
+
+| Variable | Description |
+|----------|-------------|
+| `AGENTCHROME_CONFIG` | Optional path to the configuration file used by `agentchrome config` commands. |
+| `AGENTCHROME_SESSION` | Optional path to the session file used for reconnecting across CLI invocations. |
+| `CHROME_PATH` | Optional override for Chrome or Chromium discovery during launch. |
+
+### Skill Detection
+
+| Variable | Description |
+|----------|-------------|
+| `CODEX_CI` | Indicates execution inside Codex automation and scopes active-skill notices accordingly. |
+| `CODEX_MANAGED_BY_NPM` | Indicates Codex was launched through the npm-managed CLI wrapper. |
+| `CODEX_THREAD_ID` | Identifies an active Codex thread for runtime-aware skill notice scoping. |
+
+---
+
 ## References
 
 - `steering/product.md` for product direction

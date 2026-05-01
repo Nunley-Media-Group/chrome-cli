@@ -1,9 +1,9 @@
 {
   "projectPath": "/Volumes/Fast Brick/source/repos/AgentChrome",
   "pluginsPath": "/Users/rnunley/.codex/plugins/cache/nmg-plugins/nmg-sdlc/1.67.3",
-  "pluginRoot": "/Users/rnunley/.codex/plugins/cache/nmg-plugins/nmg-sdlc/1.68.0",
+  "pluginRoot": "/Users/rnunley/.codex/plugins/cache/nmg-plugins/nmg-sdlc/1.69.0",
   "_plugin_root_note": "Set pluginRoot for Codex plugin installs (points directly at the plugin root with skills/ as a direct child). Set pluginsPath for the legacy nmg-plugins monorepo layout (runner appends plugins/nmg-sdlc). At least one is required; if both are set, pluginRoot wins.",
-  "model": "gpt-5.4",
+  "model": "gpt-5.5",
   "discordChannelId": "",
   "logDir": "",
   "maxLogDiskUsageMB": 500,
@@ -18,9 +18,9 @@
     "writeSpecs":   { "model": "gpt-5.5",      "effort": "xhigh",  "maxTurns": 40,  "timeoutMin": 15, "skill": "write-spec" },
     "implement":    { "model": "gpt-5.5",      "effort": "xhigh",  "maxTurns": 100, "timeoutMin": 30, "skill": "write-code" },
     "simplify":     { "model": "gpt-5.4",      "effort": "medium", "timeoutMin": 15 },
-    "verify":       { "model": "gpt-5.5",      "effort": "high",   "maxTurns": 100, "timeoutMin": 30, "skill": "verify-code" },
+    "verify":       { "model": "gpt-5.5",      "effort": "high",   "maxTurns": 100, "timeoutMin": 20, "skill": "verify-code" },
     "commitPush":   { "maxTurns": 10,  "timeoutMin": 5  },
-    "createPR":     { "model": "gpt-5.4",      "effort": "low",    "maxTurns": 15,  "timeoutMin": 5,  "skill": "open-pr" },
+    "createPR":     { "model": "gpt-5.4",      "effort": "low",    "maxTurns": 15,  "timeoutMin": 8,  "skill": "open-pr" },
     "monitorCI":    { "model": "gpt-5.4",      "effort": "medium", "maxTurns": 40,  "timeoutMin": 20 },
     "merge":        { "model": "gpt-5.4-mini", "effort": "low",    "maxTurns": 5,   "timeoutMin": 5  }
   },

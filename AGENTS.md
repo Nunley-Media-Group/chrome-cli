@@ -29,3 +29,9 @@ Always snapshot before interacting with UID-targeted elements, and prefer `--inc
 - Keep changes scoped to the requested issue or task.
 - Preserve existing JSON output contracts and typed exit-code behavior.
 - Run focused tests for touched behavior before finishing; use broader BDD runs when changes touch shared CLI behavior.
+
+<!-- nmg-sdlc-managed: spec-context -->
+## nmg-sdlc Spec Context
+
+For SDLC work, project-root `specs/` is the canonical BDD archive. Always identify the active spec first, then use bounded relevant-spec discovery to load only the neighboring specs that can affect the change. Do not load the full archive by default, and do not use legacy `.codex/specs/` as context.
+<!-- /nmg-sdlc-managed -->
